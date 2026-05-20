@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth()  { return request.auth != null; }
+    function uid()     { return request.auth.uid; }
+    function role()    { return get(/databases/$(database)/documents/users/$(uid())).data.role; }
+    function pharmId() { return get(/databases/$(database)/documents/users/$(uid())).data.pharmacyId; }
+
+    function isAdmin()   { return isAuth() && role() == 'admin'; }
+    function isMgr()     { return isAuth() && role() in ['admin','manager']; }
+    function isAny()     { return isAuth(); }
+
+    function ownsPharmacy(pid) {
+      return isAdmin() || (isMgr() && pharmId() == pid);
+    }
+
+    // ── users ──────────────────────────────────────────────
+    match /users/{userId} {
+      allow read:   if isAny() && (uid() == userId || isMgr());
+      allow create: if isAdmin();
+      allow update: if isAny() && (uid() == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── pharmacies ─────────────────────────────────────────
+    match /pharmacies/{pid} {
+      allow read:   if isAny();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || ownsPharmacy(pid);
+      allow delete: if isAdmin();
+    }
+
+    // ── kpi_entries ────────────────────────────────────────
+    match /kpi_entries/{eid} {
+      allow read: if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId) ||
+        isAdmin()
+      );
+      allow create: if isAny() &&
+        request.resource.data.userId == uid() &&
+        request.resource.data.date <= request.time.toDate().toISOString().split('T')[0];
+      allow update: if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId)
+      );
+      allow delete: if ownsPharmacy(resource.data.pharmacyId);
+    }
+
+    // ── targets ────────────────────────────────────────────
+    match /targets/{tid} {
+      allow read:   if isAny();
+      allow create: if isMgr();
+      allow update: if isMgr();
+      allow delete: if isAdmin();
+    }
+
+    // ── audit_logs ─────────────────────────────────────────
+    match /audit_logs/{lid} {
+      allow read:   if isMgr();
+      allow create: if isAny();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ── notifications ──────────────────────────────────────
+    match /notifications/{nid} {
+      allow read:   if isAny() && (resource.data.userId == uid() || isMgr());
+      allow create: if isMgr();
+      allow update: if isAny() && resource.data.userId == uid();
+      allow delete: if isAdmin();
+    }
+
+    // ── leaderboard ────────────────────────────────────────
+    match /leaderboard/{lid} {
+      allow read:  if isAny();
+      allow write: if isMgr();
+    }
+  }
+}

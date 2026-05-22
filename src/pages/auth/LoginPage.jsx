@@ -1,21 +1,24 @@
 // ============================================================
-// Login Page — Enterprise Design, Remember Me, Reset Password
+// Login Page — Enterprise Branding + Animations
 // ============================================================
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Eye, EyeOff, Activity, Loader2, AlertCircle, CheckCircle2,
-         ArrowLeft, Lock, Mail } from 'lucide-react'
+import {
+  Eye, EyeOff, Loader2, AlertCircle, CheckCircle2,
+  ArrowLeft, Lock, Mail, Activity,
+} from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
-import { DEMO_CREDENTIALS } from '../../data/dummyData'
-import { ROLE_LABELS } from '../../constants'
+import Logo from '../../components/brand/Logo'
+
+const DEMO_CREDENTIALS = [
+  { role:'Admin',      email:'admin@pharmapulse.com',   password:'Admin@123',   color:'#ef4444', note:'كامل الصلاحيات' },
+  { role:'مدير فرع',   email:'manager@pharmapulse.com', password:'Manager@123', color:'#f59e0b', note:'فرعه فقط' },
+  { role:'صيدلاني',    email:'pharma@pharmapulse.com',  password:'Pharma@123',  color:'#1a9a7e', note:'بياناته فقط' },
+]
 
 const ROLE_HOME = {
-  admin:      '/dashboard',
-  manager:    '/dashboard',
-  pharmacist: '/dashboard',
-  // Legacy roles
-  area_manager:  '/dashboard',
-  store_manager: '/dashboard',
+  admin:'dashboard', manager:'dashboard', pharmacist:'dashboard',
+  area_manager:'dashboard', store_manager:'dashboard',
 }
 
 export default function LoginPage() {
@@ -23,278 +26,307 @@ export default function LoginPage() {
   const [params] = useSearchParams()
   const { login, resetPassword, loading, error, clearError } = useAuthStore()
 
-  const [form,       setForm]       = useState({ email: '', password: '' })
+  const [form,       setForm]       = useState({ email:'', password:'' })
   const [rememberMe, setRememberMe] = useState(true)
   const [showPass,   setShowPass]   = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [resetMode,  setResetMode]  = useState(false)
+  const [mode,       setMode]       = useState('login') // login | reset
   const [resetEmail, setResetEmail] = useState('')
   const [resetSent,  setResetSent]  = useState(false)
   const [resetErr,   setResetErr]   = useState('')
 
-  const timeoutReason = params.get('reason') === 'timeout'
+  const isTimeout = params.get('reason') === 'timeout'
 
-  useEffect(() => { return () => clearError() }, [])
+  useEffect(() => () => clearError(), [])
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
     if (!form.email || !form.password) return
     setSubmitting(true)
     try {
       const profile = await login(form.email, form.password, rememberMe)
-      navigate(ROLE_HOME[profile.role] || '/dashboard', { replace: true })
-    } catch { /* error shown from store */ }
+      navigate(`/${ROLE_HOME[profile.role] || 'dashboard'}`, { replace: true })
+    } catch {}
     finally { setSubmitting(false) }
   }
 
   const handleReset = async (e) => {
     e.preventDefault()
-    if (!resetEmail) return
     setResetErr('')
     try {
       await resetPassword(resetEmail)
       setResetSent(true)
-    } catch (err) {
-      setResetErr(err.message)
-    }
+    } catch (err) { setResetErr(err.message) }
   }
 
-  const fillDemo = (cred) => {
+  const fill = (cred) => {
     setForm({ email: cred.email, password: cred.password })
     clearError()
   }
 
   return (
-    <div className="min-h-screen flex items-stretch">
-      {/* Left panel — branding */}
-      <div className="hidden lg:flex lg:w-1/2 xl:w-[55%] flex-col justify-between p-10
-                      relative overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950">
-        {/* Background mesh */}
+    <div className="min-h-screen flex" style={{ background:'var(--bg-base)' }}>
+
+      {/* ── Left: Branding panel ───────────────────────────── */}
+      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] relative overflow-hidden"
+           style={{ background: 'linear-gradient(145deg, rgba(7,18,32,0.99) 0%, rgba(4,13,24,0.99) 100%)' }}>
+        {/* Ambient glow */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-0 w-96 h-96 bg-brand-500/5 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
-          <div className="absolute bottom-0 right-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
-          {/* Grid lines */}
-          <svg className="absolute inset-0 w-full h-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
+          <div className="absolute w-[600px] h-[600px] rounded-full"
+               style={{
+                 background:'radial-gradient(circle, rgba(26,154,126,0.12) 0%, transparent 70%)',
+                 top:'-10%', left:'-15%',
+               }} />
+          <div className="absolute w-[400px] h-[400px] rounded-full"
+               style={{
+                 background:'radial-gradient(circle, rgba(99,102,241,0.07) 0%, transparent 70%)',
+                 bottom:'-5%', right:'-10%',
+               }} />
+          {/* Grid overlay */}
+          <svg className="absolute inset-0 w-full h-full" style={{ opacity:0.03 }}>
             <defs>
-              <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="1"/>
+              <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+                <path d="M 48 0 L 0 0 0 48" fill="none" stroke="white" strokeWidth="0.5"/>
               </pattern>
             </defs>
             <rect width="100%" height="100%" fill="url(#grid)" />
           </svg>
         </div>
 
-        {/* Logo */}
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-brand-500 flex items-center justify-center shadow-glow">
-              <Activity className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-white tracking-tight">PharmaPulse</div>
-              <div className="text-xs text-brand-400 font-medium">Enterprise KPI System</div>
-            </div>
-          </div>
-        </div>
+        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+          {/* Logo */}
+          <Logo size={42} />
 
-        {/* Hero text */}
-        <div className="relative z-10 space-y-6">
-          <div>
-            <h1 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
-              إدارة أداء
-              <span className="block text-gradient">الصيدليات</span>
-              بذكاء
-            </h1>
-            <p className="mt-4 text-slate-400 text-base leading-relaxed max-w-md">
-              منصة متكاملة لمتابعة مؤشرات الأداء الرئيسية، تحليل البيانات، وتحقيق الأهداف في الوقت الفعلي.
-            </p>
-          </div>
-
-          {/* Stats */}
-          <div className="flex gap-8">
-            {[
-              { label: 'فرع نشط',     value: '150+' },
-              { label: 'صيدلاني',     value: '800+' },
-              { label: 'دقة البيانات', value: '99.9%' },
-            ].map((s) => (
-              <div key={s.label}>
-                <div className="text-2xl font-bold text-white">{s.value}</div>
-                <div className="text-xs text-slate-500 mt-0.5">{s.label}</div>
+          {/* Hero */}
+          <div className="space-y-8">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+                   style={{ background:'rgba(26,154,126,0.12)', border:'1px solid rgba(26,154,126,0.25)', color:'var(--brand-300)' }}>
+                <Activity className="w-3.5 h-3.5" />
+                Enterprise KPI Platform
               </div>
-            ))}
-          </div>
-        </div>
+              <h1 className="text-4xl xl:text-5xl font-bold leading-tight"
+                  style={{ color:'var(--text-primary)', fontFamily:"'Sora', sans-serif" }}>
+                إدارة أداء
+                <span className="block text-gradient mt-1">الصيدليات</span>
+                بذكاء حقيقي
+              </h1>
+              <p className="text-base leading-relaxed max-w-md" style={{ color:'var(--text-secondary)' }}>
+                منصة متكاملة لمتابعة مؤشرات الأداء الرئيسية، تحليل البيانات، وتحقيق الأهداف في الوقت الفعلي.
+              </p>
+            </div>
 
-        {/* Bottom */}
-        <div className="relative z-10 text-xs text-slate-700">
-          PharmaPulse v2.2 — جميع الحقوق محفوظة
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { v:'150+', l:'فرع نشط' },
+                { v:'800+', l:'صيدلاني' },
+                { v:'99.9%', l:'دقة البيانات' },
+              ].map((s) => (
+                <div key={s.l} className="rounded-2xl p-4"
+                     style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)' }}>
+                  <div className="text-2xl font-bold text-gradient"
+                       style={{ fontFamily:"'Sora',sans-serif" }}>{s.v}</div>
+                  <div className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+            Designed & Developed by{' '}
+            <span style={{ color:'var(--brand-300)', fontWeight:600 }}>Samir Goda</span>
+            {' '}· PharmaPulse v4.0
+          </div>
         </div>
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-6 bg-slate-950">
+      {/* ── Right: Form panel ──────────────────────────────── */}
+      <div className="flex-1 flex items-center justify-center p-6"
+           style={{ background:'var(--bg-surface)' }}>
         <div className="w-full max-w-[400px] animate-fade-in">
 
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-9 h-9 rounded-xl bg-brand-500 flex items-center justify-center shadow-glow">
-              <Activity className="w-5 h-5 text-white" />
-            </div>
-            <div className="font-bold text-white">PharmaPulse</div>
+          <div className="lg:hidden mb-8">
+            <Logo size={38} />
           </div>
 
-          {/* Timeout warning */}
-          {timeoutReason && (
-            <div className="flex items-center gap-2.5 bg-amber-500/10 border border-amber-500/20
-                            rounded-xl px-4 py-3 mb-5 text-sm text-amber-400">
+          {/* Timeout notice */}
+          {isTimeout && (
+            <div className="flex items-center gap-3 rounded-xl px-4 py-3 mb-5 text-sm animate-slide-down"
+                 style={{ background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.2)', color:'#fbbf24' }}>
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              انتهت الجلسة بسبب عدم النشاط — يرجى تسجيل الدخول مجدداً
+              انتهت الجلسة — سجّل الدخول مجدداً
             </div>
           )}
 
-          {!resetMode ? (
+          {/* ── Login form ── */}
+          {mode === 'login' && (
             <>
               <div className="mb-7">
-                <h2 className="text-2xl font-bold text-white">مرحباً بعودتك</h2>
-                <p className="text-sm text-slate-500 mt-1">سجّل دخولك للمتابعة</p>
+                <h2 className="text-2xl font-bold" style={{ color:'var(--text-primary)' }}>مرحباً بك</h2>
+                <p className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>سجّل دخولك للمتابعة</p>
               </div>
 
-              {/* Error */}
               {error && (
-                <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/20
-                                rounded-xl px-4 py-3 mb-5 text-sm text-red-400 animate-slide-up">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
+                <div className="flex items-center gap-2.5 rounded-xl px-4 py-3 mb-4 text-sm animate-slide-down"
+                     style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#f87171' }}>
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Email */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    البريد الإلكتروني
-                  </label>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
+                         style={{ color:'var(--text-muted)' }}>البريد الإلكتروني</label>
                   <div className="relative">
-                    <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input type="email" value={form.email} required dir="ltr"
-                      onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); clearError() }}
+                    <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4"
+                          style={{ color:'var(--text-muted)' }} />
+                    <input type="email" dir="ltr" required value={form.email}
+                      onChange={(e) => { setForm((f) => ({ ...f, email:e.target.value })); clearError() }}
                       placeholder="user@company.com"
-                      className="pr-10 bg-slate-900 border-slate-700/80" />
+                      className="pr-10" />
                   </div>
                 </div>
 
-                {/* Password */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    كلمة المرور
-                  </label>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
+                         style={{ color:'var(--text-muted)' }}>كلمة المرور</label>
                   <div className="relative">
-                    <Lock className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input type={showPass ? 'text' : 'password'} value={form.password} required
-                      onChange={(e) => { setForm((f) => ({ ...f, password: e.target.value })); clearError() }}
+                    <Lock className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4"
+                          style={{ color:'var(--text-muted)' }} />
+                    <input type={showPass ? 'text' : 'password'} required value={form.password}
+                      onChange={(e) => { setForm((f) => ({ ...f, password:e.target.value })); clearError() }}
                       placeholder="••••••••"
-                      className="pr-10 pl-10 bg-slate-900 border-slate-700/80" />
+                      className="pr-10 pl-10" />
                     <button type="button" onClick={() => setShowPass(!showPass)}
-                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors"
+                      style={{ color:'var(--text-muted)' }}>
                       {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Remember me + Forgot */}
+                {/* Remember + Forgot */}
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2.5 cursor-pointer group">
-                    <div onClick={() => setRememberMe(!rememberMe)}
-                      className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                        rememberMe ? 'bg-brand-500 border-brand-500' : 'border-slate-600 hover:border-slate-500'
-                      }`}>
-                      {rememberMe && <Check className="w-3 h-3 text-white" />}
-                    </div>
-                    <span className="text-sm text-slate-400 group-hover:text-slate-300 transition-colors select-none">
-                      تذكّرني
-                    </span>
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <button type="button" onClick={() => setRememberMe(!rememberMe)}
+                      className="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
+                      style={{
+                        background: rememberMe ? 'var(--brand-500)' : 'transparent',
+                        borderColor: rememberMe ? 'var(--brand-500)' : 'var(--border-hover)',
+                      }}>
+                      {rememberMe && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                    <span className="text-sm" style={{ color:'var(--text-secondary)' }}>تذكّرني</span>
                   </label>
-                  <button type="button" onClick={() => setResetMode(true)}
-                    className="text-sm text-brand-400 hover:text-brand-300 transition-colors">
+                  <button type="button" onClick={() => setMode('reset')}
+                    className="text-sm transition-colors" style={{ color:'var(--brand-300)' }}
+                    onMouseEnter={(e) => e.target.style.color='var(--brand-400)'}
+                    onMouseLeave={(e) => e.target.style.color='var(--brand-300)'}>
                     نسيت كلمة المرور؟
                   </button>
                 </div>
 
-                <button type="submit" disabled={submitting || loading}
-                  className="btn btn-primary w-full py-3 text-base mt-2">
-                  {submitting ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري الدخول...</> : 'تسجيل الدخول'}
+                <button type="submit" disabled={submitting || loading} className="btn btn-primary w-full py-3 text-base mt-1">
+                  {submitting ? <><Loader2 className="w-5 h-5 animate-spin" />جاري الدخول...</> : 'تسجيل الدخول'}
                 </button>
               </form>
 
               {/* Demo credentials */}
-              <div className="mt-6">
+              <div className="mt-7">
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="flex-1 h-px bg-slate-800" />
-                  <span className="text-xs text-slate-600 shrink-0">حسابات تجريبية</span>
-                  <div className="flex-1 h-px bg-slate-800" />
+                  <div className="flex-1 h-px" style={{ background:'var(--border)' }} />
+                  <span className="text-xs" style={{ color:'var(--text-muted)' }}>حسابات تجريبية</span>
+                  <div className="flex-1 h-px" style={{ background:'var(--border)' }} />
                 </div>
-                <div className="grid grid-cols-1 gap-2">
+                <div className="space-y-2">
                   {DEMO_CREDENTIALS.map((c) => (
-                    <button key={c.email} onClick={() => fillDemo(c)}
-                      className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-slate-800
-                                 hover:border-slate-700 hover:bg-slate-900/50 transition-all text-right group">
-                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.color }} />
+                    <button key={c.email} onClick={() => fill(c)}
+                      className="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl text-right
+                                 transition-all group"
+                      style={{
+                        background:'rgba(255,255,255,0.03)',
+                        border:'1px solid var(--border)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
+                        e.currentTarget.style.borderColor = 'var(--border-brand)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+                        e.currentTarget.style.borderColor = 'var(--border)'
+                      }}>
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background:c.color }} />
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-slate-300 group-hover:text-white transition-colors">
-                          {c.role}
-                        </div>
-                        <div className="text-xs text-slate-600 truncate">{c.email}</div>
+                        <div className="text-xs font-semibold" style={{ color:'var(--text-primary)' }}>{c.role}</div>
+                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>{c.note}</div>
                       </div>
-                      <ArrowLeft className="w-3.5 h-3.5 text-slate-700 group-hover:text-brand-400 transition-colors" />
+                      <ArrowLeft className="w-3.5 h-3.5 flex-shrink-0 rotate-180 opacity-0 group-hover:opacity-100 transition-opacity"
+                                 style={{ color:'var(--brand-400)' }} />
                     </button>
                   ))}
                 </div>
               </div>
             </>
-          ) : (
-            /* Reset Password */
+          )}
+
+          {/* ── Reset Password ── */}
+          {mode === 'reset' && (
             <div className="animate-slide-up">
-              <button onClick={() => { setResetMode(false); setResetSent(false); setResetErr('') }}
-                className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6 transition-colors">
-                <ArrowLeft className="w-4 h-4 rotate-180" /> العودة لتسجيل الدخول
+              <button onClick={() => { setMode('login'); setResetSent(false); setResetErr('') }}
+                className="flex items-center gap-2 text-sm mb-7 transition-colors"
+                style={{ color:'var(--text-muted)' }}
+                onMouseEnter={(e) => e.currentTarget.style.color='var(--text-primary)'}
+                onMouseLeave={(e) => e.currentTarget.style.color='var(--text-muted)'}>
+                <ArrowLeft className="w-4 h-4 rotate-180" />
+                العودة لتسجيل الدخول
               </button>
 
-              <div className="mb-7">
-                <h2 className="text-2xl font-bold text-white">استعادة كلمة المرور</h2>
-                <p className="text-sm text-slate-500 mt-1">
-                  أدخل بريدك وسنرسل لك رابط الاستعادة
-                </p>
-              </div>
+              <h2 className="text-2xl font-bold mb-1" style={{ color:'var(--text-primary)' }}>
+                استعادة كلمة المرور
+              </h2>
+              <p className="text-sm mb-7" style={{ color:'var(--text-muted)' }}>
+                سنرسل لك رابط الاستعادة على بريدك الإلكتروني
+              </p>
 
               {resetSent ? (
-                <div className="flex flex-col items-center gap-4 py-8 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-green-500/10 flex items-center justify-center">
+                <div className="text-center py-8 space-y-4">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+                       style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.2)' }}>
                     <CheckCircle2 className="w-8 h-8 text-green-400" />
                   </div>
                   <div>
-                    <p className="text-base font-semibold text-white">تم الإرسال!</p>
-                    <p className="text-sm text-slate-400 mt-1">راجع بريدك الإلكتروني لرابط الاستعادة</p>
+                    <h3 className="font-bold" style={{ color:'var(--text-primary)' }}>تم الإرسال!</h3>
+                    <p className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>
+                      راجع بريدك الإلكتروني
+                    </p>
                   </div>
-                  <button onClick={() => { setResetMode(false); setResetSent(false) }}
-                    className="btn btn-primary mt-2">العودة لتسجيل الدخول</button>
+                  <button onClick={() => setMode('login')} className="btn btn-primary mx-auto">
+                    العودة لتسجيل الدخول
+                  </button>
                 </div>
               ) : (
                 <form onSubmit={handleReset} className="space-y-4">
                   {resetErr && (
-                    <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10
-                                    border border-red-500/20 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm"
+                         style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:'#f87171' }}>
                       <AlertCircle className="w-4 h-4 flex-shrink-0" />{resetErr}
                     </div>
                   )}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                      البريد الإلكتروني
-                    </label>
-                    <input type="email" value={resetEmail} dir="ltr"
+                  <div className="relative">
+                    <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4"
+                          style={{ color:'var(--text-muted)' }} />
+                    <input type="email" dir="ltr" required value={resetEmail}
                       onChange={(e) => setResetEmail(e.target.value)}
-                      placeholder="user@company.com" required />
+                      placeholder="user@company.com" className="pr-10" />
                   </div>
-                  <button type="submit" className="btn btn-primary w-full py-3 mt-2">
+                  <button type="submit" className="btn btn-primary w-full py-3">
                     إرسال رابط الاستعادة
                   </button>
                 </form>
@@ -304,14 +336,5 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
-  )
-}
-
-// Local Check icon (lucide doesn't export 'Check' separately sometimes)
-function Check({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-    </svg>
   )
 }

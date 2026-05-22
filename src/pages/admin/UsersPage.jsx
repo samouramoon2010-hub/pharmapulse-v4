@@ -1,11 +1,11 @@
 // ============================================================
-// Users Page — reads pharmacies from Firestore (no dummy data)
+// Users Page — Enterprise DataTable, Firestore, Auth REST API
 // ============================================================
 import React, { useEffect, useState, useMemo } from 'react'
 import {
   Users, Plus, Search, Pencil, UserCheck, UserX,
   Save, X, Loader2, Eye, EyeOff, AlertCircle,
-  ToggleLeft, ToggleRight, Mail, Phone, Hash, Shield, Crown, Building2,
+  Mail, Phone, Hash, Shield, Crown, Building2, Download,
 } from 'lucide-react'
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
@@ -17,33 +17,24 @@ import {
 } from '../../services/userService'
 import { useToastStore } from '../../components/ui/Toast'
 import ConfirmModal from '../../components/ui/ConfirmModal'
-import EmptyState from '../../components/ui/EmptyState'
-import { SkeletonTable } from '../../components/ui/SkeletonCard'
+import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
 
 const ROLES = [
-  { value:'admin',      label:'مدير النظام',  icon:'👑', needsPharmacy:false },
-  { value:'manager',    label:'مدير فرع',     icon:'🏪', needsPharmacy:true  },
-  { value:'pharmacist', label:'صيدلاني',       icon:'💊', needsPharmacy:true  },
+  { value:'admin',      label:'Admin',    icon:'👑', needsPharmacy:false },
+  { value:'manager',    label:'Manager',  icon:'🏪', needsPharmacy:true  },
+  { value:'pharmacist', label:'Pharmacist',icon:'💊', needsPharmacy:true  },
 ]
-const ROLE_STYLE = {
-  admin:      'bg-red-500/10 text-red-400 border-red-500/20',
-  manager:    'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  pharmacist: 'bg-brand-500/10 text-brand-400 border-brand-500/20',
-}
 
 function pwStrength(pw) {
   if (!pw) return { score:0, label:'', color:'' }
   let s=0
-  if (pw.length>=6)  s++
-  if (pw.length>=10) s++
-  if (/[A-Z]/.test(pw)) s++
-  if (/[0-9]/.test(pw)) s++
-  if (/[^A-Za-z0-9]/.test(pw)) s++
-  if (s<=1) return { score:s, label:'ضعيفة جداً', color:'bg-red-500' }
-  if (s<=2) return { score:s, label:'ضعيفة',     color:'bg-orange-500' }
-  if (s<=3) return { score:s, label:'متوسطة',    color:'bg-yellow-500' }
-  if (s<=4) return { score:s, label:'قوية',      color:'bg-brand-500' }
-  return          { score:s, label:'قوية جداً', color:'bg-green-500' }
+  if (pw.length>=6)s++; if (pw.length>=10)s++
+  if (/[A-Z]/.test(pw))s++; if (/[0-9]/.test(pw))s++
+  if (/[^A-Za-z0-9]/.test(pw))s++
+  if (s<=1) return { score:s, label:'Weak',    color:'#ef4444' }
+  if (s<=2) return { score:s, label:'Fair',    color:'#f59e0b' }
+  if (s<=3) return { score:s, label:'Good',    color:'#00d2ad' }
+  return          { score:s, label:'Strong',  color:'#22c55e' }
 }
 
 const EMPTY = {
@@ -51,16 +42,33 @@ const EMPTY = {
   pharmacyId:'', phone:'', employeeId:'', status:'active', sendEmail:true,
 }
 
+// Tiny field component
+function F({ label, required, error, children }) {
+  return (
+    <div style={{ marginBottom:'12px' }}>
+      <label style={{
+        display:'block', fontSize:'10px', fontWeight:500,
+        letterSpacing:'0.07em', textTransform:'uppercase',
+        color:'var(--text-muted)', marginBottom:'5px',
+        fontFamily:"'Inter',sans-serif",
+      }}>
+        {label}{required && <span style={{ color:'#ef4444', marginRight:'3px' }}>*</span>}
+      </label>
+      {children}
+      {error && <p style={{ fontSize:'11px', color:'#f87171', marginTop:'4px' }}>{error}</p>}
+    </div>
+  )
+}
+
 export default function UsersPage() {
   const { userProfile } = useAuthStore()
-  const { pharmacies, subscribe: subscribePh } = usePharmacyStore()
+  const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const toast = useToastStore()
 
   const [users,        setUsers]        = useState([])
   const [loading,      setLoading]      = useState(true)
   const [search,       setSearch]       = useState('')
   const [filterRole,   setFilterRole]   = useState('all')
-  const [filterStatus, setFilterStatus] = useState('all')
   const [showModal,    setShowModal]    = useState(false)
   const [editUser,     setEditUser]     = useState(null)
   const [form,         setForm]         = useState(EMPTY)
@@ -72,69 +80,62 @@ export default function UsersPage() {
   const [confirmToggle,setConfirmToggle]= useState(null)
 
   useEffect(() => {
-    const u1 = subscribePh()
+    const u1 = subPh()
     const q  = query(collection(db, COL.USERS), orderBy('createdAt', 'desc'))
     const u2 = onSnapshot(q, (snap) => {
       setUsers(snap.docs.map((d) => ({ id:d.id, uid:d.id, ...d.data() })))
       setLoading(false)
     }, () => setLoading(false))
-    return () => { u1(); u2() }
+    return () => { u1?.(); u2?.() }
   }, [])
 
   const isNew = !editUser
-
   const stats = useMemo(() => ({
     total:  users.length,
     active: users.filter((u) => u.active !== false).length,
-    counts: users.reduce((a, u) => { a[u.role]=(a[u.role]||0)+1; return a }, {}),
+    counts: users.reduce((a,u)=>{ a[u.role]=(a[u.role]||0)+1; return a }, {}),
   }), [users])
 
   const filtered = useMemo(() =>
     users.filter((u) => {
-      const q  = search.toLowerCase()
+      const q = search.toLowerCase()
       const ms = !q || u.displayName?.toLowerCase().includes(q) ||
-                       u.email?.toLowerCase().includes(q)       ||
+                       u.email?.toLowerCase().includes(q) ||
                        u.employeeId?.toLowerCase().includes(q)
-      const mr = filterRole   === 'all' || u.role === filterRole
-      const ma = filterStatus === 'all' ||
-        (filterStatus==='active'   ? u.active!==false : u.active===false)
-      return ms && mr && ma
-    }),
-    [users, search, filterRole, filterStatus]
-  )
+      const mr = filterRole==='all' || u.role===filterRole
+      return ms && mr
+    }), [users, search, filterRole])
 
-  const getPharmacyName = (id) => pharmacies.find((p) => p.id === id)?.name || '—'
-  const sf = (f, v) => { setForm((p)=>({...p,[f]:v})); setErrors((e)=>({...e,[f]:undefined})) }
+  const getPharmacyName = (id) => pharmacies.find((p) => p.id===id)?.name || '—'
+  const sf = (f,v) => { setForm((p)=>({...p,[f]:v})); setErrors((e)=>({...e,[f]:undefined})) }
   const selectedRole = ROLES.find((r) => r.value === form.role)
 
   const openCreate = () => { setForm(EMPTY); setEditUser(null); setErrors({}); setStep('form'); setCreated(null); setShowModal(true) }
-  const openEdit   = (u) => {
-    setForm({
-      displayName:u.displayName||'', email:u.email||'', password:'',
-      role:u.role||'pharmacist', pharmacyId:u.pharmacyId||'',
-      phone:u.phone||'', employeeId:u.employeeId||'',
-      status:u.status||(u.active!==false?'active':'inactive'), sendEmail:false,
-    })
+  const openEdit   = (u)  => {
+    setForm({ displayName:u.displayName||'', email:u.email||'', password:'',
+              role:u.role||'pharmacist', pharmacyId:u.pharmacyId||'',
+              phone:u.phone||'', employeeId:u.employeeId||'',
+              status:u.status||(u.active!==false?'active':'inactive'), sendEmail:false })
     setEditUser(u); setErrors({}); setStep('form'); setCreated(null); setShowModal(true)
   }
   const closeModal = () => { setShowModal(false); setEditUser(null) }
 
   const validate = async () => {
     const e = {}
-    if (!form.displayName?.trim()) e.displayName = 'الاسم مطلوب'
-    if (!form.email?.trim())       e.email = 'البريد مطلوب'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'البريد غير صالح'
-    else if (isNew && users.some((u) => u.email?.toLowerCase() === form.email.toLowerCase()))
-      e.email = 'البريد مسجّل مسبقاً'
+    if (!form.displayName?.trim()) e.displayName='Name is required'
+    if (!form.email?.trim()) e.email='Email is required'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email='Invalid email'
+    else if (isNew && users.some((u)=>u.email?.toLowerCase()===form.email.toLowerCase()))
+      e.email='Email already registered'
     if (isNew) {
-      if (!form.password)         e.password = 'كلمة المرور مطلوبة'
-      else if (form.password.length < 6) e.password = 'أقل 6 أحرف'
+      if (!form.password) e.password='Password required'
+      else if (form.password.length<6) e.password='Min 6 characters'
     }
-    if (!form.role) e.role = 'الدور مطلوب'
-    if (selectedRole?.needsPharmacy && !form.pharmacyId) e.pharmacyId = 'الفرع مطلوب لهذا الدور'
+    if (!form.role) e.role='Role required'
+    if (selectedRole?.needsPharmacy && !form.pharmacyId) e.pharmacyId='Branch required for this role'
     if (form.employeeId?.trim()) {
-      const dup = await employeeIdExists(form.employeeId.trim(), isNew ? null : editUser?.uid||editUser?.id)
-      if (dup) e.employeeId = 'الرقم الوظيفي مستخدم مسبقاً'
+      const dup = await employeeIdExists(form.employeeId.trim(), isNew?null:editUser?.uid||editUser?.id)
+      if (dup) e.employeeId='Employee ID already in use'
     }
     return e
   }
@@ -146,30 +147,28 @@ export default function UsersPage() {
     try {
       if (isNew) {
         const result = await createUser({
-          displayName: form.displayName.trim(), email: form.email.trim(),
-          password: form.password, role: form.role, status: form.status,
-          pharmacyId: form.pharmacyId||null, phone: form.phone,
-          employeeId: form.employeeId, sendWelcomeEmail: form.sendEmail,
-          actorId: userProfile?.uid, actorRole: userProfile?.role,
+          displayName:form.displayName.trim(), email:form.email.trim(),
+          password:form.password, role:form.role, status:form.status,
+          pharmacyId:form.pharmacyId||null, phone:form.phone,
+          employeeId:form.employeeId, sendWelcomeEmail:form.sendEmail,
+          actorId:userProfile?.uid, actorRole:userProfile?.role,
         })
         setCreated(result); setStep('success')
       } else {
         await updateUserProfile(
           editUser.uid||editUser.id,
-          {
-            displayName: form.displayName.trim(), role: form.role,
-            status: form.status, active: form.status==='active',
-            pharmacyId: form.pharmacyId||null, phone: form.phone, employeeId: form.employeeId,
-          },
+          { displayName:form.displayName.trim(), role:form.role,
+            status:form.status, active:form.status==='active',
+            pharmacyId:form.pharmacyId||null, phone:form.phone, employeeId:form.employeeId },
           userProfile?.uid, userProfile?.role,
         )
-        toast.success('تم تحديث بيانات المستخدم')
+        toast.success('User updated')
         closeModal()
       }
     } catch (e) {
-      const msg = e.message || 'حدث خطأ'
-      if (msg.toLowerCase().includes('email') || msg.includes('البريد')) setErrors({ email: msg })
-      else setErrors({ _global: msg })
+      const msg=e.message||'An error occurred'
+      if (msg.toLowerCase().includes('email')||msg.includes('البريد')) setErrors({email:msg})
+      else setErrors({_global:msg})
       toast.error(msg)
     } finally { setSaving(false) }
   }
@@ -178,287 +177,341 @@ export default function UsersPage() {
     if (!confirmToggle) return
     try {
       await toggleUserStatus(confirmToggle.uid||confirmToggle.id, userProfile?.uid, userProfile?.role)
-      toast.success(`تم ${confirmToggle.active!==false?'إيقاف':'تفعيل'} الحساب`)
+      toast.success(`Account ${confirmToggle.active!==false?'suspended':'activated'}`)
     } catch (e) { toast.error(e.message) }
     setConfirmToggle(null)
   }
 
   const pw = pwStrength(form.password)
 
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Users className="w-6 h-6 text-brand-400" />إدارة المستخدمين
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">{stats.total} مستخدم · {stats.active} نشط</p>
+  // DataTable columns
+  const columns = [
+    {
+      key:'displayName', label:'User', primary:true, sortable:true,
+      render:(val, row) => (
+        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+          <div style={{
+            width:'24px', height:'24px', borderRadius:'50%',
+            background:'var(--brand-500)', color:'#09090b',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:'10px', fontWeight:700, flexShrink:0,
+          }}>{val?.[0]||'?'}</div>
+          <div>
+            <div style={{ fontSize:'12.5px', fontWeight:500, color:'var(--text-primary)' }}>{val}</div>
+            {row.employeeId && (
+              <div style={{ fontSize:'10px', color:'var(--text-muted)', fontFamily:'monospace' }}>#{row.employeeId}</div>
+            )}
+          </div>
         </div>
-        <button onClick={openCreate} className="btn btn-primary gap-2"><Plus className="w-4 h-4"/>إضافة مستخدم</button>
+      ),
+    },
+    {
+      key:'email', label:'Email', sortable:true,
+      render:(val)=><span style={{ fontFamily:"'Inter',monospace", fontSize:'11px' }}>{val}</span>,
+    },
+    {
+      key:'role', label:'Role', sortable:true,
+      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',pharmacist:'Pharmacist'}[val]||val} />,
+    },
+    {
+      key:'pharmacyId', label:'Branch',
+      render:(val)=><span style={{ fontSize:'11px' }}>{val ? getPharmacyName(val) : '—'}</span>,
+    },
+    {
+      key:'active', label:'Status', sortable:true, align:'center',
+      render:(val, row)=>{
+        const active = val!==false && row.status!=='inactive'
+        return <StatusPill status={active?'active':'inactive'} label={active?'Active':'Suspended'} />
+      },
+    },
+    {
+      key:'_actions', label:'', align:'center', width:'100px',
+      render:(_, row)=>(
+        <RowActions actions={[
+          { label:'Edit', onClick:()=>openEdit(row) },
+          { label: row.active!==false?'Suspend':'Activate',
+            onClick:()=>setConfirmToggle({...row, uid:row.uid||row.id, active:row.active!==false}),
+            secondary:true, danger:row.active!==false },
+        ]} />
+      ),
+    },
+  ]
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-5">
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'16px' }}>
+        <div>
+          <h1 style={{ fontSize:'15px', fontWeight:600, letterSpacing:'-0.02em', color:'var(--text-primary)', fontFamily:"'Inter',sans-serif" }}>
+            Users
+          </h1>
+          <p style={{ fontSize:'12px', color:'var(--text-muted)', marginTop:'2px' }}>
+            {stats.total} members · {stats.active} active
+          </p>
+        </div>
+        <div style={{ display:'flex', gap:'8px' }}>
+          <button onClick={openCreate} className="btn btn-primary btn-sm" style={{ gap:'6px' }}>
+            <Plus style={{ width:13, height:13 }} /> Add User
+          </button>
+        </div>
       </div>
 
-      {/* Role cards */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Stats strip */}
+      <div style={{ display:'flex', gap:'2px' }}>
         {[
-          { role:'admin',      label:'مدير النظام', color:'#ef4444', icon:Crown },
-          { role:'manager',    label:'مدير فرع',    color:'#f59e0b', icon:Shield },
-          { role:'pharmacist', label:'صيدلاني',      color:'#1a9a7e', icon:Building2 },
-        ].map((r) => (
-          <button key={r.role} onClick={() => setFilterRole(filterRole===r.role?'all':r.role)}
-            className="card card-p flex items-center gap-3 cursor-pointer text-right transition-all"
-            style={filterRole===r.role ? { borderColor:`${r.color}40` } : {}}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background:`${r.color}18` }}>
-              <r.icon className="w-4 h-4" style={{ color:r.color }} />
-            </div>
-            <div><div className="text-xl font-bold text-white">{stats.counts[r.role]||0}</div>
-            <div className="text-xs text-slate-500">{r.label}</div></div>
+          { role:'all',       label:'All',         count:stats.total,              color:'var(--text-muted)' },
+          { role:'admin',     label:'Admin',        count:stats.counts.admin||0,    color:'#f87171' },
+          { role:'manager',   label:'Manager',      count:stats.counts.manager||0,  color:'#fbbf24' },
+          { role:'pharmacist',label:'Pharmacist',   count:stats.counts.pharmacist||0,color:'var(--brand-400)' },
+        ].map((s) => (
+          <button key={s.role}
+            onClick={() => setFilterRole(s.role)}
+            style={{
+              padding:'4px 10px', borderRadius:'6px', fontSize:'12px',
+              fontFamily:"'Inter',sans-serif",
+              background: filterRole===s.role ? 'var(--bg-overlay)' : 'transparent',
+              border: filterRole===s.role ? '1px solid var(--border-default)' : '1px solid transparent',
+              color: filterRole===s.role ? s.color : 'var(--text-muted)',
+              cursor:'pointer', transition:'all 0.12s',
+              display:'flex', alignItems:'center', gap:'5px',
+            }}>
+            <span style={{ fontWeight:600, fontVariantNumeric:'tabular-nums' }}>{s.count}</span>
+            <span>{s.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input value={search} onChange={(e)=>setSearch(e.target.value)}
-            placeholder="بحث بالاسم أو البريد..." className="pr-9 text-sm" />
-        </div>
-        <select value={filterStatus} onChange={(e)=>setFilterStatus(e.target.value)} className="text-sm">
-          <option value="all">كل الحالات</option>
-          <option value="active">نشط</option>
-          <option value="inactive">موقوف</option>
-        </select>
+      {/* Search */}
+      <div style={{ position:'relative', maxWidth:'320px' }}>
+        <Search style={{
+          position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)',
+          width:13, height:13, color:'var(--text-muted)', pointerEvents:'none',
+        }} />
+        <input value={search} onChange={(e)=>setSearch(e.target.value)}
+          placeholder="Search by name, email or ID..."
+          style={{ paddingRight:'32px', fontSize:'13px', height:'34px' }} />
       </div>
 
       {/* Table */}
-      {loading ? <SkeletonTable rows={6} /> : filtered.length===0 ? (
-        <EmptyState icon={Users} title="لا يوجد مستخدمون"
-          action={<button onClick={openCreate} className="btn btn-primary btn-sm gap-2"><Plus className="w-4 h-4"/>إضافة</button>} />
-      ) : (
-        <div className="tbl-wrap overflow-x-auto">
-          <table className="tbl">
-            <thead><tr>
-              <th>المستخدم</th>
-              <th className="hidden sm:table-cell">البريد</th>
-              <th>الدور</th>
-              <th className="hidden md:table-cell">الفرع</th>
-              <th>الحالة</th>
-              <th className="text-center">إجراء</th>
-            </tr></thead>
-            <tbody>
-              {filtered.map((u) => {
-                const uid = u.uid||u.id
-                const active = u.active!==false && u.status!=='inactive'
-                return (
-                  <tr key={uid} className={active?'':'opacity-50'}>
-                    <td><div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-brand flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                        {u.displayName?.[0]||'?'}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-200">{u.displayName}</div>
-                        {u.employeeId && <div className="text-xs text-slate-600">#{u.employeeId}</div>}
-                      </div>
-                    </div></td>
-                    <td className="hidden sm:table-cell text-sm text-slate-400">{u.email}</td>
-                    <td><span className={`badge text-xs ${ROLE_STYLE[u.role]||ROLE_STYLE.pharmacist}`}>
-                      {ROLES.find((r)=>r.value===u.role)?.label||u.role}
-                    </span></td>
-                    <td className="hidden md:table-cell text-sm text-slate-400">
-                      {u.pharmacyId ? getPharmacyName(u.pharmacyId) : '—'}
-                    </td>
-                    <td><span className={`badge text-xs ${active ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                      {active?'نشط':'موقوف'}
-                    </span></td>
-                    <td><div className="flex items-center justify-center gap-1">
-                      <button onClick={()=>openEdit(u)} className="btn btn-ghost btn-icon btn-sm"><Pencil className="w-3.5 h-3.5"/></button>
-                      <button onClick={()=>setConfirmToggle({...u,uid,active})}
-                        className={`btn btn-ghost btn-icon btn-sm ${active?'hover:text-red-400':'hover:text-green-400'}`}>
-                        {active ? <UserX className="w-3.5 h-3.5"/> : <UserCheck className="w-3.5 h-3.5"/>}
-                      </button>
-                    </div></td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns} rows={filtered} loading={loading}
+        emptyText="No users found"
+        emptySubtext={search ? `No results for "${search}"` : 'Add your first user to get started'}
+        selectable
+      />
 
-      {/* Modal */}
+      {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeModal}/>
-          <div className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl animate-scale-in">
-            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+        <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }} onClick={closeModal} />
+          <div style={{
+            position:'relative', width:'100%', maxWidth:'440px',
+            background:'var(--bg-elevated)', border:'1px solid var(--border-strong)',
+            borderRadius:'12px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)',
+            maxHeight:'88vh', overflow:'hidden', display:'flex', flexDirection:'column',
+            animation:'scaleIn 0.2s ease-out both',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding:'14px 16px', borderBottom:'1px solid var(--border-subtle)',
+              display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0,
+            }}>
               <div>
-                <h2 className="text-base font-bold text-white">{isNew?'إضافة مستخدم':'تعديل المستخدم'}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isNew ? 'يُنشئ Firebase Auth + Firestore document' : 'تعديل Firestore فقط'}
-                </p>
+                <div style={{ fontSize:'14px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'-0.01em' }}>
+                  {isNew ? 'New User' : 'Edit User'}
+                </div>
+                <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'1px' }}>
+                  {isNew ? 'Creates Firebase Auth + Firestore profile' : 'Updates Firestore profile only'}
+                </div>
               </div>
-              <button onClick={closeModal} className="btn btn-ghost btn-icon"><X className="w-5 h-5"/></button>
+              <button onClick={closeModal} className="btn btn-ghost btn-icon" style={{ width:28, height:28 }}>
+                <X style={{ width:14, height:14 }} />
+              </button>
             </div>
 
             {step==='success' && created ? (
-              <div className="px-6 py-8 text-center space-y-5">
-                <div className="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto">
-                  <UserCheck className="w-8 h-8 text-green-400"/>
+              <div style={{ padding:'24px', textAlign:'center', flexShrink:0 }}>
+                <div style={{
+                  width:'40px', height:'40px', borderRadius:'10px', margin:'0 auto 12px',
+                  background:'rgba(0,210,173,0.1)', border:'1px solid rgba(0,210,173,0.2)',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                }}>
+                  <UserCheck style={{ width:18, height:18, color:'var(--brand-400)' }} />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">تم إنشاء الحساب!</h3>
-                  <p className="text-sm text-slate-400 mt-1">{created.displayName}</p>
+                <div style={{ fontSize:'14px', fontWeight:600, color:'var(--text-primary)', marginBottom:'4px' }}>User created</div>
+                <div style={{ fontSize:'12px', color:'var(--text-muted)', marginBottom:'16px' }}>{created.displayName}</div>
+                <div style={{
+                  background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)',
+                  borderRadius:'8px', padding:'10px 12px', textAlign:'right',
+                  fontSize:'11px', color:'var(--text-secondary)', marginBottom:'16px',
+                }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'4px' }}>
+                    <span style={{ color:'var(--text-muted)' }}>UID</span>
+                    <code style={{ color:'var(--brand-400)', fontFamily:'monospace', fontSize:'10px' }}>{created.uid?.slice(0,16)}...</code>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between' }}>
+                    <span style={{ color:'var(--text-muted)' }}>Branch</span>
+                    <span>{created.pharmacyId ? getPharmacyName(created.pharmacyId) : '—'}</span>
+                  </div>
                 </div>
-                <div className="bg-slate-800/60 rounded-xl p-4 space-y-2 text-right text-sm">
-                  <div className="flex justify-between"><span className="text-slate-500">UID</span>
-                    <code className="text-brand-400 text-xs">{created.uid}</code></div>
-                  <div className="flex justify-between"><span className="text-slate-500">الفرع</span>
-                    <span className="text-slate-200">{created.pharmacyId ? getPharmacyName(created.pharmacyId) : '—'}</span></div>
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={()=>{setStep('form');setForm(EMPTY);setErrors({})}} className="btn btn-secondary flex-1">إضافة آخر</button>
-                  <button onClick={closeModal} className="btn btn-primary flex-1">إغلاق</button>
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button onClick={()=>{setStep('form');setForm(EMPTY);setErrors({})}} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                    Add another
+                  </button>
+                  <button onClick={closeModal} className="btn btn-primary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                    Done
+                  </button>
                 </div>
               </div>
             ) : (
-              <div className="px-6 py-5 space-y-4">
+              <div style={{ overflowY:'auto', padding:'16px', flex:1 }}>
                 {errors._global && (
-                  <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-400">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0"/>{errors._global}
+                  <div style={{
+                    display:'flex', alignItems:'center', gap:'8px',
+                    background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)',
+                    borderRadius:'8px', padding:'8px 12px', marginBottom:'12px',
+                    fontSize:'12px', color:'#f87171',
+                  }}>
+                    <AlertCircle style={{ width:14, height:14, flexShrink:0 }} />{errors._global}
                   </div>
                 )}
 
-                {/* Name */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">الاسم *</label>
-                  <input value={form.displayName} onChange={(e)=>sf('displayName',e.target.value)} placeholder="محمد أحمد العتيبي"/>
-                  {errors.displayName && <p className="text-xs text-red-400">{errors.displayName}</p>}
-                </div>
+                <F label="Full name" required error={errors.displayName}>
+                  <input value={form.displayName} onChange={(e)=>sf('displayName',e.target.value)} placeholder="Mohammed Al-Otaibi" style={{ height:'34px', fontSize:'13px' }} />
+                </F>
 
-                {/* Email */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">البريد الإلكتروني *</label>
-                  <div className="relative">
-                    <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"/>
+                <F label="Email" required error={errors.email}>
+                  <div style={{ position:'relative' }}>
+                    <Mail style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', width:13, height:13, color:'var(--text-muted)', pointerEvents:'none' }} />
                     <input type="email" dir="ltr" value={form.email} onChange={(e)=>sf('email',e.target.value)}
-                      placeholder="user@company.com" className="pr-10"
-                      disabled={!isNew} style={!isNew?{opacity:0.6,cursor:'not-allowed'}:{}}/>
+                      placeholder="user@company.com" style={{ paddingRight:'32px', height:'34px', fontSize:'13px' }}
+                      disabled={!isNew} />
                   </div>
-                  {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
-                </div>
+                </F>
 
-                {/* Password */}
                 {isNew && (
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">كلمة المرور *</label>
-                    <div className="relative">
+                  <F label="Temporary password" required error={errors.password}>
+                    <div style={{ position:'relative' }}>
                       <input type={showPass?'text':'password'} dir="ltr" value={form.password}
-                        onChange={(e)=>sf('password',e.target.value)} placeholder="••••••••" className="pl-10"/>
+                        onChange={(e)=>sf('password',e.target.value)} placeholder="••••••••"
+                        style={{ paddingLeft:'32px', height:'34px', fontSize:'13px' }} />
                       <button type="button" onClick={()=>setShowPass(!showPass)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
-                        {showPass?<EyeOff className="w-4 h-4"/>:<Eye className="w-4 h-4"/>}
+                        style={{ position:'absolute', left:'10px', top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)', background:'none', border:'none', cursor:'pointer', padding:0 }}>
+                        {showPass?<EyeOff style={{width:13,height:13}}/>:<Eye style={{width:13,height:13}}/>}
                       </button>
                     </div>
                     {form.password && (
-                      <div className="space-y-1">
-                        <div className="flex gap-1">{[1,2,3,4,5].map((i)=>(
-                          <div key={i} className={`h-1 flex-1 rounded-full ${i<=pw.score?pw.color:'bg-slate-800'}`}/>
-                        ))}</div>
-                        <p className={`text-xs ${pw.score<=2?'text-red-400':pw.score<=3?'text-yellow-400':'text-green-400'}`}>{pw.label}</p>
+                      <div style={{ marginTop:'5px', display:'flex', alignItems:'center', gap:'6px' }}>
+                        <div style={{ display:'flex', gap:'2px', flex:1 }}>
+                          {[1,2,3,4,5].map((i)=>(
+                            <div key={i} style={{
+                              flex:1, height:'2px', borderRadius:'99px',
+                              background: i<=pw.score ? pw.color : 'var(--border-subtle)',
+                              transition:'background 0.2s',
+                            }} />
+                          ))}
+                        </div>
+                        <span style={{ fontSize:'10px', color:pw.color, fontWeight:500, minWidth:'32px', textAlign:'left' }}>{pw.label}</span>
                       </div>
                     )}
-                    {errors.password && <p className="text-xs text-red-400">{errors.password}</p>}
-                    <label className="flex items-center gap-2.5 mt-1 cursor-pointer">
+                    <label style={{ display:'flex', alignItems:'center', gap:'7px', marginTop:'7px', cursor:'pointer' }}>
                       <button type="button" onClick={()=>sf('sendEmail',!form.sendEmail)}
-                        className={`w-9 h-5 rounded-full transition-all relative ${form.sendEmail?'bg-brand-500':'bg-slate-700'}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${form.sendEmail?'right-0.5':'left-0.5'}`}/>
+                        style={{
+                          width:'28px', height:'16px', borderRadius:'99px',
+                          background: form.sendEmail ? 'var(--brand-500)' : 'var(--bg-overlay)',
+                          border:'1px solid var(--border-default)', position:'relative',
+                          cursor:'pointer', transition:'background 0.2s', flexShrink:0,
+                        }}>
+                        <div style={{
+                          position:'absolute', top:'1px', width:'12px', height:'12px',
+                          borderRadius:'50%', background:'white', transition:'right 0.2s',
+                          right: form.sendEmail ? '1px' : 'calc(100% - 13px)',
+                          boxShadow:'0 1px 3px rgba(0,0,0,0.3)',
+                        }} />
                       </button>
-                      <span className="text-xs text-slate-400">إرسال بريد لتعيين كلمة المرور</span>
+                      <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>
+                        Send password reset email
+                      </span>
                     </label>
-                  </div>
+                  </F>
                 )}
 
-                {/* Role */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">الدور *</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {ROLES.map((r) => (
+                <F label="Role" required error={errors.role}>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'6px' }}>
+                    {ROLES.map((r)=>(
                       <button key={r.value} type="button" onClick={()=>sf('role',r.value)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-all ${
-                          form.role===r.value
-                            ? 'bg-brand-500/15 border-brand-500/40 text-brand-300'
-                            : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
-                        }`}>
-                        <span>{r.icon}</span><span className="text-xs">{r.label}</span>
+                        style={{
+                          padding:'7px 8px', borderRadius:'8px', fontSize:'12px',
+                          border:`1px solid ${form.role===r.value?'var(--border-brand)':'var(--border-subtle)'}`,
+                          background: form.role===r.value ? 'var(--bg-active)' : 'var(--bg-overlay)',
+                          color: form.role===r.value ? 'var(--brand-300)' : 'var(--text-muted)',
+                          cursor:'pointer', transition:'all 0.12s',
+                          display:'flex', alignItems:'center', gap:'5px', justifyContent:'center',
+                        }}>
+                        <span style={{ fontSize:'13px' }}>{r.icon}</span>
+                        <span>{r.label}</span>
                       </button>
                     ))}
                   </div>
-                  {errors.role && <p className="text-xs text-red-400">{errors.role}</p>}
-                </div>
+                </F>
 
-                {/* Pharmacy */}
                 {selectedRole?.needsPharmacy && (
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                      الفرع {selectedRole.needsPharmacy && '*'}
-                    </label>
-                    <select value={form.pharmacyId} onChange={(e)=>sf('pharmacyId',e.target.value)}>
-                      <option value="">-- اختر الفرع --</option>
-                      {pharmacies.filter((p)=>p.active!==false).map((p) => (
+                  <F label="Branch" required={selectedRole.needsPharmacy} error={errors.pharmacyId}>
+                    <select value={form.pharmacyId} onChange={(e)=>sf('pharmacyId',e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
+                      <option value="">Select branch...</option>
+                      {pharmacies.filter((p)=>p.active!==false).map((p)=>(
                         <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                       ))}
                     </select>
-                    {errors.pharmacyId && <p className="text-xs text-red-400">{errors.pharmacyId}</p>}
                     {pharmacies.length===0 && (
-                      <p className="text-xs text-amber-400">⚠️ لا توجد فروع — أضف فروعاً أولاً من صفحة إدارة الفروع</p>
+                      <p style={{ fontSize:'11px', color:'#fbbf24', marginTop:'4px' }}>
+                        ⚠ No branches available — add branches first
+                      </p>
                     )}
-                  </div>
+                  </F>
                 )}
 
-                {/* Phone + EmployeeId */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">الجوال</label>
-                    <div className="relative">
-                      <Phone className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"/>
-                      <input type="tel" value={form.phone} onChange={(e)=>sf('phone',e.target.value)} placeholder="05xxxxxxxx" className="pr-9"/>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                  <F label="Phone">
+                    <div style={{ position:'relative' }}>
+                      <Phone style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', width:13, height:13, color:'var(--text-muted)', pointerEvents:'none' }} />
+                      <input type="tel" value={form.phone} onChange={(e)=>sf('phone',e.target.value)} placeholder="05xxxxxxxx" style={{ paddingRight:'32px', height:'34px', fontSize:'13px' }} />
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">رقم الموظف</label>
-                    <div className="relative">
-                      <Hash className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"/>
-                      <input value={form.employeeId} dir="ltr" onChange={(e)=>sf('employeeId',e.target.value)} placeholder="EMP-001" className="pr-9"/>
+                  </F>
+                  <F label="Employee ID" error={errors.employeeId}>
+                    <div style={{ position:'relative' }}>
+                      <Hash style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', width:13, height:13, color:'var(--text-muted)', pointerEvents:'none' }} />
+                      <input value={form.employeeId} dir="ltr" onChange={(e)=>sf('employeeId',e.target.value)} placeholder="EMP-001" style={{ paddingRight:'32px', height:'34px', fontSize:'13px' }} />
                     </div>
-                    {errors.employeeId && <p className="text-xs text-red-400">{errors.employeeId}</p>}
-                  </div>
+                  </F>
                 </div>
 
-                {/* Status */}
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-sm text-slate-300">الحالة</span>
-                  <div className="flex gap-2">
-                    {['active','inactive'].map((s)=>(
-                      <button key={s} type="button" onClick={()=>sf('status',s)}
-                        className={`px-3 py-1.5 rounded-xl text-sm border transition-all ${
-                          form.status===s
-                            ? s==='active'
-                              ? 'bg-brand-500/15 border-brand-500/30 text-brand-300'
-                              : 'bg-red-500/15 border-red-500/30 text-red-400'
-                            : 'bg-slate-800 border-slate-700 text-slate-500'
-                        }`}>
-                        {s==='active'?'نشط':'موقوف'}
+                <F label="Status">
+                  <div style={{ display:'flex', gap:'6px' }}>
+                    {[{v:'active',l:'Active'},{v:'inactive',l:'Inactive'}].map((s)=>(
+                      <button key={s.v} type="button" onClick={()=>sf('status',s.v)}
+                        style={{
+                          flex:1, height:'32px', borderRadius:'7px', fontSize:'12px',
+                          border:`1px solid ${form.status===s.v ? (s.v==='active'?'var(--border-brand)':'rgba(239,68,68,0.2)') : 'var(--border-subtle)'}`,
+                          background: form.status===s.v ? (s.v==='active'?'var(--bg-active)':'rgba(239,68,68,0.08)') : 'var(--bg-overlay)',
+                          color: form.status===s.v ? (s.v==='active'?'var(--brand-300)':'#f87171') : 'var(--text-muted)',
+                          cursor:'pointer', transition:'all 0.12s',
+                        }}>
+                        {s.l}
                       </button>
                     ))}
                   </div>
-                </div>
+                </F>
 
-                <div className="flex gap-3 pt-1">
-                  <button onClick={closeModal} className="btn btn-secondary flex-1">إلغاء</button>
-                  <button onClick={handleSave} disabled={saving} className="btn btn-primary flex-1 gap-2">
-                    {saving?<><Loader2 className="w-4 h-4 animate-spin"/>{isNew?'جاري الإنشاء...':'جاري الحفظ...'}</>
-                           :<><Save className="w-4 h-4"/>{isNew?'إنشاء المستخدم':'حفظ'}</>}
+                <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
+                  <button onClick={closeModal} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                    Cancel
+                  </button>
+                  <button onClick={handleSave} disabled={saving} className="btn btn-primary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                    {saving
+                      ? <><Loader2 style={{ width:13, height:13, animation:'spin 1s linear infinite' }} />{isNew?'Creating...':'Saving...'}</>
+                      : isNew ? 'Create User' : 'Save Changes'
+                    }
                   </button>
                 </div>
               </div>
@@ -468,9 +521,9 @@ export default function UsersPage() {
       )}
 
       <ConfirmModal open={!!confirmToggle} onClose={()=>setConfirmToggle(null)} onConfirm={handleToggle}
-        title={confirmToggle?.active!==false?'إيقاف المستخدم':'تفعيل المستخدم'}
-        message={`هل تريد ${confirmToggle?.active!==false?'إيقاف':'تفعيل'} حساب "${confirmToggle?.displayName}"؟`}
-        confirmLabel={confirmToggle?.active!==false?'إيقاف':'تفعيل'}
+        title={confirmToggle?.active!==false?'Suspend User':'Activate User'}
+        message={`${confirmToggle?.active!==false?'Suspend':'Activate'} account for "${confirmToggle?.displayName}"?`}
+        confirmLabel={confirmToggle?.active!==false?'Suspend':'Activate'}
         danger={confirmToggle?.active!==false} />
     </div>
   )

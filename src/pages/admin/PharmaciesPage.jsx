@@ -1,101 +1,85 @@
 // ============================================================
-// Pharmacies Management — Full CRUD, Realtime, Enterprise UI
+// Pharmacies Page — Enterprise DataTable
 // ============================================================
 import React, { useEffect, useState, useMemo } from 'react'
 import {
-  Building2, Plus, Search, Pencil, Trash2,
-  ToggleLeft, ToggleRight, MapPin, Save, X,
-  Loader2, Filter, ChevronDown, AlertCircle,
+  Building2, Plus, Search, Pencil, ToggleLeft, ToggleRight,
+  Trash2, Save, X, Loader2, AlertCircle, MapPin,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { usePharmacyStore } from '../../store/pharmacyStore'
 import { useToastStore } from '../../components/ui/Toast'
 import ConfirmModal from '../../components/ui/ConfirmModal'
-import EmptyState from '../../components/ui/EmptyState'
-import { SkeletonTable } from '../../components/ui/SkeletonCard'
+import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
 import { pharmacyCodeExists } from '../../services/pharmacyService'
 
 const SA_REGIONS = [
-  'الرياض', 'مكة المكرمة', 'المدينة المنورة', 'القصيم',
-  'المنطقة الشرقية', 'عسير', 'تبوك', 'حائل', 'الحدود الشمالية',
-  'جازان', 'نجران', 'الباحة', 'الجوف',
+  'الرياض','مكة المكرمة','المدينة المنورة','القصيم','المنطقة الشرقية',
+  'عسير','تبوك','حائل','الحدود الشمالية','جازان','نجران','الباحة','الجوف',
 ]
 
-const EMPTY = {
-  code: '', name: '', region: 'الرياض', city: '',
-  managerEmail: '', managerUid: '', active: true,
-}
+const EMPTY = { code:'', name:'', region:'الرياض', city:'', managerEmail:'', active:true }
 
-function Field({ label, required, error, children }) {
+function F({ label, required, error, children }) {
   return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-        {label} {required && <span className="text-red-400">*</span>}
+    <div style={{ marginBottom:'12px' }}>
+      <label style={{
+        display:'block', fontSize:'10px', fontWeight:500,
+        letterSpacing:'0.07em', textTransform:'uppercase',
+        color:'var(--text-muted)', marginBottom:'5px', fontFamily:"'Inter',sans-serif",
+      }}>
+        {label}{required && <span style={{ color:'#ef4444', marginRight:'3px' }}>*</span>}
       </label>
       {children}
-      {error && (
-        <p className="flex items-center gap-1 text-xs text-red-400">
-          <AlertCircle className="w-3 h-3" />{error}
-        </p>
-      )}
+      {error && <p style={{ fontSize:'11px', color:'#f87171', marginTop:'4px' }}>{error}</p>}
     </div>
   )
 }
 
 export default function PharmaciesPage() {
-  const { userProfile }  = useAuthStore()
+  const { userProfile } = useAuthStore()
   const { pharmacies, loading, subscribe, create, update, toggle, remove } = usePharmacyStore()
   const toast = useToastStore()
 
   const [search,       setSearch]       = useState('')
   const [filterRegion, setFilterRegion] = useState('all')
   const [filterActive, setFilterActive] = useState('all')
-  const [page,         setPage]         = useState(1)
-  const PER_PAGE = 15
-
-  const [showForm, setShowForm] = useState(false)
-  const [editId,   setEditId]   = useState(null)
-  const [form,     setForm]     = useState(EMPTY)
-  const [errors,   setErrors]   = useState({})
-  const [saving,   setSaving]   = useState(false)
-  const [confirm,  setConfirm]  = useState(null)
+  const [showForm,     setShowForm]     = useState(false)
+  const [editId,       setEditId]       = useState(null)
+  const [form,         setForm]         = useState(EMPTY)
+  const [errors,       setErrors]       = useState({})
+  const [saving,       setSaving]       = useState(false)
+  const [confirm,      setConfirm]      = useState(null)
 
   useEffect(() => { const u = subscribe(); return u }, [])
 
-  // Filter + paginate
-  const filtered = useMemo(() => {
-    return pharmacies.filter((p) => {
-      const q  = search.toLowerCase()
-      const ms = !q || p.name?.toLowerCase().includes(q) || p.code?.toLowerCase().includes(q) || p.city?.toLowerCase().includes(q)
-      const mr = filterRegion === 'all' || p.region === filterRegion
-      const ma = filterActive === 'all' || (filterActive === 'active' ? p.active !== false : p.active === false)
-      return ms && mr && ma
-    })
-  }, [pharmacies, search, filterRegion, filterActive])
+  const filtered = useMemo(() => pharmacies.filter((p) => {
+    const q  = search.toLowerCase()
+    const ms = !q || p.name?.toLowerCase().includes(q) || p.code?.toLowerCase().includes(q) || p.city?.toLowerCase().includes(q)
+    const mr = filterRegion==='all' || p.region===filterRegion
+    const ma = filterActive==='all' || (filterActive==='active'?p.active!==false:p.active===false)
+    return ms && mr && ma
+  }), [pharmacies, search, filterRegion, filterActive])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
-  const paged      = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-
-  const set = (f, v) => { setForm((p) => ({ ...p, [f]: v })); setErrors((e) => ({ ...e, [f]: undefined })) }
+  const sf = (f,v) => { setForm((p)=>({...p,[f]:v})); setErrors((e)=>({...e,[f]:undefined})) }
 
   const openCreate = () => { setForm(EMPTY); setEditId(null); setErrors({}); setShowForm(true) }
   const openEdit   = (p)  => {
-    setForm({ code: p.code, name: p.name, region: p.region || 'الرياض',
-              city: p.city || '', managerEmail: p.managerEmail || '',
-              managerUid: p.managerUid || '', active: p.active !== false })
+    setForm({ code:p.code, name:p.name, region:p.region||'الرياض',
+              city:p.city||'', managerEmail:p.managerEmail||'', active:p.active!==false })
     setEditId(p.id); setErrors({}); setShowForm(true)
   }
   const closeForm = () => { setShowForm(false); setEditId(null) }
 
   const validate = async () => {
     const e = {}
-    if (!form.code?.trim()) e.code = 'الكود مطلوب'
+    if (!form.code?.trim()) e.code='Code required'
     else {
       const dup = await pharmacyCodeExists(form.code.trim(), editId)
-      if (dup) e.code = 'هذا الكود مستخدم مسبقاً'
+      if (dup) e.code='Code already in use'
     }
-    if (!form.name?.trim()) e.name = 'الاسم مطلوب'
-    if (!form.region)        e.region = 'المنطقة مطلوبة'
+    if (!form.name?.trim()) e.name='Name required'
+    if (!form.region)       e.region='Region required'
     return e
   }
 
@@ -104,210 +88,179 @@ export default function PharmaciesPage() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setSaving(true)
     try {
-      if (editId) {
-        await update(editId, form, userProfile?.uid, userProfile?.role)
-        toast.success('تم تحديث بيانات الفرع')
-      } else {
-        await create(form, userProfile?.uid, userProfile?.role)
-        toast.success('تم إنشاء الفرع بنجاح')
-      }
+      if (editId) { await update(editId, form, userProfile?.uid, userProfile?.role); toast.success('Branch updated') }
+      else        { await create(form, userProfile?.uid, userProfile?.role); toast.success('Branch created') }
       closeForm()
-    } catch (e) {
-      toast.error(e.message)
-    } finally { setSaving(false) }
+    } catch (e) { toast.error(e.message) }
+    finally { setSaving(false) }
   }
 
-  const handleToggle = async (id) => {
-    try {
-      await toggle(id, userProfile?.uid, userProfile?.role)
-      toast.info('تم تغيير حالة الفرع')
-    } catch (e) { toast.error(e.message) }
-  }
+  const stats = useMemo(() => ({
+    total:   pharmacies.length,
+    active:  pharmacies.filter((p) => p.active !== false).length,
+    regions: [...new Set(pharmacies.map((p) => p.region).filter(Boolean))].length,
+  }), [pharmacies])
 
-  const handleDelete = async (id) => {
-    try {
-      await remove(id, userProfile?.uid, userProfile?.role)
-      toast.success('تم حذف الفرع')
-    } catch (e) { toast.error(e.message) }
-    setConfirm(null)
-  }
+  // Columns
+  const columns = [
+    {
+      key:'code', label:'Code', sortable:true, width:'80px',
+      render:(v)=>(
+        <code style={{
+          fontSize:'11px', fontFamily:'monospace',
+          background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)',
+          padding:'1px 6px', borderRadius:'4px', color:'var(--brand-400)',
+        }}>{v}</code>
+      ),
+    },
+    {
+      key:'name', label:'Branch Name', primary:true, sortable:true,
+      render:(v, row)=>(
+        <div>
+          <div style={{ fontSize:'12.5px', fontWeight:500, color:'var(--text-primary)' }}>{v}</div>
+          {row.city && (
+            <div style={{ fontSize:'10px', color:'var(--text-muted)', display:'flex', alignItems:'center', gap:'3px', marginTop:'1px' }}>
+              <MapPin style={{ width:9, height:9 }} />{row.city}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    { key:'region', label:'Region', sortable:true, render:(v)=><span style={{ fontSize:'12px' }}>{v||'—'}</span> },
+    {
+      key:'active', label:'Status', align:'center', sortable:true,
+      render:(v)=><StatusPill status={v!==false?'active':'inactive'} label={v!==false?'Active':'Inactive'} />,
+    },
+    {
+      key:'_actions', label:'', align:'center', width:'100px',
+      render:(_,row)=>(
+        <RowActions actions={[
+          { label:'Edit', onClick:()=>openEdit(row) },
+          { label:row.active!==false?'Deactivate':'Activate',
+            onClick:async ()=>{
+              try { await toggle(row.id, userProfile?.uid, userProfile?.role); toast.info('Status updated') }
+              catch(e){ toast.error(e.message) }
+            }, secondary:true },
+          { label:'Delete', onClick:()=>setConfirm({id:row.id, name:row.name}), secondary:true, danger:true },
+        ]} />
+      ),
+    },
+  ]
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Building2 className="w-6 h-6 text-brand-400" /> إدارة الفروع
+          <h1 style={{ fontSize:'15px', fontWeight:600, letterSpacing:'-0.02em', color:'var(--text-primary)', fontFamily:"'Inter',sans-serif" }}>
+            Pharmacies
           </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {pharmacies.length} فرع · {pharmacies.filter((p) => p.active !== false).length} نشط
+          <p style={{ fontSize:'12px', color:'var(--text-muted)', marginTop:'2px' }}>
+            {stats.total} branches · {stats.active} active · {stats.regions} regions
           </p>
         </div>
-        <button onClick={openCreate} className="btn btn-primary gap-2">
-          <Plus className="w-4 h-4" /> إضافة فرع
+        <button onClick={openCreate} className="btn btn-primary btn-sm" style={{ gap:'6px' }}>
+          <Plus style={{ width:13, height:13 }} /> Add Branch
         </button>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            placeholder="بحث بالاسم أو الكود أو المدينة..." className="pr-9 text-sm" />
+      <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+        <div style={{ position:'relative', flex:'1', minWidth:'200px', maxWidth:'280px' }}>
+          <Search style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', width:13, height:13, color:'var(--text-muted)', pointerEvents:'none' }} />
+          <input value={search} onChange={(e)=>setSearch(e.target.value)}
+            placeholder="Search by name, code or city..."
+            style={{ paddingRight:'32px', height:'34px', fontSize:'13px' }} />
         </div>
-        <select value={filterRegion} onChange={(e) => { setFilterRegion(e.target.value); setPage(1) }} className="text-sm">
-          <option value="all">كل المناطق</option>
-          {SA_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+        <select value={filterRegion} onChange={(e)=>setFilterRegion(e.target.value)} style={{ height:'34px', fontSize:'12px', width:'auto', flex:'none' }}>
+          <option value="all">All Regions</option>
+          {SA_REGIONS.map((r)=><option key={r} value={r}>{r}</option>)}
         </select>
-        <select value={filterActive} onChange={(e) => { setFilterActive(e.target.value); setPage(1) }} className="text-sm">
-          <option value="all">كل الحالات</option>
-          <option value="active">نشط</option>
-          <option value="inactive">متوقف</option>
+        <select value={filterActive} onChange={(e)=>setFilterActive(e.target.value)} style={{ height:'34px', fontSize:'12px', width:'auto', flex:'none' }}>
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
         </select>
       </div>
 
-      {/* Table */}
-      {loading ? <SkeletonTable rows={8} /> :
-       paged.length === 0 ? (
-        <EmptyState icon={Building2} title="لا توجد فروع"
-          description="أضف فرعاً جديداً أو غيّر معايير البحث"
-          action={<button onClick={openCreate} className="btn btn-primary btn-sm gap-2"><Plus className="w-4 h-4" />إضافة فرع</button>} />
-      ) : (
-        <>
-          <div className="tbl-wrap overflow-x-auto">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>الكود</th>
-                  <th>الاسم</th>
-                  <th className="hidden md:table-cell">المنطقة</th>
-                  <th className="hidden md:table-cell">المدينة</th>
-                  <th>الحالة</th>
-                  <th className="text-center">إجراء</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.map((p) => (
-                  <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}>
-                    <td><code className="text-xs bg-slate-800 px-2 py-0.5 rounded text-brand-400">{p.code}</code></td>
-                    <td><span className="text-sm font-medium text-slate-200">{p.name}</span></td>
-                    <td className="hidden md:table-cell text-sm text-slate-400 flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 inline ml-1 text-slate-600" />{p.region}
-                    </td>
-                    <td className="hidden md:table-cell text-sm text-slate-400">{p.city || '—'}</td>
-                    <td>
-                      <span className={`badge text-xs ${
-                        p.active !== false
-                          ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                          : 'bg-red-500/10 text-red-400 border-red-500/20'
-                      }`}>
-                        {p.active !== false ? 'نشط' : 'متوقف'}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => openEdit(p)} className="btn btn-ghost btn-icon btn-sm" title="تعديل">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => handleToggle(p.id)} className="btn btn-ghost btn-icon btn-sm" title="تفعيل/إيقاف">
-                          {p.active !== false
-                            ? <ToggleRight className="w-4 h-4 text-brand-400" />
-                            : <ToggleLeft className="w-4 h-4 text-slate-500" />}
-                        </button>
-                        <button onClick={() => setConfirm({ id: p.id, name: p.name })}
-                          className="btn btn-ghost btn-icon btn-sm hover:text-red-400" title="حذف">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <DataTable columns={columns} rows={filtered} loading={loading}
+        emptyText="No branches found"
+        emptySubtext={search ? `No results for "${search}"` : 'Add your first branch to get started'}
+      />
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-slate-500">
-              <span>{filtered.length} فرع · صفحة {page} من {totalPages}</span>
-              <div className="flex gap-2">
-                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="btn btn-ghost btn-sm">السابق</button>
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map((n) => (
-                  <button key={n} onClick={() => setPage(n)}
-                    className={`btn btn-sm ${page === n ? 'btn-primary' : 'btn-ghost'}`}>{n}</button>
-                ))}
-                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="btn btn-ghost btn-sm">التالي</button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Form Modal */}
+      {/* Form modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeForm} />
-          <div className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg
-                          max-h-[90vh] overflow-y-auto shadow-2xl animate-scale-in">
-            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-base font-bold text-white">{editId ? 'تعديل الفرع' : 'فرع جديد'}</h2>
-              <button onClick={closeForm} className="btn btn-ghost btn-icon"><X className="w-5 h-5" /></button>
+        <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }} onClick={closeForm} />
+          <div style={{
+            position:'relative', width:'100%', maxWidth:'400px',
+            background:'var(--bg-elevated)', border:'1px solid var(--border-strong)',
+            borderRadius:'12px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)',
+            overflow:'hidden', animation:'scaleIn 0.2s ease-out both',
+          }}>
+            <div style={{ padding:'14px 16px', borderBottom:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ fontSize:'14px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'-0.01em' }}>
+                {editId ? 'Edit Branch' : 'New Branch'}
+              </div>
+              <button onClick={closeForm} className="btn btn-ghost btn-icon" style={{ width:28, height:28 }}>
+                <X style={{ width:14, height:14 }} />
+              </button>
             </div>
-            <div className="px-6 py-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="كود الفرع" required error={errors.code}>
-                  <input value={form.code} onChange={(e) => set('code', e.target.value.toUpperCase())}
-                    placeholder="5074" dir="ltr" disabled={!!editId}
-                    className={editId ? 'opacity-60 cursor-not-allowed' : ''} />
-                </Field>
-                <Field label="اسم الفرع" required error={errors.name}>
-                  <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="صيدلية الأثير" />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="المنطقة" required error={errors.region}>
-                  <select value={form.region} onChange={(e) => set('region', e.target.value)}>
-                    {SA_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            <div style={{ padding:'16px', overflowY:'auto', maxHeight:'70vh' }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                <F label="Branch Code" required error={errors.code}>
+                  <input value={form.code} onChange={(e)=>sf('code',e.target.value.toUpperCase())}
+                    placeholder="5074" dir="ltr"
+                    disabled={!!editId} style={{ height:'34px', fontSize:'13px', opacity:editId?0.5:1 }} />
+                </F>
+                <F label="Region" required error={errors.region}>
+                  <select value={form.region} onChange={(e)=>sf('region',e.target.value)} style={{ height:'34px', fontSize:'12px' }}>
+                    {SA_REGIONS.map((r)=><option key={r} value={r}>{r}</option>)}
                   </select>
-                </Field>
-                <Field label="المدينة">
-                  <input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="الدمام" />
-                </Field>
+                </F>
               </div>
-              <Field label="بريد مدير الفرع">
-                <input type="email" dir="ltr" value={form.managerEmail}
-                  onChange={(e) => set('managerEmail', e.target.value)}
-                  placeholder="manager@company.com" />
-              </Field>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-sm text-slate-300">الحالة</span>
-                <button type="button" onClick={() => set('active', !form.active)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm transition-all ${
-                    form.active
-                      ? 'bg-brand-500/15 border-brand-500/30 text-brand-300'
-                      : 'bg-slate-800 border-slate-700 text-slate-500'
-                  }`}>
-                  {form.active ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                  {form.active ? 'نشط' : 'متوقف'}
+              <F label="Branch Name" required error={errors.name}>
+                <input value={form.name} onChange={(e)=>sf('name',e.target.value)} placeholder="صيدلية الأثير" style={{ height:'34px', fontSize:'13px' }} />
+              </F>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                <F label="City">
+                  <input value={form.city} onChange={(e)=>sf('city',e.target.value)} placeholder="الدمام" style={{ height:'34px', fontSize:'13px' }} />
+                </F>
+                <F label="Manager Email">
+                  <input type="email" dir="ltr" value={form.managerEmail} onChange={(e)=>sf('managerEmail',e.target.value)} placeholder="mgr@co.com" style={{ height:'34px', fontSize:'13px' }} />
+                </F>
+              </div>
+              <F label="Status">
+                <div style={{ display:'flex', gap:'6px' }}>
+                  {[{v:true,l:'Active'},{v:false,l:'Inactive'}].map((s)=>(
+                    <button key={String(s.v)} type="button" onClick={()=>sf('active',s.v)}
+                      style={{
+                        flex:1, height:'32px', borderRadius:'7px', fontSize:'12px',
+                        border:`1px solid ${form.active===s.v?(s.v?'var(--border-brand)':'rgba(239,68,68,0.2)'):'var(--border-subtle)'}`,
+                        background:form.active===s.v?(s.v?'var(--bg-active)':'rgba(239,68,68,0.08)'):'var(--bg-overlay)',
+                        color:form.active===s.v?(s.v?'var(--brand-300)':'#f87171'):'var(--text-muted)',
+                        cursor:'pointer', transition:'all 0.12s',
+                      }}>
+                      {s.l}
+                    </button>
+                  ))}
+                </div>
+              </F>
+              <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
+                <button onClick={closeForm} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>Cancel</button>
+                <button onClick={handleSave} disabled={saving} className="btn btn-primary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                  {saving ? <><Loader2 style={{ width:13, height:13, animation:'spin 1s linear infinite' }} />Saving...</> : editId ? 'Save Changes' : 'Create Branch'}
                 </button>
               </div>
-            </div>
-            <div className="px-6 pb-5 flex gap-3">
-              <button onClick={closeForm} className="btn btn-secondary flex-1">إلغاء</button>
-              <button onClick={handleSave} disabled={saving} className="btn btn-primary flex-1 gap-2">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {editId ? 'حفظ التعديلات' : 'إنشاء الفرع'}
-              </button>
             </div>
           </div>
         </div>
       )}
 
-      <ConfirmModal open={!!confirm} onClose={() => setConfirm(null)}
-        onConfirm={() => handleDelete(confirm?.id)}
-        title="حذف الفرع" message={`هل تريد حذف "${confirm?.name}"؟ لا يمكن التراجع.`}
-        confirmLabel="حذف" danger />
+      <ConfirmModal open={!!confirm} onClose={()=>setConfirm(null)}
+        onConfirm={async()=>{ try{ await remove(confirm.id,userProfile?.uid,userProfile?.role); toast.success('Branch deleted') }catch(e){toast.error(e.message)} setConfirm(null) }}
+        title="Delete Branch" message={`Delete "${confirm?.name}"? This cannot be undone.`}
+        confirmLabel="Delete" danger />
     </div>
   )
 }

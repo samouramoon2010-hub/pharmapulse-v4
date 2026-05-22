@@ -11,13 +11,19 @@ import {
 
 // ── Collection names ─────────────────────────────────────────
 export const COL = {
-  USERS:         'users',
-  PHARMACIES:    'pharmacies',
-  KPI_ENTRIES:   'kpi_entries',
-  TARGETS:       'targets',
-  AUDIT_LOGS:    'audit_logs',
-  NOTIFICATIONS: 'notifications',
-  LEADERBOARD:   'leaderboard',
+  USERS:              'users',
+  PHARMACIES:         'pharmacies',
+  KPI_ENTRIES:        'kpi_entries',
+  TARGETS:            'targets',
+  AUDIT_LOGS:         'audit_logs',
+  NOTIFICATIONS:      'notifications',
+  LEADERBOARD:        'leaderboard',
+  // Historical Data Layer V1
+  DAILY_SUMMARIES:    'daily_summaries',
+  MONTHLY_SUMMARIES:  'monthly_summaries',
+  FORECAST_SNAPSHOTS: 'forecast_snapshots',
+  RISK_SNAPSHOTS:     'risk_snapshots',
+  RANKING_HISTORY:    'ranking_history',
 }
 
 // ── Config from .env ─────────────────────────────────────────

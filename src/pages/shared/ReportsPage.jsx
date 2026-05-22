@@ -1,310 +1,410 @@
 // ============================================================
-// Reports Page — daily/weekly/monthly + CSV + Excel export
+// Reports Page — connected to current Firestore schema
+// Uses: kpiStore entries/targets, pharmacyStore, Engine V1
 // ============================================================
 import React, { useEffect, useMemo, useState } from 'react'
-import { FileText, Download, Calendar, BarChart2, TrendingUp, Building2, ChevronDown, FileSpreadsheet } from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
-import { useKpiStore } from '../../store/kpiStore'
-import { useBranchStore } from '../../store/branchStore'
-import { useTeamStore } from '../../store/teamStore'
-import PerformanceChart from '../../components/charts/PerformanceChart'
-import EmptyState from '../../components/ui/EmptyState'
-import { useToastStore } from '../../components/ui/Toast'
-import { formatKpiValue, getAchievementColor, currentMonthRange, currentWeekRange, todayStr } from '../../utils/helpers'
-import { DUMMY_BRANCHES } from '../../data/dummyData'
+import {
+  FileText, Download, Calendar, BarChart2,
+  TrendingUp, Building2, FileSpreadsheet,
+} from 'lucide-react'
+import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
+import {
+  AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+import { useAuthStore }     from '../../store/authStore'
+import { useKpiStore }      from '../../store/kpiStore'
+import { usePharmacyStore } from '../../store/pharmacyStore'
+import { useToastStore }    from '../../components/ui/Toast'
+import EmptyState           from '../../components/ui/EmptyState'
+import { SkeletonChart }    from '../../components/ui/SkeletonCard'
+import {
+  getTrafficLight, TRAFFIC_COLORS,
+  computeAchievementPct, sumKpi, getDayProgress,
+  computeOverallAchievement, computeKpiStats,
+} from '../../engine'
 
-const REPORT_TYPES = [
-  { id: 'daily',    label: 'يومي',    icon: Calendar,   color: '#1a9a7e' },
-  { id: 'weekly',   label: 'أسبوعي',  icon: BarChart2,   color: '#6366f1' },
-  { id: 'monthly',  label: 'شهري',    icon: TrendingUp,  color: '#f59e0b' },
+// ── Constants ─────────────────────────────────────────────────
+const KPI_FIELDS = [
+  { key:'wasfaty',      targetKey:'wasfatyTarget',   label:'Wasfaty',      color:'#6366f1' },
+  { key:'omni',         targetKey:'omniTarget',       label:'OmniHealth',   color:'#ef4444' },
+  { key:'wellness',     targetKey:'wellnessTarget',   label:'Wellness',     color:'#f59e0b' },
+  { key:'basket',       targetKey:'basketTarget',     label:'Basket',       color:'#22c55e' },
+  { key:'crossSelling', targetKey:'crossSellTarget',  label:'Cross Sell',   color:'#8b5cf6' },
 ]
 
+const REPORT_TYPES = [
+  { id:'daily',   label:'Today',        icon: Calendar   },
+  { id:'weekly',  label:'Last 7 days',  icon: BarChart2  },
+  { id:'monthly', label:'This Month',   icon: TrendingUp },
+]
+
+function todayStr() { return format(new Date(), 'yyyy-MM-dd') }
+
+function getDateRange(type) {
+  const today = new Date()
+  switch (type) {
+    case 'daily':   return { from: todayStr(), to: todayStr() }
+    case 'weekly':  return { from: format(subDays(today, 6), 'yyyy-MM-dd'), to: todayStr() }
+    case 'monthly': return {
+      from: format(startOfMonth(today), 'yyyy-MM-dd'),
+      to:   format(endOfMonth(today),   'yyyy-MM-dd'),
+    }
+    default: return { from: todayStr(), to: todayStr() }
+  }
+}
+
+// Recharts tooltip
+const ChartTip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{
+      background:'var(--bg-overlay)', border:'1px solid var(--border-default)',
+      borderRadius:'8px', padding:'8px 12px',
+      boxShadow:'0 8px 24px rgba(0,0,0,0.4)', fontSize:'11px',
+      fontFamily:"'Inter', monospace",
+    }}>
+      <p style={{ color:'var(--text-muted)', marginBottom:'4px' }}>{label}</p>
+      {payload.map((p, i) => (
+        <div key={i} style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+          <div style={{ width:6, height:6, borderRadius:'50%', background:p.color }} />
+          <span style={{ color:'var(--text-primary)', fontWeight:600, fontVariantNumeric:'tabular-nums' }}>
+            {p.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function ReportsPage() {
-  const { userProfile } = useAuthStore()
-  const { templates, entries, subscribeTemplates, subscribeAllEntries } = useKpiStore()
-  const { branches, subscribeBranches } = useBranchStore()
-  const { members, subscribeAllMembers } = useTeamStore()
+  const { userProfile }  = useAuthStore()
+  const {
+    entries, targets,
+    subscribeAllEntries, subscribePharmacyEntries,
+    subscribeAllTargets, subscribeMyTargets,
+  } = useKpiStore()
+  const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const toast = useToastStore()
 
-  const [reportType,    setReportType]    = useState('daily')
-  const [selectedBranch, setSelectedBranch] = useState(userProfile?.branchId || 'all')
-  const [customFrom,    setCustomFrom]    = useState('')
-  const [customTo,      setCustomTo]      = useState('')
-  const [useCustom,     setUseCustom]     = useState(false)
+  const [reportType,     setReportType]     = useState('monthly')
+  const [selectedBranch, setSelectedBranch] = useState('all')
+  const [customFrom,     setCustomFrom]     = useState('')
+  const [customTo,       setCustomTo]       = useState('')
+  const [useCustom,      setUseCustom]      = useState(false)
+  const [loading,        setLoading]        = useState(true)
+
+  const role      = userProfile?.role
+  const isAdmin   = role === 'admin'
+  const isManager = ['admin','manager'].includes(role)
+  const pharmacyId = userProfile?.pharmacyId
+  const dp = getDayProgress()
 
   useEffect(() => {
-    const u1 = subscribeTemplates()
-    const u2 = subscribeAllEntries()
-    const u3 = subscribeBranches()
-    const u4 = subscribeAllMembers()
-    return () => { u1(); u2(); u3(); u4() }
-  }, [])
+    const u1 = subPh()
+    let u2 = () => {}, u3 = () => {}
+    if (isAdmin) {
+      u2 = subscribeAllEntries()
+      u3 = subscribeAllTargets()
+    } else if (pharmacyId) {
+      u2 = subscribePharmacyEntries(pharmacyId)
+      u3 = subscribeMyTargets(pharmacyId)
+    }
+    const t = setTimeout(() => setLoading(false), 600)
+    return () => { u1(); u2?.(); u3?.(); clearTimeout(t) }
+  }, [userProfile?.uid])
 
   const today = todayStr()
-  const { from: weekFrom,  to: weekTo  } = currentWeekRange()
-  const { from: monthFrom, to: monthTo } = currentMonthRange()
-
+  const baseRange = getDateRange(reportType)
   const dateRange = useCustom && customFrom && customTo
     ? { from: customFrom, to: customTo }
-    : { daily: { from: today, to: today }, weekly: { from: weekFrom, to: weekTo }, monthly: { from: monthFrom, to: monthTo } }[reportType]
+    : baseRange
 
-  const isManager = ['admin','area_manager','store_manager'].includes(userProfile?.role)
-  const activeBranches = branches.length ? branches : DUMMY_BRANCHES
-
-  // Filtered entries
+  // Filter entries to date range + branch
   const rangeEntries = useMemo(() =>
     entries.filter((e) => {
       const inRange  = e.date >= dateRange.from && e.date <= dateRange.to
-      const inBranch = selectedBranch === 'all' || e.branchId === selectedBranch
+      const inBranch = selectedBranch === 'all' || e.pharmacyId === selectedBranch
       return inRange && inBranch
-    }), [entries, dateRange, selectedBranch])
+    }),
+    [entries, dateRange, selectedBranch]
+  )
 
-  const overallAchievement = useMemo(() =>
-    rangeEntries.length ? Math.round(rangeEntries.reduce((s,e)=>s+e.achievement,0)/rangeEntries.length) : 0,
-    [rangeEntries])
+  // Current month for targets
+  const currentMonth = format(new Date(), 'yyyy-MM')
 
-  // Per-KPI summary
-  const kpiSummary = useMemo(() =>
-    templates.filter((t) => t.active && t.type !== 'formula').map((kpi) => {
-      const ke = rangeEntries.filter((e) => e.kpiId === kpi.id)
-      const total = ke.reduce((s,e)=>s+e.value,0)
-      const avg   = ke.length ? Math.round(ke.reduce((s,e)=>s+e.achievement,0)/ke.length) : 0
-      return { ...kpi, total, avgAchievement: avg, count: ke.length }
-    }), [templates, rangeEntries])
+  // Per-KPI summary for range
+  const kpiSummary = useMemo(() => {
+    // Find target for each pharmacy
+    const targetMap = {}
+    targets.forEach((t) => { if (t.month === currentMonth) targetMap[t.pharmacyId] = t })
 
-  // Per-branch summary
-  const branchSummary = useMemo(() =>
-    activeBranches.map((b) => {
-      const be  = rangeEntries.filter((e) => e.branchId === b.id)
-      const avg = be.length ? Math.round(be.reduce((s,e)=>s+e.achievement,0)/be.length) : 0
-      return { ...b, achievement: avg, entryCount: be.length }
-    }).sort((a,b)=>b.achievement-a.achievement),
-    [activeBranches, rangeEntries])
+    return KPI_FIELDS.map(({ key, targetKey, label, color }) => {
+      const total      = rangeEntries.reduce((s, e) => s + (Number(e[key]) || 0), 0)
+      const totalTarget = (() => {
+        const branches = selectedBranch === 'all'
+          ? [...new Set(rangeEntries.map((e) => e.pharmacyId))]
+          : [selectedBranch]
+        return branches.reduce((s, pid) => s + (targetMap[pid]?.[targetKey] || 0), 0)
+      })()
+      const achPct   = computeAchievementPct(total, totalTarget)
+      const status   = totalTarget > 0 ? getTrafficLight(achPct, dp.ratio) : null
+      return { key, label, color, total, totalTarget, achPct, status, entryCount: rangeEntries.length }
+    })
+  }, [rangeEntries, targets, selectedBranch, currentMonth, dp])
 
-  // Per-pharmacist summary
-  const pharmacistSummary = useMemo(() => {
-    const all = members.length ? members : []
-    const pharmacists = all.filter((m) => m.role === 'pharmacist')
-    return pharmacists.map((m) => {
-      const uid = m.uid || m.id
-      const me  = rangeEntries.filter((e) => e.userId === uid)
-      const avg = me.length ? Math.round(me.reduce((s,e)=>s+e.achievement,0)/me.length) : 0
-      return { ...m, achievement: avg, entryCount: me.length }
-    }).sort((a,b)=>b.achievement-a.achievement).slice(0,10)
-  }, [members, rangeEntries])
+  // Overall achievement
+  const overallAch = useMemo(() => {
+    const vals = kpiSummary.filter((k) => k.totalTarget > 0).map((k) => k.achPct)
+    return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0
+  }, [kpiSummary])
 
-  // Trend chart
-  const trendData = useMemo(() => {
-    const days = []
-    const from = new Date(dateRange.from)
-    const to   = new Date(dateRange.to)
-    for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
-      const ds = d.toISOString().split('T')[0]
-      const de = rangeEntries.filter((e) => e.date === ds)
-      const avg = de.length ? Math.round(de.reduce((s,e)=>s+e.achievement,0)/de.length) : 0
-      days.push({ date: new Date(d).toLocaleDateString('ar-SA',{day:'2-digit',month:'short'}), value: avg, target: 80 })
-    }
-    return days
-  }, [rangeEntries, dateRange])
+  // Per-branch summary (admin/manager)
+  const branchSummary = useMemo(() => {
+    if (!isManager) return []
+    const targetMap = {}
+    targets.forEach((t) => { if (t.month === currentMonth) targetMap[t.pharmacyId] = t })
+
+    return pharmacies
+      .filter((p) => p.active !== false)
+      .map((ph) => {
+        const be   = rangeEntries.filter((e) => e.pharmacyId === ph.id)
+        const kpiStatsMap = {}
+        KPI_FIELDS.forEach(({ key, targetKey }) => {
+          const actual = be.reduce((s, e) => s + (Number(e[key]) || 0), 0)
+          const target = targetMap[ph.id]?.[targetKey] || 0
+          kpiStatsMap[key] = { achievementPct: computeAchievementPct(actual, target) }
+        })
+        const ach = computeOverallAchievement(kpiStatsMap)
+        return { ...ph, achievement: ach, entryCount: be.length }
+      })
+      .sort((a, b) => b.achievement - a.achievement)
+  }, [pharmacies, rangeEntries, targets, currentMonth, isManager])
+
+  // 14-day trend
+  const trendData = useMemo(() =>
+    Array.from({ length: 14 }, (_, i) => {
+      const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
+      const label = format(subDays(new Date(), 13 - i), 'dd/MM')
+      const de    = entries.filter((e) =>
+        e.date === date && (selectedBranch === 'all' || e.pharmacyId === selectedBranch)
+      )
+      const total = de.reduce((s, e) =>
+        KPI_FIELDS.reduce((ss, { key }) => ss + (Number(e[key]) || 0), s), 0)
+      return { date: label, total }
+    }),
+    [entries, selectedBranch]
+  )
 
   // ── CSV Export ───────────────────────────────────────────────
   const exportCSV = () => {
-    const header = 'التاريخ,الفرع,الصيدلاني,KPI,القيمة,الهدف,الإنجاز%\n'
+    const header = 'Date,Pharmacy,Wasfaty,OmniHealth,Wellness,Basket,CrossSelling\n'
     const rows = rangeEntries.map((e) => {
-      const kpi    = templates.find((t) => t.id === e.kpiId)
-      const branch = activeBranches.find((b) => b.id === e.branchId)
-      const member = members.find((m) => m.uid === e.userId || m.id === e.userId)
-      return `${e.date},${branch?.name||''},${member?.displayName||e.userId},${kpi?.name||e.kpiId},${e.value},${e.target},${e.achievement}%`
+      const ph = pharmacies.find((p) => p.id === e.pharmacyId)
+      return `${e.date},${ph?.name || e.pharmacyId},${e.wasfaty||0},${e.omni||0},${e.wellness||0},${e.basket||0},${e.crossSelling||0}`
     }).join('\n')
-    const blob = new Blob(['\uFEFF'+header+rows], { type:'text/csv;charset=utf-8' })
+    const blob = new Blob(['\uFEFF' + header + rows], { type:'text/csv;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url; a.download = `pharmapulse-${reportType}-${today}.csv`; a.click()
     URL.revokeObjectURL(url)
-    toast.success('تم تصدير ملف CSV')
+    toast.success('CSV exported')
   }
 
-  // ── Excel Export (TSV → .xlsx via blob) ─────────────────────
-  const exportExcel = () => {
-    // Simple HTML table exported as .xls (opens in Excel)
-    const rows = rangeEntries.map((e) => {
-      const kpi    = templates.find((t) => t.id === e.kpiId)
-      const branch = activeBranches.find((b) => b.id === e.branchId)
-      const member = members.find((m) => m.uid === e.userId || m.id === e.userId)
-      return `<tr><td>${e.date}</td><td>${branch?.name||''}</td><td>${member?.displayName||''}</td><td>${kpi?.name||''}</td><td>${e.value}</td><td>${e.target}</td><td>${e.achievement}%</td></tr>`
-    }).join('')
-    const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px;font-family:Arial}</style></head><body><table><tr><th>التاريخ</th><th>الفرع</th><th>الصيدلاني</th><th>KPI</th><th>القيمة</th><th>الهدف</th><th>الإنجاز</th></tr>${rows}</table></body></html>`
-    const blob = new Blob([html], { type:'application/vnd.ms-excel;charset=utf-8' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url; a.download = `pharmapulse-${reportType}-${today}.xls`; a.click()
-    URL.revokeObjectURL(url)
-    toast.success('تم تصدير ملف Excel')
+  const STAT_STYLE = {
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: '10px',
+    padding: '12px 16px',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'16px' }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">التقارير</h1>
-          <p className="text-sm text-slate-400 mt-0.5">{rangeEntries.length} إدخال · {dateRange.from === dateRange.to ? dateRange.from : `${dateRange.from} → ${dateRange.to}`}</p>
+          <h1 style={{ fontSize:'15px', fontWeight:600, letterSpacing:'-0.02em', color:'var(--text-primary)', fontFamily:"'Inter',sans-serif" }}>
+            Reports
+          </h1>
+          <p style={{ fontSize:'12px', color:'var(--text-muted)', marginTop:'2px' }}>
+            {rangeEntries.length} entries · {dateRange.from}{dateRange.from !== dateRange.to ? ` → ${dateRange.to}` : ''}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={exportCSV}   className="btn-secondary text-sm gap-1.5"><Download className="w-4 h-4" /> CSV</button>
-          <button onClick={exportExcel} className="btn-secondary text-sm gap-1.5"><FileSpreadsheet className="w-4 h-4" /> Excel</button>
-          <button onClick={() => toast.info('تصدير PDF قريباً')} className="btn-secondary text-sm gap-1.5 opacity-60">
-            <FileText className="w-4 h-4" /> PDF
+        <div style={{ display:'flex', gap:'6px' }}>
+          <button onClick={exportCSV}
+            style={{ height:'32px', padding:'0 12px', borderRadius:'8px', fontSize:'12px', fontWeight:500, cursor:'pointer', background:'var(--bg-elevated)', border:'1px solid var(--border-default)', color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:'5px' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background='var(--bg-overlay)'; e.currentTarget.style.color='var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background='var(--bg-elevated)'; e.currentTarget.style.color='var(--text-secondary)' }}>
+            <Download style={{ width:13, height:13 }} /> CSV
+          </button>
+          <button onClick={() => toast.info('PDF export — coming soon')}
+            style={{ height:'32px', padding:'0 12px', borderRadius:'8px', fontSize:'12px', fontWeight:500, cursor:'pointer', background:'var(--bg-elevated)', border:'1px solid var(--border-default)', color:'var(--text-muted)', display:'flex', alignItems:'center', gap:'5px', opacity:0.6 }}>
+            <FileText style={{ width:13, height:13 }} /> PDF
           </button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-end">
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">نوع التقرير</label>
-          <div className="flex gap-2">
-            {REPORT_TYPES.map((rt) => (
-              <button key={rt.id} onClick={() => { setReportType(rt.id); setUseCustom(false) }}
-                className="badge transition-all"
-                style={reportType === rt.id && !useCustom
-                  ? { background:`${rt.color}15`, borderColor:`${rt.color}40`, color:rt.color }
-                  : { background:'rgba(30,41,59,0.6)', borderColor:'#334155', color:'#64748b' }}
-              ><rt.icon className="w-3 h-3" />{rt.label}</button>
-            ))}
-          </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-end' }}>
+        {/* Report type */}
+        <div style={{ display:'flex', gap:'2px', background:'var(--bg-hover)', border:'1px solid var(--border-subtle)', borderRadius:'8px', padding:'2px' }}>
+          {REPORT_TYPES.map((rt) => (
+            <button key={rt.id} onClick={() => { setReportType(rt.id); setUseCustom(false) }}
+              style={{
+                height:'28px', padding:'0 10px', borderRadius:'6px', fontSize:'12px', fontWeight:500, cursor:'pointer',
+                background: reportType === rt.id && !useCustom ? 'var(--bg-card)' : 'transparent',
+                border: `1px solid ${reportType === rt.id && !useCustom ? 'var(--border-default)' : 'transparent'}`,
+                color: reportType === rt.id && !useCustom ? 'var(--text-primary)' : 'var(--text-muted)',
+                transition:'all 0.15s',
+              }}>
+              {rt.label}
+            </button>
+          ))}
         </div>
+
+        {/* Branch selector */}
         {isManager && (
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">الفرع</label>
-            <select value={selectedBranch} onChange={(e)=>setSelectedBranch(e.target.value)} className="text-sm">
-              <option value="all">جميع الفروع</option>
-              {activeBranches.map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
+          <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}
+            style={{ height:'34px', fontSize:'12px', minWidth:'140px' }}>
+            <option value="all">All Branches</option>
+            {pharmacies.filter((p) => p.active !== false).map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         )}
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">نطاق مخصص</label>
-          <div className="flex gap-2 items-center">
-            <input type="date" value={customFrom} onChange={(e)=>{setCustomFrom(e.target.value);setUseCustom(true)}} className="text-sm" max={today} />
-            <span className="text-slate-600 text-xs">→</span>
-            <input type="date" value={customTo}   onChange={(e)=>{setCustomTo(e.target.value);setUseCustom(true)}}   className="text-sm" max={today} />
-          </div>
+
+        {/* Custom range */}
+        <div style={{ display:'flex', alignItems:'center', gap:'4px' }}>
+          <input type="date" value={customFrom} max={today} dir="ltr"
+            onChange={(e) => { setCustomFrom(e.target.value); if (customTo) setUseCustom(true) }}
+            style={{ height:'34px', fontSize:'12px', width:'130px' }} />
+          <span style={{ color:'var(--text-muted)', fontSize:'11px' }}>→</span>
+          <input type="date" value={customTo} max={today} dir="ltr"
+            onChange={(e) => { setCustomTo(e.target.value); if (customFrom) setUseCustom(true) }}
+            style={{ height:'34px', fontSize:'12px', width:'130px' }} />
+          {useCustom && (
+            <button onClick={() => { setUseCustom(false); setCustomFrom(''); setCustomTo('') }}
+              style={{ fontSize:'11px', color:'var(--text-muted)', background:'none', border:'none', cursor:'pointer', padding:'0 4px' }}>
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Summary stats */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">
         {[
-          { label:'إنجاز كلي',     value:`${overallAchievement}%`, color:'#1a9a7e' },
-          { label:'إجمالي الإدخالات', value:rangeEntries.length,   color:'#6366f1' },
-          { label:'KPIs',           value:kpiSummary.length,       color:'#f59e0b' },
-          { label:'فروع نشطة',     value:branchSummary.filter((b)=>b.entryCount>0).length, color:'#ec4899' },
-        ].map((s,i)=>(
-          <div key={i} className="kpi-card text-center py-4">
-            <div className="text-2xl font-bold mb-1" style={{color:s.color}}>{s.value}</div>
-            <div className="text-xs text-slate-400">{s.label}</div>
+          { label:'Overall Ach.',  value: `${overallAch}%`,        color: TRAFFIC_COLORS[getTrafficLight(overallAch, dp.ratio)]?.color || 'var(--brand-400)' },
+          { label:'Total Entries', value: rangeEntries.length,     color:'var(--brand-400)' },
+          { label:'Active Branches', value: isAdmin ? branchSummary.filter((b) => b.entryCount > 0).length : '—', color:'#6366f1' },
+          { label:'Days in Range',
+            value: (() => {
+              const d1 = new Date(dateRange.from), d2 = new Date(dateRange.to)
+              return Math.round((d2 - d1) / 86400000) + 1
+            })(),
+            color:'#f59e0b' },
+        ].map((s) => (
+          <div key={s.label} style={STAT_STYLE}>
+            <div style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'5px', fontFamily:"'Inter',sans-serif" }}>
+              {s.label}
+            </div>
+            <div style={{ fontSize:'1.25rem', fontWeight:600, letterSpacing:'-0.03em', fontVariantNumeric:'tabular-nums', color: s.color, fontFamily:"'Inter',sans-serif" }}>
+              {typeof s.value === 'number' ? s.value.toLocaleString() : s.value}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Trend chart */}
-      <div className="kpi-card">
-        <h3 className="text-sm font-semibold text-slate-200 mb-4">اتجاه الإنجاز</h3>
-        {trendData.length === 0
-          ? <EmptyState icon={BarChart2} title="لا توجد بيانات" />
-          : <PerformanceChart data={trendData} dataKey="value" targetKey="target" color="#1a9a7e" height={220} type={reportType==='daily'?'bar':'line'} />
-        }
-      </div>
-
-      {/* KPI table */}
-      <div className="kpi-card">
-        <h3 className="text-sm font-semibold text-slate-200 mb-4">تفاصيل المؤشرات</h3>
-        {kpiSummary.length === 0
-          ? <EmptyState icon={FileText} title="لا توجد بيانات" />
-          : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header text-right">المؤشر</th>
-                    <th className="table-header text-center">الإجمالي</th>
-                    <th className="table-header text-center">الإدخالات</th>
-                    <th className="table-header text-center">متوسط الإنجاز</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kpiSummary.map((k)=>(
-                    <tr key={k.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="table-cell">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:k.color}} />
-                          <span className="text-sm text-slate-300">{k.name}</span>
-                        </div>
-                      </td>
-                      <td className="table-cell text-center text-sm text-slate-300">{formatKpiValue(k.total,k.type,k.unit)}</td>
-                      <td className="table-cell text-center text-sm text-slate-400">{k.count}</td>
-                      <td className="table-cell text-center">
-                        {k.count > 0 ? (
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="w-16 bg-slate-800 rounded-full h-1.5">
-                              <div className="h-full rounded-full" style={{width:`${Math.min(k.avgAchievement,100)}%`,background:k.color}} />
-                            </div>
-                            <span className={`text-xs font-bold ${getAchievementColor(k.avgAchievement)}`}>{k.avgAchievement}%</span>
-                          </div>
-                        ) : <span className="text-slate-700 text-xs">—</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </div>
-
-      {/* Branch breakdown */}
-      {isManager && (
-        <div className="kpi-card">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4">أداء الفروع</h3>
-          <div className="space-y-3">
-            {branchSummary.map((b,idx)=>(
-              <div key={b.id} className="flex items-center gap-3">
-                <span className="text-xs text-slate-600 w-5">{idx+1}</span>
-                <Building2 className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                <span className="text-sm text-slate-300 flex-1">{b.name}</span>
-                <span className="text-xs text-slate-500">{b.entryCount} إدخال</span>
-                <div className="w-24 bg-slate-800 rounded-full h-1.5">
-                  <div className="h-full rounded-full" style={{
-                    width:`${Math.min(b.achievement,100)}%`,
-                    background:b.achievement>=80?'#1a9a7e':b.achievement>=60?'#eab308':'#ef4444',
-                  }} />
+      {/* KPI achievement summary */}
+      <div style={{ ...STAT_STYLE, padding:'16px' }}>
+        <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
+          KPI Achievement — {useCustom ? 'Custom range' : REPORT_TYPES.find((r) => r.id === reportType)?.label}
+        </div>
+        {loading ? (
+          <div style={{ height:80, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', fontSize:'12px' }}>Loading...</div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+            {kpiSummary.map(({ key, label, color, total, totalTarget, achPct, status }) => {
+              const cfg = status ? TRAFFIC_COLORS[status] : null
+              return (
+                <div key={key} style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'5px', width:'90px', flexShrink:0 }}>
+                    <div style={{ width:6, height:6, borderRadius:'50%', background:color, flexShrink:0 }} />
+                    <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{label}</span>
+                  </div>
+                  <div style={{ flex:1, height:'5px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
+                    <div style={{ height:'100%', borderRadius:'99px', background: cfg?.color || color, width:`${Math.min(achPct, 100)}%`, transition:'width 0.6s ease' }} />
+                  </div>
+                  <div style={{ width:'36px', textAlign:'left', fontSize:'11px', fontWeight:600, fontVariantNumeric:'tabular-nums', color: cfg?.color || color }}>
+                    {totalTarget > 0 ? `${achPct}%` : '—'}
+                  </div>
+                  <div style={{ width:'60px', textAlign:'left', fontSize:'10px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
+                    {total.toLocaleString()}
+                  </div>
                 </div>
-                <span className={`text-xs font-bold w-10 text-left ${getAchievementColor(b.achievement)}`}>{b.achievement}%</span>
-              </div>
-            ))}
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 14-day trend */}
+      <div style={{ ...STAT_STYLE, padding:'16px' }}>
+        <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
+          14-Day Entry Volume
+        </div>
+        {loading ? <SkeletonChart height={160} /> : (
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={trendData} margin={{ top:0, right:0, bottom:0, left:-30 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill:'var(--text-muted)', fontSize:10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill:'var(--text-muted)', fontSize:10 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<ChartTip />} />
+              <Bar dataKey="total" radius={[3,3,0,0]} fill="var(--brand-500)" opacity={0.8} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Branch breakdown — manager/admin only */}
+      {isManager && branchSummary.length > 0 && (
+        <div style={{ ...STAT_STYLE, padding:'16px' }}>
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
+            Branch Performance
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
+            {branchSummary.slice(0, 10).map((b, idx) => {
+              const cfg = TRAFFIC_COLORS[getTrafficLight(b.achievement, dp.ratio)]
+              return (
+                <div key={b.id} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                  <span style={{ fontSize:'10px', color:'var(--text-muted)', width:'16px', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>
+                    {idx + 1}
+                  </span>
+                  <Building2 style={{ width:12, height:12, color:'var(--text-muted)', flexShrink:0 }} strokeWidth={1.75} />
+                  <span style={{ flex:1, fontSize:'12px', color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {b.name}
+                  </span>
+                  <span style={{ fontSize:'10px', color:'var(--text-muted)', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>
+                    {b.entryCount}
+                  </span>
+                  <div style={{ width:'80px', height:'4px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden', flexShrink:0 }}>
+                    <div style={{ height:'100%', borderRadius:'99px', background: cfg.color, width:`${Math.min(b.achievement, 100)}%`, transition:'width 0.6s ease' }} />
+                  </div>
+                  <span style={{ fontSize:'11px', fontWeight:600, width:'34px', textAlign:'left', fontVariantNumeric:'tabular-nums', color: cfg.color, flexShrink:0 }}>
+                    {b.achievement}%
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* Top pharmacists */}
-      {pharmacistSummary.length > 0 && (
-        <div className="kpi-card">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4">أداء الصيادلة (أعلى 10)</h3>
-          <div className="space-y-2">
-            {pharmacistSummary.map((m,idx)=>(
-              <div key={m.uid||m.id} className="flex items-center gap-3">
-                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${idx===0?'bg-amber-500/20 text-amber-400':idx===1?'bg-slate-500/20 text-slate-300':'bg-slate-800 text-slate-600'}`}>{idx+1}</span>
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">{m.displayName?.[0]}</div>
-                <span className="flex-1 text-sm text-slate-300 truncate">{m.displayName}</span>
-                <div className="w-20 bg-slate-800 rounded-full h-1.5">
-                  <div className="h-full rounded-full" style={{width:`${Math.min(m.achievement,100)}%`,background:m.achievement>=80?'#1a9a7e':m.achievement>=60?'#eab308':'#ef4444'}} />
-                </div>
-                <span className={`text-xs font-bold w-10 text-left ${getAchievementColor(m.achievement)}`}>{m.achievement}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {rangeEntries.length === 0 && !loading && (
+        <EmptyState icon={FileText}
+          title="No entries for this period"
+          description="Enter KPI data or adjust the date range" />
       )}
     </div>
   )

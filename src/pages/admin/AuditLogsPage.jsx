@@ -1,164 +1,223 @@
 // ============================================================
-// Audit Logs Page — view all system actions
+// Audit Logs — Enterprise DataTable with before/after diff
 // ============================================================
 import React, { useEffect, useState, useMemo } from 'react'
-import { Shield, Search, Filter, ChevronDown } from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
-import { subscribeAuditLogs, AUDIT_ACTION } from '../../services/auditService'
-import EmptyState from '../../components/ui/EmptyState'
-import { COL } from '../../services/firebase'
+import { ShieldCheck, Search, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore'
+import { db, COL } from '../../services/firebase'
+import DataTable, { StatusPill } from '../../components/ui/DataTable'
 
-const ACTION_CONFIG = {
-  [AUDIT_ACTION.LOGIN]:        { label: 'تسجيل دخول',  color: 'text-blue-400',   bg: 'bg-blue-500/10 border-blue-500/20' },
-  [AUDIT_ACTION.LOGOUT]:       { label: 'تسجيل خروج',  color: 'text-slate-400',  bg: 'bg-slate-800 border-slate-700' },
-  [AUDIT_ACTION.CREATE]:       { label: 'إنشاء',        color: 'text-green-400',  bg: 'bg-green-500/10 border-green-500/20' },
-  [AUDIT_ACTION.UPDATE]:       { label: 'تعديل',        color: 'text-amber-400',  bg: 'bg-amber-500/10 border-amber-500/20' },
-  [AUDIT_ACTION.DELETE]:       { label: 'حذف',          color: 'text-red-400',    bg: 'bg-red-500/10 border-red-500/20' },
-  [AUDIT_ACTION.APPROVE]:      { label: 'اعتماد',       color: 'text-brand-400',  bg: 'bg-brand-500/10 border-brand-500/20' },
-  [AUDIT_ACTION.REJECT]:       { label: 'رفض',          color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/20' },
-  [AUDIT_ACTION.IMPORT]:       { label: 'استيراد',      color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
-  [AUDIT_ACTION.BULK_APPROVE]: { label: 'اعتماد جماعي', color: 'text-cyan-400',   bg: 'bg-cyan-500/10 border-cyan-500/20' },
+const ACTION_STYLE = {
+  create:       { label:'Created',  status:'active'  },
+  update:       { label:'Updated',  status:'warning' },
+  delete:       { label:'Deleted',  status:'critical'},
+  login:        { label:'Login',    status:'good'    },
+  logout:       { label:'Logout',   status:'inactive'},
+  import:       { label:'Import',   status:'info'    },
+  bulk_approve: { label:'Approved', status:'active'  },
 }
 
-function timeAgo(ts) {
-  if (!ts) return '—'
-  const d    = typeof ts === 'string' ? new Date(ts) : ts.toDate?.() || new Date(ts)
-  const diff = Date.now() - d.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1)  return 'الآن'
-  if (mins < 60) return `منذ ${mins} د`
-  const hrs = Math.floor(mins / 60)
-  if (hrs  < 24) return `منذ ${hrs} س`
-  return d.toLocaleDateString('ar-SA')
+function DiffRow({ label, before, after }) {
+  const changed = JSON.stringify(before) !== JSON.stringify(after)
+  if (!changed && before === undefined) return null
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'80px 1fr 1fr', gap:'8px', fontSize:'11px', padding:'3px 0', borderBottom:'1px solid var(--border-subtle)' }}>
+      <span style={{ color:'var(--text-muted)', fontFamily:"'Inter',sans-serif", fontWeight:500 }}>{label}</span>
+      <span style={{ color: changed ? '#f87171' : 'var(--text-muted)', fontFamily:'monospace', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {before !== undefined ? JSON.stringify(before) : '—'}
+      </span>
+      <span style={{ color: changed ? '#4ade80' : 'var(--text-muted)', fontFamily:'monospace', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {after !== undefined ? JSON.stringify(after) : '—'}
+      </span>
+    </div>
+  )
+}
+
+function ExpandedLog({ log }) {
+  const before = log.before || {}
+  const after  = log.after  || {}
+  const keys   = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((k) => !['createdAt','updatedAt','timestamp'].includes(k))
+
+  return (
+    <div style={{
+      padding:'12px 16px', background:'var(--bg-overlay)',
+      borderBottom:'1px solid var(--border-subtle)',
+    }}>
+      {keys.length > 0 ? (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'80px 1fr 1fr', gap:'8px', marginBottom:'6px' }}>
+            <span style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)' }}>Field</span>
+            <span style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'#f87171' }}>Before</span>
+            <span style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'#4ade80' }}>After</span>
+          </div>
+          {keys.map((k) => (
+            <DiffRow key={k} label={k} before={before[k]} after={after[k]} />
+          ))}
+        </div>
+      ) : (
+        <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>No field changes recorded</span>
+      )}
+    </div>
+  )
 }
 
 export default function AuditLogsPage() {
-  const { userProfile } = useAuthStore()
-  const [logs,        setLogs]        = useState([])
-  const [search,      setSearch]      = useState('')
-  const [filterAction, setFilterAction] = useState('all')
-  const [filterCol,   setFilterCol]   = useState('all')
-  const [expanded,    setExpanded]    = useState(null)
+  const [logs,       setLogs]     = useState([])
+  const [loading,    setLoading]  = useState(true)
+  const [search,     setSearch]   = useState('')
+  const [expanded,   setExpanded] = useState(null)
 
   useEffect(() => {
-    const unsub = subscribeAuditLogs({ n: 200 })((data) => setLogs(data))
-    return unsub
+    const q = query(collection(db, COL.AUDIT_LOGS), orderBy('timestamp', 'desc'), limit(200))
+    const u = onSnapshot(q, (snap) => {
+      setLogs(snap.docs.map((d) => ({ id:d.id, ...d.data() })))
+      setLoading(false)
+    }, () => setLoading(false))
+    return u
   }, [])
 
-  const filtered = useMemo(() => logs.filter((l) => {
-    const matchSearch = !search ||
-      l.userId?.includes(search) ||
-      l.docId?.includes(search) ||
-      l.action?.includes(search)
-    const matchAction = filterAction === 'all' || l.action === filterAction
-    const matchCol    = filterCol    === 'all' || l.collection === filterCol
-    return matchSearch && matchAction && matchCol
-  }), [logs, search, filterAction, filterCol])
+  const filtered = useMemo(() => {
+    if (!search) return logs
+    const q = search.toLowerCase()
+    return logs.filter((l) =>
+      l.action?.includes(q) ||
+      l.userId?.includes(q) ||
+      l.collection?.includes(q)
+    )
+  }, [logs, search])
 
-  const collections = [...new Set(logs.map((l) => l.collection).filter(Boolean))]
+  const fmt = (ts) => {
+    if (!ts) return '—'
+    const d = ts.toDate?.() || new Date(ts)
+    return d.toLocaleString('en-GB', { dateStyle:'short', timeStyle:'short' })
+  }
+
+  const columns = [
+    {
+      key:'timestamp', label:'Time', sortable:true, width:'130px',
+      render:(v)=>(
+        <span style={{ fontSize:'11px', fontFamily:'monospace', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
+          {fmt(v)}
+        </span>
+      ),
+    },
+    {
+      key:'action', label:'Action', sortable:true, width:'90px',
+      render:(v)=>{
+        const cfg = ACTION_STYLE[v] || { label:v, status:'neutral' }
+        return <StatusPill status={cfg.status} label={cfg.label} />
+      },
+    },
+    { key:'collection', label:'Collection', sortable:true,
+      render:(v)=><span style={{ fontSize:'11px', fontFamily:'monospace', color:'var(--text-secondary)' }}>{v||'—'}</span> },
+    { key:'userId', label:'User', sortable:true,
+      render:(v)=><span style={{ fontSize:'11px', fontFamily:'monospace', color:'var(--text-muted)' }}>{v?.slice(0,12)||'—'}…</span> },
+    { key:'userRole', label:'Role', sortable:true,
+      render:(v)=><span style={{ fontSize:'11px', color:'var(--text-muted)' }}>{v||'—'}</span> },
+    {
+      key:'_expand', label:'', align:'center', width:'60px',
+      render:(_, row)=>(
+        <button onClick={(e)=>{ e.stopPropagation(); setExpanded(expanded===row.id?null:row.id) }}
+          style={{
+            display:'flex', alignItems:'center', gap:'4px',
+            fontSize:'11px', color:'var(--text-muted)',
+            background:'transparent', border:'none', cursor:'pointer',
+            padding:'2px 6px', borderRadius:'4px', transition:'color 0.12s',
+          }}
+          onMouseEnter={(e)=>e.currentTarget.style.color='var(--text-primary)'}
+          onMouseLeave={(e)=>e.currentTarget.style.color='var(--text-muted)'}>
+          {expanded===row.id
+            ? <ChevronUp style={{ width:12, height:12 }} />
+            : <ChevronDown style={{ width:12, height:12 }} />}
+        </button>
+      ),
+    },
+  ]
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Shield className="w-6 h-6 text-brand-400" /> سجل التدقيق
-        </h1>
-        <p className="text-sm text-slate-400 mt-0.5">{logs.length} عملية مسجّلة</p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48 max-w-xs">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="بحث بالمستخدم أو الوثيقة..." className="pr-9 text-sm" />
+    <div className="max-w-5xl mx-auto space-y-5">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div>
+          <h1 style={{ fontSize:'15px', fontWeight:600, letterSpacing:'-0.02em', color:'var(--text-primary)', fontFamily:"'Inter',sans-serif" }}>
+            Audit Log
+          </h1>
+          <p style={{ fontSize:'12px', color:'var(--text-muted)', marginTop:'2px' }}>
+            {logs.length} events recorded
+          </p>
         </div>
-        <select value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="text-sm">
-          <option value="all">كل العمليات</option>
-          {Object.entries(AUDIT_ACTION).map(([k, v]) => (
-            <option key={v} value={v}>{ACTION_CONFIG[v]?.label || v}</option>
-          ))}
-        </select>
-        <select value={filterCol} onChange={(e) => setFilterCol(e.target.value)} className="text-sm">
-          <option value="all">كل المجموعات</option>
-          {collections.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', color:'var(--text-muted)' }}>
+          <Clock style={{ width:12, height:12 }} />
+          Real-time
+        </div>
       </div>
 
-      {/* Table */}
-      {filtered.length === 0
-        ? <EmptyState icon={Shield} title="لا توجد سجلات" description="العمليات ستظهر هنا عند تنفيذها" />
-        : (
-          <div className="table-container">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header text-right">الوقت</th>
-                  <th className="table-header text-right">العملية</th>
-                  <th className="table-header text-right">المجموعة</th>
-                  <th className="table-header text-right">المستخدم</th>
-                  <th className="table-header text-center">التفاصيل</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((log) => {
-                  const cfg = ACTION_CONFIG[log.action] || {}
-                  const isExp = expanded === log.id
-                  return (
-                    <React.Fragment key={log.id}>
-                      <tr className="hover:bg-slate-800/20 transition-colors">
-                        <td className="table-cell text-xs text-slate-500 whitespace-nowrap">{timeAgo(log.timestamp)}</td>
-                        <td className="table-cell">
-                          <span className={`badge text-xs ${cfg.bg || ''} ${cfg.color || ''}`}>{cfg.label || log.action}</span>
-                        </td>
-                        <td className="table-cell text-xs text-slate-400">{log.collection || '—'}</td>
-                        <td className="table-cell">
-                          <div className="text-xs text-slate-300">{log.userRole || '—'}</div>
-                          <div className="text-xs text-slate-600 truncate max-w-[120px]">{log.userId || '—'}</div>
-                        </td>
-                        <td className="table-cell text-center">
-                          {(log.before || log.after || log.meta) && (
-                            <button onClick={() => setExpanded(isExp ? null : log.id)}
-                              className="text-slate-500 hover:text-brand-400 transition-colors">
-                              <ChevronDown className={`w-4 h-4 transition-transform ${isExp ? 'rotate-180' : ''}`} />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      {isExp && (
-                        <tr>
-                          <td colSpan={5} className="px-4 pb-3">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
-                              {log.meta && Object.keys(log.meta).length > 0 && (
-                                <div className="bg-slate-800/40 rounded-lg p-3 text-xs">
-                                  <p className="text-slate-400 font-semibold mb-1">Meta</p>
-                                  <pre className="text-slate-500 overflow-auto max-h-32">{JSON.stringify(log.meta, null, 2)}</pre>
-                                </div>
-                              )}
-                              {log.before && (
-                                <div className="bg-red-500/5 border border-red-500/10 rounded-lg p-3 text-xs">
-                                  <p className="text-red-400 font-semibold mb-1">قبل</p>
-                                  <pre className="text-slate-500 overflow-auto max-h-32">{JSON.stringify(log.before, null, 2)}</pre>
-                                </div>
-                              )}
-                              {log.after && (
-                                <div className="bg-green-500/5 border border-green-500/10 rounded-lg p-3 text-xs">
-                                  <p className="text-green-400 font-semibold mb-1">بعد</p>
-                                  <pre className="text-slate-500 overflow-auto max-h-32">{JSON.stringify(log.after, null, 2)}</pre>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
+      <div style={{ position:'relative', maxWidth:'280px' }}>
+        <Search style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', width:13, height:13, color:'var(--text-muted)', pointerEvents:'none' }} />
+        <input value={search} onChange={(e)=>setSearch(e.target.value)}
+          placeholder="Filter by action, user or collection..."
+          style={{ paddingRight:'32px', height:'34px', fontSize:'13px' }} />
+      </div>
+
+      {/* Custom table with expandable rows */}
+      <div className="tbl-wrap">
+        {loading ? (
+          <div style={{ padding:'40px', textAlign:'center', color:'var(--text-muted)', fontSize:'13px' }}>
+            Loading logs...
           </div>
-        )
-      }
+        ) : (
+          <table style={{ width:'100%', borderCollapse:'collapse' }}>
+            <thead>
+              <tr>
+                {columns.map((col) => (
+                  <th key={col.key} style={{
+                    padding:'8px 12px', fontSize:'10px', fontWeight:500,
+                    letterSpacing:'0.07em', textTransform:'uppercase',
+                    color:'var(--text-muted)', textAlign: col.align||'right',
+                    borderBottom:'1px solid var(--border-subtle)',
+                    background:'var(--bg-canvas)',
+                    fontFamily:"'Inter',sans-serif",
+                    width: col.width,
+                  }}>
+                    {col.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0,100).map((log) => (
+                <React.Fragment key={log.id}>
+                  <tr style={{ transition:'background 0.1s' }}
+                    onMouseEnter={(e)=>e.currentTarget.style.background='var(--bg-hover)'}
+                    onMouseLeave={(e)=>e.currentTarget.style.background='transparent'}>
+                    {columns.map((col) => (
+                      <td key={col.key} style={{
+                        padding:'0 12px', height:'38px',
+                        borderBottom: expanded===log.id ? 'none' : '1px solid var(--border-subtle)',
+                        textAlign: col.align||'right', verticalAlign:'middle',
+                      }}>
+                        {col.render ? col.render(log[col.key], log) : log[col.key]??'—'}
+                      </td>
+                    ))}
+                  </tr>
+                  {expanded === log.id && (
+                    <tr>
+                      <td colSpan={columns.length} style={{ padding:0 }}>
+                        <ExpandedLog log={log} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding:'40px', textAlign:'center', color:'var(--text-muted)', fontSize:'13px' }}>
+            No audit logs found
+          </div>
+        )}
+      </div>
     </div>
   )
 }

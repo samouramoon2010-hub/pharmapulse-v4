@@ -77,5 +77,56 @@ service cloud.firestore {
       allow read:  if isAny();
       allow write: if isMgr();
     }
+
+    // ── daily_summaries ────────────────────────────────────────────
+    match /daily_summaries/{docId} {
+      allow read:  if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId) ||
+        isAdmin()
+      );
+      allow create: if isAny() && resource == null;  // service writes only
+      allow update: if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ── monthly_summaries ──────────────────────────────────────────
+    match /monthly_summaries/{docId} {
+      allow read:  if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId) ||
+        isAdmin()
+      );
+      allow write: if isAny();  // written by client after KPI save
+      allow delete: if isAdmin();
+    }
+
+    // ── forecast_snapshots ─────────────────────────────────────────
+    match /forecast_snapshots/{docId} {
+      allow read:  if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId) ||
+        isAdmin()
+      );
+      allow write: if isAny();
+      allow delete: if isAdmin();
+    }
+
+    // ── risk_snapshots ─────────────────────────────────────────────
+    match /risk_snapshots/{docId} {
+      allow read:  if isMgr();
+      allow write: if isAny();
+      allow delete: if isAdmin();
+    }
+
+    // ── ranking_history ────────────────────────────────────────────
+    match /ranking_history/{docId} {
+      allow read:  if isAny();
+      allow write: if isAny();
+      allow delete: if isAdmin();
+    }
   }
 }

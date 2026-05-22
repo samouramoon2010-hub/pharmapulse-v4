@@ -1,159 +1,284 @@
 // ============================================================
-// Sidebar — Production, role-aware
+// Sidebar — Premium Enterprise (monochrome, compact)
 // ============================================================
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ClipboardList, TrendingUp, Users,
-  Building2, Target, BarChart2, FileSpreadsheet, Shield,
-  Settings, LogOut, Bell, X, Activity,
+  LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
+  Target, BarChart2, FileSpreadsheet, ShieldCheck, Settings,
+  LogOut, Bell, X, PanelLeftClose, PanelLeft,
 } from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
+import { useAuthStore }    from '../../store/authStore'
+import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
+import Logo, { LogoIcon } from '../brand/Logo'
 
-const NAV = {
+const NAV_CONFIG = {
   admin: [
-    { group:'الرئيسية',  items:[
-      { icon:LayoutDashboard, label:'لوحة التحكم',  path:'/dashboard' },
-      { icon:TrendingUp,      label:'التحليلات',    path:'/reports' },
+    { group: '', items: [
+      { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
-    { group:'الإدارة', items:[
-      { icon:Building2,      label:'الفروع',        path:'/pharmacies' },
-      { icon:Users,          label:'المستخدمون',    path:'/users' },
-      { icon:Target,         label:'الأهداف',       path:'/targets' },
+    { group: 'Analytics', items: [
+      { icon: TrendingUp,      label: 'Reports',    path: '/reports' },
+      { icon: Target,          label: 'Targets',    path: '/targets' },
     ]},
-    { group:'العمليات', items:[
-      { icon:FileSpreadsheet, label:'استيراد Excel', path:'/import' },
-      { icon:Shield,          label:'سجل التدقيق',  path:'/audit' },
-      { icon:Bell,            label:'الإشعارات',    path:'/notifications' },
+    { group: 'Administration', items: [
+      { icon: Building2,       label: 'Pharmacies', path: '/pharmacies' },
+      { icon: Users,           label: 'Users',      path: '/users' },
+      { icon: FileSpreadsheet, label: 'Import',     path: '/import' },
     ]},
-    { group:'', items:[{ icon:Settings, label:'الإعدادات', path:'/settings' }]},
+    { group: 'System', items: [
+      { icon: ShieldCheck,     label: 'Audit Log',      path: '/audit' },
+      { icon: Bell,            label: 'Notifications',   path: '/notifications' },
+      { icon: Settings,        label: 'Settings',        path: '/settings' },
+    ]},
   ],
   manager: [
-    { group:'الرئيسية', items:[
-      { icon:LayoutDashboard, label:'لوحة التحكم',  path:'/dashboard' },
-      { icon:TrendingUp,      label:'التحليلات',    path:'/reports' },
+    { group: '', items: [
+      { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
-    { group:'الفريق', items:[
-      { icon:Users,           label:'الفريق',       path:'/team' },
-      { icon:Target,          label:'الأهداف',      path:'/targets' },
+    { group: 'Analytics', items: [
+      { icon: TrendingUp, label: 'Reports',  path: '/reports' },
+      { icon: Target,     label: 'Targets',  path: '/targets' },
+      { icon: Users,      label: 'Team',     path: '/team' },
     ]},
-    { group:'', items:[
-      { icon:Bell,     label:'الإشعارات', path:'/notifications' },
-      { icon:Settings, label:'الإعدادات', path:'/settings' },
+    { group: 'System', items: [
+      { icon: Bell,     label: 'Notifications', path: '/notifications' },
+      { icon: Settings, label: 'Settings',      path: '/settings' },
     ]},
   ],
   pharmacist: [
-    { group:'الرئيسية', items:[
-      { icon:LayoutDashboard, label:'لوحة التحكم', path:'/dashboard' },
-      { icon:ClipboardList,   label:'إدخال KPI',   path:'/entry' },
-      { icon:TrendingUp,      label:'أدائي',        path:'/performance' },
+    { group: '', items: [
+      { icon: LayoutDashboard, label: 'Dashboard',   path: '/dashboard', exact: true },
     ]},
-    { group:'', items:[
-      { icon:Bell,     label:'الإشعارات', path:'/notifications' },
-      { icon:Settings, label:'الإعدادات', path:'/settings' },
+    { group: 'My Work', items: [
+      { icon: ClipboardList, label: 'KPI Entry',    path: '/entry' },
+      { icon: TrendingUp,    label: 'Performance',  path: '/performance' },
+    ]},
+    { group: 'System', items: [
+      { icon: Bell,     label: 'Notifications', path: '/notifications' },
+      { icon: Settings, label: 'Settings',      path: '/settings' },
     ]},
   ],
 }
 
+const ROLE_LABELS = { admin:'Admin', manager:'Manager', pharmacist:'Pharmacist' }
+
 function resolveNav(role) {
-  if (role === 'admin') return NAV.admin
-  if (role === 'manager') return NAV.manager
-  return NAV.pharmacist
+  return NAV_CONFIG[role] || NAV_CONFIG.pharmacist
 }
 
-const ROLE_LABELS = { admin:'مدير النظام', manager:'مدير الفرع', pharmacist:'صيدلاني' }
+// Tooltip for collapsed mode
+function Tooltip({ label }) {
+  return (
+    <div className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-50 pointer-events-none"
+         style={{
+           background: 'var(--bg-overlay)',
+           border: '1px solid var(--border-default)',
+           borderRadius: '6px',
+           padding: '4px 10px',
+           fontSize: '12px',
+           fontWeight: 500,
+           color: 'var(--text-primary)',
+           whiteSpace: 'nowrap',
+           boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+         }}>
+      {label}
+    </div>
+  )
+}
+
+function NavExpanded({ item, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      className={`nav-item w-full text-right ${active ? 'active' : ''}`}
+      style={{ justifyContent: 'flex-start' }}>
+      <item.icon className="w-[15px] h-[15px] flex-shrink-0" strokeWidth={1.75} />
+      <span className="flex-1 text-right">{item.label}</span>
+    </button>
+  )
+}
+
+function NavCollapsed({ item, active, onClick }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div className="relative flex justify-center"
+         onMouseEnter={() => setHovered(true)}
+         onMouseLeave={() => setHovered(false)}>
+      <button onClick={onClick}
+        className={`nav-item-icon ${active ? 'active' : ''}`}>
+        <item.icon className="w-[15px] h-[15px]" strokeWidth={1.75} />
+      </button>
+      {hovered && <Tooltip label={item.label} />}
+    </div>
+  )
+}
 
 export default function Sidebar({ mobileOpen, onClose }) {
-  const navigate  = useNavigate()
-  const location  = useLocation()
+  const navigate = useNavigate()
+  const location = useLocation()
   const { userProfile, logout } = useAuthStore()
+  const { sidebarMode, toggleSidebar } = useSettingsStore()
 
-  const role      = userProfile?.role || 'pharmacist'
-  const navGroups = resolveNav(role)
+  const role       = userProfile?.role || 'pharmacist'
+  const navGroups  = resolveNav(role)
+  const collapsed  = sidebarMode === SIDEBAR_MODE.COLLAPSED
 
-  const isActive = (path) =>
-    path === '/dashboard' ? location.pathname === path : location.pathname.startsWith(path)
+  const isActive = (path, exact) =>
+    exact ? location.pathname === path : location.pathname.startsWith(path)
 
   const go = (path) => { navigate(path); onClose?.() }
   const handleLogout = async () => { await logout(); navigate('/login') }
 
-  const Content = () => (
-    <div className="flex flex-col h-full">
-      <div className="px-5 py-5 border-b border-slate-800/60 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-glow flex-shrink-0">
-            <Activity className="w-5 h-5 text-white"/>
-          </div>
-          <div>
-            <div className="font-bold text-white text-[15px] leading-none">PharmaPulse</div>
-            <div className="text-[11px] text-brand-400 mt-0.5 font-medium">Enterprise KPI</div>
-          </div>
-        </div>
+  const Content = ({ isMobile = false }) => (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Logo */}
+      <div className="flex-shrink-0 flex items-center"
+           style={{
+             height: 'var(--topbar-h)',
+             padding: collapsed && !isMobile ? '0 14px' : '0 14px',
+             borderBottom: '1px solid var(--border-subtle)',
+             justifyContent: collapsed && !isMobile ? 'center' : 'space-between',
+           }}>
+        {collapsed && !isMobile
+          ? <LogoIcon size={30} />
+          : <>
+              <Logo size={30} showText />
+              {!isMobile && (
+                <button onClick={toggleSidebar}
+                  className="btn btn-ghost btn-icon -mr-1 opacity-30 hover:opacity-70">
+                  <PanelLeftClose className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </>
+        }
       </div>
 
-      <div className="mx-3 mt-3 p-3 rounded-xl bg-slate-800/40 border border-slate-800/80 flex-shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-full bg-gradient-brand flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-            {userProfile?.displayName?.[0]||'U'}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-white truncate leading-none mb-0.5">
-              {userProfile?.displayName}
+      {/* User card */}
+      {(!collapsed || isMobile) && (
+        <div className="flex-shrink-0 mx-3 mt-3 px-2.5 py-2 rounded-lg"
+             style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-zinc-900
+                            font-bold text-xs flex-shrink-0"
+                 style={{ background: 'var(--brand-500)', fontSize: '10px' }}>
+              {userProfile?.displayName?.[0] || 'U'}
             </div>
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-400 border border-brand-500/20 font-medium">
-              {ROLE_LABELS[role]||role}
-            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate leading-none"
+                   style={{ color: 'var(--text-primary)' }}>
+                {userProfile?.displayName}
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {ROLE_LABELS[role] || role}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-4">
+      {/* Collapsed avatar */}
+      {collapsed && !isMobile && (
+        <div className="flex justify-center mt-3 flex-shrink-0">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center
+                          text-zinc-900 font-bold text-xs"
+               style={{ background: 'var(--brand-500)', fontSize: '10px' }}>
+            {userProfile?.displayName?.[0] || 'U'}
+          </div>
+        </div>
+      )}
+
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto no-scrollbar py-3"
+           style={{ padding: collapsed && !isMobile ? '12px 10px' : '12px' }}>
         {navGroups.map((group, gi) => (
-          <div key={gi}>
-            {group.group && (
-              <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest px-3.5 mb-1.5">
-                {group.group}
-              </div>
+          <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
+            {group.group && !collapsed && (
+              <div className="section-label px-2 mb-1.5">{group.group}</div>
+            )}
+            {group.group && collapsed && !isMobile && (
+              <div className="my-3 mx-1 border-t" style={{ borderColor: 'var(--border-subtle)' }} />
             )}
             <div className="space-y-0.5">
-              {group.items.map((item) => (
-                <button key={item.path} onClick={() => go(item.path)}
-                  className={`nav-item w-full text-right ${isActive(item.path) ? 'active' : ''}`}>
-                  <item.icon className="w-4 h-4 flex-shrink-0"/>
-                  <span className="flex-1 text-right">{item.label}</span>
-                </button>
-              ))}
+              {group.items.map((item) => {
+                const active = isActive(item.path, item.exact)
+                return collapsed && !isMobile
+                  ? <NavCollapsed key={item.path} item={item} active={active} onClick={() => go(item.path)} />
+                  : <NavExpanded  key={item.path} item={item} active={active} onClick={() => go(item.path)} />
+              })}
             </div>
           </div>
         ))}
       </nav>
 
-      <div className="px-3 pb-4 flex-shrink-0 border-t border-slate-800/60 pt-3">
-        <button onClick={handleLogout}
-          className="nav-item w-full text-right text-red-400 hover:text-red-300 hover:bg-red-500/10">
-          <LogOut className="w-4 h-4 flex-shrink-0"/>
-          <span className="flex-1 text-right">تسجيل الخروج</span>
-        </button>
+      {/* Expand button */}
+      {collapsed && !isMobile && (
+        <div className="flex justify-center pb-2 flex-shrink-0">
+          <div className="relative group">
+            <button onClick={toggleSidebar} className="nav-item-icon opacity-25 hover:opacity-60">
+              <PanelLeft className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Logout */}
+      <div className="flex-shrink-0 pb-3"
+           style={{
+             padding: collapsed && !isMobile ? '0 10px 12px' : '0 12px 12px',
+             borderTop: '1px solid var(--border-subtle)',
+             paddingTop: '8px',
+           }}>
+        {collapsed && !isMobile ? (
+          <div className="relative flex justify-center group">
+            <button onClick={handleLogout} className="nav-item-icon hover:bg-red-500/8"
+                    style={{ color: 'var(--text-muted)' }}
+                    onMouseEnter={(e) => e.currentTarget.style.color='#f87171'}
+                    onMouseLeave={(e) => e.currentTarget.style.color='var(--text-muted)'}>
+              <LogOut className="w-[15px] h-[15px]" strokeWidth={1.75} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={handleLogout}
+            className="nav-item w-full text-right"
+            style={{ color: 'var(--text-muted)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background='rgba(239,68,68,0.07)'; e.currentTarget.style.color='#f87171' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background=''; e.currentTarget.style.color='var(--text-muted)' }}>
+            <LogOut className="w-[15px] h-[15px] flex-shrink-0" strokeWidth={1.75} />
+            <span className="flex-1">Sign Out</span>
+          </button>
+        )}
       </div>
     </div>
   )
 
   return (
     <>
-      <aside className="hidden lg:flex flex-col fixed right-0 top-0 bottom-0 z-30 bg-slate-950 border-l border-slate-800/60"
-             style={{ width:'var(--sidebar-w)' }}>
-        <Content/>
+      {/* Desktop */}
+      <aside className="hidden lg:flex flex-col fixed right-0 top-0 bottom-0 z-30"
+             style={{
+               width: collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-w)',
+               background: 'var(--sidebar-bg)',
+               borderLeft: '1px solid var(--border-subtle)',
+               backdropFilter: 'blur(24px)',
+               transition: 'width 250ms cubic-bezier(0.4,0,0.2,1)',
+             }}>
+        <Content />
       </aside>
 
+      {/* Mobile */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}/>
-          <aside className="absolute right-0 top-0 bottom-0 bg-slate-950 border-l border-slate-800"
-                 style={{ width:'280px' }}>
-            <button onClick={onClose} className="absolute top-4 left-4 btn btn-ghost btn-icon">
-              <X className="w-5 h-5"/>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+          <aside className="absolute right-0 top-0 bottom-0 animate-sidebar-in"
+                 style={{
+                   width: '260px',
+                   background: 'var(--sidebar-bg)',
+                   borderLeft: '1px solid var(--border-subtle)',
+                 }}>
+            <button onClick={onClose} className="absolute top-3.5 left-3 btn btn-ghost btn-icon">
+              <X className="w-4 h-4" />
             </button>
-            <Content/>
+            <Content isMobile />
           </aside>
         </div>
       )}

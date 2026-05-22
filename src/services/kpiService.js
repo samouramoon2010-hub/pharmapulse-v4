@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore'
 import { auth, db, COL } from './firebase'
 import { logAction, AUDIT_ACTION } from './auditService'
+import { triggerHistorySnapshots } from './historyService'
 
 const clean = (obj) =>
   Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined))
@@ -70,15 +71,6 @@ export async function saveKpiEntry({
       : {}),
   })
 
-  // Debug log — remove before final release
-  console.log('[kpiService] saveKpiEntry payload:', {
-    docId,
-    userId:     payload.userId,
-    pharmacyId: payload.pharmacyId,
-    date:       payload.date,
-    isNew,
-  })
-
   // ── Step 4: write to Firestore ────────────────────────────────
   await setDoc(doc(db, COL.KPI_ENTRIES, docId), payload, { merge: true })
 
@@ -91,6 +83,21 @@ export async function saveKpiEntry({
     userRole:   actorRole,
     before:     isNew ? null : existing.data(),
     after:      payload,
+  })
+
+  // ── Step 6: History Layer V1 snapshots ──────────────────────
+  // Fire-and-forget: KPI save already succeeded at step 4.
+  // Failures here are logged but never propagate to the caller.
+  triggerHistorySnapshots(
+    resolvedUserId,
+    payload.pharmacyId,
+    date,
+    actorId || resolvedUserId,
+    actorRole,
+  ).catch((e) => {
+    // Safety net — triggerHistorySnapshots has its own internal try/catch
+    // but this catches unexpected throws from the function setup itself.
+    console.error('[kpiService] Unexpected error in triggerHistorySnapshots:', e.message)
   })
 
   return { id: docId, ...payload }
@@ -161,6 +168,17 @@ export function subscribeAllTargets(callback) {
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   )
+}
+
+export async function deleteTarget(pharmacyId, month, actorId, actorRole) {
+  const docId = `${pharmacyId}_${month}`
+  const snap  = await getDoc(doc(db, COL.TARGETS, docId))
+  if (!snap.exists()) throw new Error('الهدف غير موجود')
+  await deleteDoc(doc(db, COL.TARGETS, docId))
+  await logAction({
+    action: AUDIT_ACTION.DELETE, collection: COL.TARGETS,
+    docId, userId: actorId, userRole: actorRole, before: snap.data(),
+  })
 }
 
 export async function bulkImportKpiEntries(rows, usersMap, actorId, actorRole) {

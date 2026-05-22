@@ -1,51 +1,83 @@
 // ============================================================
-// StatCard — animated KPI summary card
+// StatCard — Premium compact metric card
+// No giant icons. Tabular numbers. Status pill. Delta.
 // ============================================================
-import React from 'react'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { TrendingUp, TrendingDown } from 'lucide-react'
+
+function CountUp({ target, duration = 600, suffix = '' }) {
+  const [val, setVal] = useState(0)
+  const raf = useRef(null)
+  useEffect(() => {
+    if (typeof target !== 'number') return
+    const start = performance.now()
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setVal(Math.round(target * eased))
+      if (t < 1) raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return <>{val.toLocaleString()}{suffix}</>
+}
 
 export default function StatCard({
-  label, value, sub, icon: Icon, color = '#1a9a7e',
-  trend, trendLabel, suffix = '', delay = 0, loading = false,
+  label, value, sub, icon: Icon,
+  color = 'var(--brand-500)', delay = 0,
+  trend, suffix = '', loading = false, animate = true,
 }) {
+  const isNum = typeof value === 'number'
+
   if (loading) {
     return (
-      <div className="stat-card" style={{ animationDelay: `${delay}ms` }}>
-        <div className="skeleton w-10 h-10 rounded-xl" />
-        <div className="skeleton w-20 h-7 rounded" />
-        <div className="skeleton w-28 h-4 rounded" />
+      <div className="stat-card" style={{ animationDelay:`${delay}ms` }}>
+        <div className="skeleton h-2.5 w-16 rounded" />
+        <div className="skeleton h-7 w-24 rounded" />
+        <div className="skeleton h-2 w-20 rounded" />
       </div>
     )
   }
 
   const trendPositive = trend > 0
-  const trendNeutral  = !trend
+  const hasTrend = trend !== undefined && trend !== 0
 
   return (
-    <div className="stat-card" style={{ animationDelay: `${delay}ms` }}>
-      <div className="flex items-start justify-between">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-             style={{ background: `${color}18`, border: `1px solid ${color}28` }}>
-          {Icon && <Icon className="w-5 h-5" style={{ color }} />}
-        </div>
-        {trend !== undefined && !trendNeutral && (
-          <div className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${
-            trendPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-          }`}>
+    <div className="stat-card group" style={{ animationDelay:`${delay}ms` }}>
+      {/* Label row */}
+      <div className="flex items-center justify-between">
+        <span className="metric-label">{label}</span>
+        {hasTrend && (
+          <span className="inline-flex items-center gap-1"
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 500,
+                  fontFamily: 'Inter, sans-serif',
+                  color: trendPositive ? 'var(--kpi-excellent)' : 'var(--kpi-critical)',
+                }}>
             {trendPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             {Math.abs(trend)}%
-          </div>
+          </span>
         )}
       </div>
 
-      <div>
-        <div className="text-2xl font-bold text-white font-display tracking-tight">
-          {value}{suffix}
-        </div>
-        <div className="text-sm text-slate-400 mt-0.5">{label}</div>
-        {sub && <div className="text-xs text-slate-600 mt-1">{sub}</div>}
-        {trendLabel && <div className="text-xs text-slate-600 mt-1">{trendLabel}</div>}
+      {/* Value */}
+      <div className="metric-value">
+        {isNum && animate
+          ? <CountUp target={value} suffix={suffix} />
+          : <>{value}{suffix}</>
+        }
       </div>
+
+      {/* Sub label */}
+      {sub && (
+        <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'-2px' }}>{sub}</div>
+      )}
+
+      {/* Bottom accent — 1px color line */}
+      <div className="h-px w-8 rounded-full mt-0.5 transition-all duration-300 group-hover:w-full"
+           style={{ background: color, opacity: 0.5 }} />
     </div>
   )
 }

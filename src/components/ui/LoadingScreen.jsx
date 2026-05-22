@@ -1,34 +1,64 @@
 // ============================================================
-// LoadingScreen - Full page loading state
+// LoadingScreen — Splash / route loading
+// Premium zinc dark, minimal animation
 // ============================================================
+import React, { useEffect, useState } from 'react'
+import Logo from '../brand/Logo'
 
-import React from 'react'
+export default function LoadingScreen({ message = 'Loading...' }) {
+  const [visible, setVisible] = useState(false)
 
-export default function LoadingScreen({ message = 'جاري التحميل...' }) {
+  // Slight delay before showing to avoid flash on fast loads
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 60)
+    return () => clearTimeout(t)
+  }, [])
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950">
-      {/* Logo mark */}
-      <div className="relative mb-8">
-        <div className="w-16 h-16 rounded-2xl bg-brand-500/20 border border-brand-500/30 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center">
-            <span className="text-white font-bold text-lg">P</span>
-          </div>
+    <div style={{
+      position:'fixed', inset:0, zIndex:200,
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      background:'var(--bg-canvas)',
+      opacity: visible ? 1 : 0,
+      transition:'opacity 0.3s ease',
+    }}>
+      {/* Ambient glow */}
+      <div style={{
+        position:'absolute', inset:0, pointerEvents:'none',
+        background:'radial-gradient(ellipse 50% 35% at 50% 50%, rgba(0,210,173,0.05) 0%, transparent 70%)',
+      }} />
+
+      <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:'28px' }}
+           className="animate-fade-in">
+        <Logo size={44} />
+
+        {/* Three-dot loader */}
+        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+          {[0,1,2].map((i) => (
+            <div key={i} style={{
+              width:'5px', height:'5px', borderRadius:'50%',
+              background:'var(--brand-500)',
+              animation:'pulse 1.2s ease-in-out infinite',
+              animationDelay:`${i * 0.2}s`,
+              opacity:0.6,
+            }} />
+          ))}
         </div>
-        {/* Spinning ring */}
-        <div className="absolute inset-0 rounded-2xl border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
+
+        <div style={{
+          fontSize:'11px', color:'var(--text-muted)',
+          fontFamily:"'Inter',sans-serif", letterSpacing:'0.02em',
+        }}>
+          {message}
+        </div>
       </div>
 
-      <p className="text-slate-400 text-sm">{message}</p>
-
-      {/* Animated dots */}
-      <div className="flex gap-1.5 mt-4">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="w-1.5 h-1.5 rounded-full bg-brand-500/60"
-            style={{ animation: `pulse 1.2s ${i * 0.2}s infinite` }}
-          />
-        ))}
+      <div style={{
+        position:'absolute', bottom:'24px',
+        fontSize:'10px', color:'var(--text-muted)', opacity:0.4,
+        fontFamily:"'Inter',sans-serif",
+      }}>
+        Samir Goda
       </div>
     </div>
   )

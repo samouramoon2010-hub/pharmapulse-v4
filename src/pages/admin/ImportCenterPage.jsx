@@ -14,6 +14,12 @@ import { bulkImportPharmacies } from '../../services/pharmacyService'
 import { createUser }           from '../../services/userService'
 import { saveTarget, saveKpiEntry } from '../../services/kpiService'
 import {
+  readExcelFile as readExcelSafe,
+  parseExcelRowsToRaw,
+  previewKpiImport,
+  commitValidatedKpiBatch,
+} from '../../services/kpiImportService'
+import {
   collection, query, where, getDocs,
 } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
@@ -66,10 +72,38 @@ export default function ImportCenterPage() {
   const [result,    setResult]    = useState(null)
   const [fileName,  setFileName]  = useState('')
   const [progress,  setProgress]  = useState(0)
+  // KPI import: staged pipeline state
+  const [kpiPreview,    setKpiPreview]    = useState(null)   // ImportPreview
+  const [kpiCommitting, setKpiCommitting] = useState(false)
 
   useEffect(() => { const u = subscribe(); return u }, [])
 
-  const reset = () => { setRows([]); setErrors([]); setStatus('idle'); setResult(null); setFileName(''); setProgress(0) }
+  const reset = () => {
+    setRows([]); setErrors([]); setStatus('idle'); setResult(null)
+    setFileName(''); setProgress(0); setKpiPreview(null); setKpiCommitting(false)
+  }
+
+  // ── KPI Staged Commit ─────────────────────────────────────
+  const handleKpiCommit = async () => {
+    if (!kpiPreview || kpiCommitting) return
+    setKpiCommitting(true)
+    try {
+      const ctx = {
+        uid:        userProfile?.uid,
+        role:       userProfile?.role,
+        pharmacyId: userProfile?.pharmacyId || null,
+      }
+      const commitResult = await commitValidatedKpiBatch(kpiPreview, ctx, userProfile?.role)
+      setResult({ created: commitResult.committed, skipped: commitResult.skipped, errors: commitResult.errors.map(e => ({ row: e.stagingId, error: e.error })) })
+      setStatus('done')
+      toast.success(`Import complete — ${commitResult.committed} KPI entries committed`)
+    } catch (e) {
+      toast.error('Commit failed: ' + e.message)
+      setStatus('kpi_preview')
+    } finally {
+      setKpiCommitting(false)
+    }
+  }
 
   const handleFile = useCallback(async (file) => {
     if (!file) return
@@ -161,28 +195,26 @@ export default function ImportCenterPage() {
         }
 
       } else if (schemaKey === 'kpi_entries') {
-        // Build employeeId→{uid,pharmacyId} map
-        const empSnap = await getDocs(collection(db, COL.USERS))
-        const empMap  = {}
-        empSnap.docs.forEach((d) => {
-          const u = d.data()
-          if (u.employeeId) empMap[u.employeeId] = { uid:d.id, pharmacyId:u.pharmacyId }
-        })
+        // ── STAGED PIPELINE — no dirty writes ─────────────────
+        // 1. Parse raw rows through ingestion layer
+        const rawRows = parseExcelRowsToRaw(rows, fileName)
 
-        for (let i = 0; i < rows.length; i++) {
-          setProgress(Math.round((i/rows.length)*100))
-          const row = rows[i]
-          try {
-            const info = empMap[String(row.employeeId)]
-            if (!info) { result.errors.push({ row, error:`رقم موظف غير موجود: ${row.employeeId}` }); continue }
-            await saveKpiEntry({ ...info, date:String(row.date),
-              wasfaty:Number(row.wasfaty)||0, omni:Number(row.omni)||0,
-              wellness:Number(row.wellness)||0, basket:Number(row.basket)||0,
-              crossSelling:Number(row.crossSelling)||0, notes:String(row.notes||''),
-              actorId, actorRole })
-            result.created++
-          } catch (e) { result.errors.push({ row, error:e.message }) }
+        // 2. Validate + preview (no Firestore write yet)
+        const ctx = {
+          uid:        actorId,
+          role:       actorRole,
+          pharmacyId: userProfile?.pharmacyId || null,
         }
+        const preview = await previewKpiImport(
+          rawRows, ctx,
+          userProfile?.pharmacyId || '',
+          pharmacies,
+          fileName,
+        )
+        setKpiPreview(preview)
+        setStatus('kpi_preview')   // pause here — user sees preview
+        setProgress(100)
+        return   // don't continue to done — user must confirm
       }
 
       setProgress(100)
@@ -342,6 +374,137 @@ export default function ImportCenterPage() {
               {status==='importing'
                 ? <><Loader2 className="w-4 h-4 animate-spin"/>جاري الاستيراد...</>
                 : <><Upload className="w-4 h-4"/>استيراد {rows.length} سجل</>}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── KPI Import Preview — Staged Pipeline ───────────── */}
+      {status === 'kpi_preview' && kpiPreview && (
+        <div style={{
+          background:'var(--bg-surface)', border:'1px solid var(--border-default)',
+          borderRadius:'10px', overflow:'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            padding:'12px 16px', background:'var(--bg-canvas)',
+            borderBottom:'1px solid var(--border-subtle)',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+          }}>
+            <div>
+              <div style={{ fontSize:'13px', fontWeight:600, color:'var(--text-primary)' }}>
+                KPI Import Preview
+              </div>
+              <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'1px' }}>
+                Review before writing to Firestore — no data written yet
+              </div>
+            </div>
+            <div style={{
+              fontSize:'10px', fontWeight:500, padding:'2px 10px', borderRadius:'99px',
+              background: kpiPreview.safetyReport.safeToCommit ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+              border:`1px solid ${kpiPreview.safetyReport.safeToCommit ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              color: kpiPreview.safetyReport.safeToCommit ? '#4ade80' : '#f87171',
+              fontFamily:"'Inter',sans-serif",
+            }}>
+              {kpiPreview.safetyReport.safeToCommit ? '✓ Safe to commit' : '✗ Blocked'}
+            </div>
+          </div>
+
+          {/* Summary strip */}
+          <div style={{
+            display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'1px',
+            background:'var(--border-subtle)',
+          }} className="sm:grid-cols-4">
+            {[
+              { label:'Total Rows',   value: kpiPreview.totalRows,              color:'var(--text-secondary)' },
+              { label:'Valid',        value: kpiPreview.safetyReport.safeRecords, color:'#4ade80' },
+              { label:'Invalid',      value: kpiPreview.invalidRows.length,     color: kpiPreview.invalidRows.length > 0 ? '#f87171' : 'var(--text-muted)' },
+              { label:'Duplicates',   value: kpiPreview.duplicates,             color: kpiPreview.duplicates > 0 ? '#fbbf24' : 'var(--text-muted)' },
+            ].map((s) => (
+              <div key={s.label} style={{
+                padding:'12px 16px', background:'var(--bg-surface)',
+                textAlign:'center',
+              }}>
+                <div style={{ fontSize:'1.25rem', fontWeight:700, color:s.color, fontVariantNumeric:'tabular-nums' }}>
+                  {s.value}
+                </div>
+                <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'2px', fontFamily:"'Inter',sans-serif", letterSpacing:'0.04em', textTransform:'uppercase' }}>
+                  {s.label}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Safety blockers */}
+          {!kpiPreview.safetyReport.safeToCommit && kpiPreview.safetyReport.blockers.length > 0 && (
+            <div style={{ padding:'10px 16px', background:'rgba(239,68,68,0.05)', borderBottom:'1px solid rgba(239,68,68,0.15)' }}>
+              {kpiPreview.safetyReport.blockers.map((b, i) => (
+                <div key={i} style={{ fontSize:'12px', color:'#f87171', display:'flex', alignItems:'center', gap:'6px' }}>
+                  <span>⛔</span>{b}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Invalid rows detail */}
+          {kpiPreview.invalidRows.length > 0 && (
+            <div style={{ padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize:'10px', fontWeight:600, color:'#f87171', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'6px', fontFamily:"'Inter',sans-serif" }}>
+                Invalid Rows ({kpiPreview.invalidRows.length})
+              </div>
+              <div style={{ maxHeight:'140px', overflowY:'auto' }}>
+                {kpiPreview.invalidRows.slice(0,20).map((r) => (
+                  <div key={r.stagingId} style={{ fontSize:'11px', color:'var(--text-secondary)', padding:'3px 0', borderBottom:'1px solid var(--border-subtle)', display:'flex', gap:'8px' }}>
+                    <span style={{ color:'var(--text-muted)', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>
+                      Row {r.stagingId?.split('-').pop()}
+                    </span>
+                    <span style={{ color:'#f87171' }}>
+                      {r.errors.map(e => e.message).join(' · ')}
+                    </span>
+                  </div>
+                ))}
+                {kpiPreview.invalidRows.length > 20 && (
+                  <div style={{ fontSize:'11px', color:'var(--text-muted)', padding:'4px 0' }}>
+                    ...and {kpiPreview.invalidRows.length - 20} more
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Warning rows */}
+          {kpiPreview.warningRows.length > 0 && (
+            <div style={{ padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize:'10px', fontWeight:600, color:'#fbbf24', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'6px', fontFamily:"'Inter',sans-serif" }}>
+                Warnings ({kpiPreview.warningRows.length} rows)
+              </div>
+              {kpiPreview.warningRows.slice(0,5).map((r) => (
+                <div key={r.stagingId} style={{ fontSize:'11px', color:'#fbbf24', padding:'2px 0' }}>
+                  {r.warnings.map(w => w.message).join(' · ')}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ padding:'12px 16px', display:'flex', gap:'8px' }}>
+            <button onClick={reset}
+              style={{ height:'32px', padding:'0 14px', borderRadius:'8px', fontSize:'12px', fontWeight:500, cursor:'pointer', background:'var(--bg-elevated)', border:'1px solid var(--border-default)', color:'var(--text-secondary)' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleKpiCommit}
+              disabled={!kpiPreview.safetyReport.safeToCommit || kpiCommitting || kpiPreview.safetyReport.safeRecords === 0}
+              style={{
+                flex:1, height:'32px', borderRadius:'8px', fontSize:'12px', fontWeight:600, cursor:'pointer',
+                background:'var(--brand-500)', border:'none', color:'#09090b',
+                opacity: (!kpiPreview.safetyReport.safeToCommit || kpiPreview.safetyReport.safeRecords === 0) ? 0.4 : 1,
+                display:'flex', alignItems:'center', justifyContent:'center', gap:'5px',
+              }}>
+              {kpiCommitting
+                ? 'Committing...'
+                : `Commit ${kpiPreview.safetyReport.safeRecords} KPI Entries`
+              }
             </button>
           </div>
         </div>

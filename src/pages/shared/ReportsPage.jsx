@@ -24,6 +24,13 @@ import {
   computeOverallAchievement, computeKpiStats,
 } from '../../engine'
 
+// Executive Intelligence Layer
+import {
+  generateBranchSummary,
+  GRADE_COLORS, GRADE_BG, GRADE_BORDER,
+} from '../../engine/executive'
+import { format as dateFnsFormat } from 'date-fns'
+
 // ── Constants ─────────────────────────────────────────────────
 const KPI_FIELDS = [
   { key:'wasfaty',      targetKey:'wasfatyTarget',   label:'Wasfaty',      color:'#6366f1' },
@@ -196,6 +203,56 @@ export default function ReportsPage() {
     [entries, selectedBranch]
   )
 
+  // ── Executive Intelligence Summary ─────────────────────────────
+  // For selected branch (or first active branch for admin)
+  const executiveSummary = useMemo(() => {
+    const today     = new Date().toISOString().split('T')[0]
+    const thisMonth = format(new Date(), 'yyyy-MM')
+
+    // Determine which branch to summarise
+    const targetPharmacyId = selectedBranch !== 'all'
+      ? selectedBranch
+      : pharmacies.find((p) => p.active !== false)?.id
+
+    if (!targetPharmacyId) return null
+
+    const pharmacy = pharmacies.find((p) => p.id === targetPharmacyId)
+    if (!pharmacy) return null
+
+    const branchTarget = targets.find(
+      (t) => t.pharmacyId === targetPharmacyId && t.month === thisMonth
+    )
+
+    const from = `${thisMonth}-01`
+    const last = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()
+    const to   = `${thisMonth}-${String(last).padStart(2,'0')}`
+    const branchMTD = entries.filter(
+      (e) => e.pharmacyId === targetPharmacyId && e.date >= from && e.date <= to
+    )
+    const historical = [...entries]
+      .filter((e) => e.pharmacyId === targetPharmacyId)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-60)
+
+    try {
+      return generateBranchSummary(
+        {
+          pharmacyId:   targetPharmacyId,
+          pharmacyName: pharmacy.name,
+          pharmacyCode: pharmacy.code || '',
+          region:       pharmacy.region || '',
+          mtdEntries:   branchMTD,
+          target:       branchTarget || null,
+          historicalEntries: historical,
+        },
+        today,
+        thisMonth,
+      )
+    } catch {
+      return null
+    }
+  }, [selectedBranch, pharmacies, targets, entries])
+
   // ── CSV Export ───────────────────────────────────────────────
   const exportCSV = () => {
     const header = 'Date,Pharmacy,Wasfaty,OmniHealth,Wellness,Basket,CrossSelling\n'
@@ -291,6 +348,137 @@ export default function ReportsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Executive Intelligence Summary Card ─────────────── */}
+      {executiveSummary && (
+        <div style={{
+          background:'var(--bg-surface)', border:`1px solid ${GRADE_BORDER[executiveSummary.score.grade]}`,
+          borderRadius:'10px', padding:'14px 16px',
+          boxShadow:'inset 0 1px 0 rgba(255,255,255,0.04)',
+        }} className="animate-fade-in">
+          {/* Header row */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'12px', flexWrap:'wrap', gap:'8px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+              <div style={{
+                width:36, height:36, borderRadius:'8px', flexShrink:0,
+                display:'flex', alignItems:'center', justifyContent:'center',
+                background: GRADE_BG[executiveSummary.score.grade],
+                border:`1px solid ${GRADE_BORDER[executiveSummary.score.grade]}`,
+              }}>
+                <span style={{
+                  fontSize:'16px', fontWeight:700,
+                  color: GRADE_COLORS[executiveSummary.score.grade],
+                  fontFamily:"'Inter',sans-serif",
+                }}>
+                  {executiveSummary.score.grade}
+                </span>
+              </div>
+              <div>
+                <div style={{ fontSize:'13px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'-0.01em' }}>
+                  {executiveSummary.pharmacyName}
+                </div>
+                <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'1px', fontFamily:"'Inter',sans-serif" }}>
+                  Executive Summary · {executiveSummary.reportMonth}
+                </div>
+              </div>
+            </div>
+
+            {/* Score + Risk badges */}
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+              {/* Composite score */}
+              <div style={{
+                padding:'3px 10px', borderRadius:'99px', fontSize:'11px', fontWeight:600,
+                fontFamily:"'Inter',sans-serif", fontVariantNumeric:'tabular-nums',
+                background: GRADE_BG[executiveSummary.score.grade],
+                border:`1px solid ${GRADE_BORDER[executiveSummary.score.grade]}`,
+                color: GRADE_COLORS[executiveSummary.score.grade],
+              }}>
+                Score {executiveSummary.score.adjusted}/100
+              </div>
+
+              {/* Risk badge */}
+              {(() => {
+                const riskStyle = {
+                  ON_TRACK:    { bg:'rgba(0,210,173,0.08)',  border:'rgba(0,210,173,0.2)',  color:'#00d2ad', label:'On Track'  },
+                  LOW_RISK:    { bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  color:'#22c55e', label:'Low Risk'  },
+                  MEDIUM_RISK: { bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)', color:'#f59e0b', label:'Medium Risk'},
+                  HIGH_RISK:   { bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  color:'#ef4444', label:'High Risk' },
+                }[executiveSummary.riskProfile.riskLevel] || { bg:'var(--bg-hover)', border:'var(--border-subtle)', color:'var(--text-muted)', label:'Unknown' }
+                return (
+                  <div style={{
+                    display:'flex', alignItems:'center', gap:'4px',
+                    padding:'3px 10px', borderRadius:'99px', fontSize:'11px', fontWeight:500,
+                    fontFamily:"'Inter',sans-serif",
+                    background: riskStyle.bg, border:`1px solid ${riskStyle.border}`, color: riskStyle.color,
+                  }}>
+                    <div style={{ width:5, height:5, borderRadius:'50%', background:riskStyle.color, flexShrink:0 }} />
+                    {riskStyle.label}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+
+          {/* KPI breakdown row */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'6px', marginBottom:'12px' }}
+               className="sm:grid-cols-5">
+            {executiveSummary.score.kpiBreakdown.map(({ kpiKey, label, achievementPct, status }) => {
+              const cfg = TRAFFIC_COLORS[status]
+              const isWeakest  = executiveSummary.weakestKpi   === kpiKey
+              const isStrongest = executiveSummary.strongestKpi === kpiKey
+              return (
+                <div key={kpiKey} style={{
+                  background:'var(--bg-overlay)', borderRadius:'7px', padding:'7px 10px',
+                  border:`1px solid ${isWeakest ? 'rgba(239,68,68,0.2)' : isStrongest ? 'rgba(34,197,94,0.2)' : 'var(--border-subtle)'}`,
+                  position:'relative',
+                }}>
+                  {(isWeakest || isStrongest) && (
+                    <div style={{
+                      position:'absolute', top:'-6px', right:'6px',
+                      fontSize:'8px', fontWeight:600, padding:'0 4px', borderRadius:'3px',
+                      fontFamily:"'Inter',sans-serif", letterSpacing:'0.04em',
+                      background: isWeakest ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+                      color: isWeakest ? '#f87171' : '#4ade80', border:'none',
+                    }}>
+                      {isWeakest ? '▼ FOCUS' : '▲ BEST'}
+                    </div>
+                  )}
+                  <div style={{ fontSize:'9px', color:'var(--text-muted)', marginBottom:'3px', fontFamily:"'Inter',sans-serif", letterSpacing:'0.04em', textTransform:'uppercase' }}>
+                    {label}
+                  </div>
+                  <div style={{ fontSize:'1rem', fontWeight:600, color:cfg.color, fontVariantNumeric:'tabular-nums', letterSpacing:'-0.03em' }}>
+                    {achievementPct}%
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Top recommendations */}
+          {executiveSummary.recommendations.length > 0 && (
+            <div style={{ borderTop:'1px solid var(--border-subtle)', paddingTop:'10px' }}>
+              <div style={{ fontSize:'9px', fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'7px', fontFamily:"'Inter',sans-serif" }}>
+                Recommendations
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                {executiveSummary.recommendations.slice(0, 3).map((r) => {
+                  const prioColor = { CRITICAL:'#ef4444', HIGH:'#f59e0b', MEDIUM:'#00d2ad', INFO:'#60a5fa' }[r.priority] || 'var(--text-muted)'
+                  return (
+                    <div key={r.id} style={{ display:'flex', alignItems:'flex-start', gap:'8px', fontSize:'11px' }}>
+                      <div style={{ width:5, height:5, borderRadius:'50%', background:prioColor, flexShrink:0, marginTop:'5px' }} />
+                      <div>
+                        <span style={{ fontWeight:500, color:'var(--text-primary)' }}>{r.title}</span>
+                        {' '}
+                        <span style={{ color:'var(--text-muted)' }}>{r.body}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Summary stats */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">

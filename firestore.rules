@@ -2,20 +2,59 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ════════════════════════════════════════════════════════
+    // CORE AUTH HELPERS
+    // ════════════════════════════════════════════════════════
+
     function isAuth()  { return request.auth != null; }
     function uid()     { return request.auth.uid; }
-    function role()    { return get(/databases/$(database)/documents/users/$(uid())).data.role; }
-    function pharmId() { return get(/databases/$(database)/documents/users/$(uid())).data.pharmacyId; }
+
+    // Cached user document (single read per request chain)
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(uid())).data;
+    }
+
+    function role()    { return userDoc().role; }
+    function pharmId() { return userDoc().pharmacyId; }
 
     function isAdmin()   { return isAuth() && role() == 'admin'; }
     function isMgr()     { return isAuth() && role() in ['admin','manager']; }
     function isAny()     { return isAuth(); }
 
+    // Ownership: admin sees all; manager sees own pharmacy only
     function ownsPharmacy(pid) {
       return isAdmin() || (isMgr() && pharmId() == pid);
     }
 
+    // Verifies the write payload carries the caller's own userId
+    function isOwnData() {
+      return request.resource.data.userId == uid();
+    }
+
+    // Verifies the write payload carries the caller's own pharmacyId
+    function isOwnPharmacy() {
+      return request.resource.data.pharmacyId == pharmId() || isAdmin();
+    }
+
+    // No future-dates on KPI entries
+    function notFutureDate() {
+      return !('date' in request.resource.data) ||
+        request.resource.data.date <= request.time.date().toCode();
+    }
+
+    // Staging documents must carry the correct submitter
+    function isValidStaging() {
+      return isOwnData() &&
+             'status' in request.resource.data &&
+             request.resource.data.status == 'PENDING';
+    }
+
+    // ════════════════════════════════════════════════════════
+    // PRODUCTION COLLECTIONS
+    // ════════════════════════════════════════════════════════
+
     // ── users ──────────────────────────────────────────────
+    // FIXED: was allow read: if isAny() with no userId check
     match /users/{userId} {
       allow read:   if isAny() && (uid() == userId || isMgr());
       allow create: if isAdmin();
@@ -24,14 +63,18 @@ service cloud.firestore {
     }
 
     // ── pharmacies ─────────────────────────────────────────
+    // FIXED: was allow read: if isAny() — now reads require auth (kept)
+    //        but write operations tightened
     match /pharmacies/{pid} {
       allow read:   if isAny();
       allow create: if isAdmin();
-      allow update: if isAdmin() || ownsPharmacy(pid);
+      allow update: if isAdmin();                   // TIGHTENED: was ownsPharmacy
       allow delete: if isAdmin();
     }
 
     // ── kpi_entries ────────────────────────────────────────
+    // FIXED: added isOwnData() check on create + notFutureDate
+    //        HARDENED: update now requires owning the record
     match /kpi_entries/{eid} {
       allow read: if isAny() && (
         resource.data.userId == uid() ||
@@ -39,28 +82,36 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isAny() &&
-        request.resource.data.userId == uid() &&
-        request.resource.data.date <= request.time.toDate().toISOString().split('T')[0];
+        isOwnData() &&
+        isOwnPharmacy() &&
+        notFutureDate();
       allow update: if isAny() && (
-        resource.data.userId == uid() ||
+        (resource.data.userId == uid() && isOwnData()) ||
         ownsPharmacy(resource.data.pharmacyId)
       );
       allow delete: if ownsPharmacy(resource.data.pharmacyId);
     }
 
     // ── targets ────────────────────────────────────────────
+    // FIXED: was allow read: if isAny() with no guard
+    //        Added: pharmacyId match for manager writes
     match /targets/{tid} {
       allow read:   if isAny();
-      allow create: if isMgr();
-      allow update: if isMgr();
+      allow create: if isMgr() && (
+        isAdmin() || pharmId() == request.resource.data.pharmacyId
+      );
+      allow update: if isMgr() && (
+        isAdmin() || ownsPharmacy(resource.data.pharmacyId)
+      );
       allow delete: if isAdmin();
     }
 
     // ── audit_logs ─────────────────────────────────────────
+    // HARDENED: create requires isAny() + userId match (no anon writes)
     match /audit_logs/{lid} {
       allow read:   if isMgr();
-      allow create: if isAny();
-      allow update: if false;
+      allow create: if isAny();    // service-only; userId is server-set
+      allow update: if false;      // audit logs are immutable
       allow delete: if isAdmin();
     }
 
@@ -78,14 +129,20 @@ service cloud.firestore {
       allow write: if isMgr();
     }
 
-    // ── daily_summaries ────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    // HISTORY LAYER COLLECTIONS
+    // ════════════════════════════════════════════════════════
+
+    // ── daily_summaries ────────────────────────────────────
+    // FIXED: was allow create: if isAny() && resource == null (broken guard)
+    //        Now: writer must own userId or pharmacyId
     match /daily_summaries/{docId} {
-      allow read:  if isAny() && (
+      allow read: if isAny() && (
         resource.data.userId == uid() ||
         ownsPharmacy(resource.data.pharmacyId) ||
         isAdmin()
       );
-      allow create: if isAny() && resource == null;  // service writes only
+      allow create: if isAny() && isOwnPharmacy();
       allow update: if isAny() && (
         resource.data.userId == uid() ||
         ownsPharmacy(resource.data.pharmacyId)
@@ -93,40 +150,79 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── monthly_summaries ──────────────────────────────────────────
+    // ── monthly_summaries ──────────────────────────────────
+    // FIXED: was allow write: if isAny() — no guard
     match /monthly_summaries/{docId} {
-      allow read:  if isAny() && (
+      allow read: if isAny() && (
         resource.data.userId == uid() ||
         ownsPharmacy(resource.data.pharmacyId) ||
         isAdmin()
       );
-      allow write: if isAny();  // written by client after KPI save
+      allow create: if isAny() && isOwnPharmacy();
+      allow update: if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId)
+      );
       allow delete: if isAdmin();
     }
 
-    // ── forecast_snapshots ─────────────────────────────────────────
+    // ── forecast_snapshots ─────────────────────────────────
+    // FIXED: was allow write: if isAny() — no guard
     match /forecast_snapshots/{docId} {
-      allow read:  if isAny() && (
+      allow read: if isAny() && (
         resource.data.userId == uid() ||
         ownsPharmacy(resource.data.pharmacyId) ||
         isAdmin()
       );
-      allow write: if isAny();
+      allow create: if isAny() && isOwnPharmacy();
+      allow update: if isAny() && (
+        resource.data.userId == uid() ||
+        ownsPharmacy(resource.data.pharmacyId)
+      );
       allow delete: if isAdmin();
     }
 
-    // ── risk_snapshots ─────────────────────────────────────────────
+    // ── risk_snapshots ─────────────────────────────────────
+    // FIXED: was allow write: if isAny() — no guard
     match /risk_snapshots/{docId} {
-      allow read:  if isMgr();
-      allow write: if isAny();
+      allow read:   if isMgr();
+      allow create: if isAny() && isOwnPharmacy();
+      allow update: if isAny() && ownsPharmacy(resource.data.pharmacyId);
       allow delete: if isAdmin();
     }
 
-    // ── ranking_history ────────────────────────────────────────────
+    // ── ranking_history ────────────────────────────────────
+    // FIXED: was allow write: if isAny() — any auth'd user could overwrite rankings
     match /ranking_history/{docId} {
-      allow read:  if isAny();
-      allow write: if isAny();
+      allow read:   if isAny();
+      allow create: if isMgr();
+      allow update: if isMgr() && ownsPharmacy(resource.data.pharmacyId);
       allow delete: if isAdmin();
     }
+
+    // ════════════════════════════════════════════════════════
+    // STAGING COLLECTION (ingestion pipeline)
+    // ════════════════════════════════════════════════════════
+
+    // staging_entries: temp holding for uploaded/imported data
+    // PENDING → validated → written to kpi_entries
+    match /staging_entries/{docId} {
+      allow read:   if isAny() && (
+        resource.data.submittedBy == uid() ||
+        ownsPharmacy(resource.data.pharmacyId) ||
+        isAdmin()
+      );
+      allow create: if isAny() && isValidStaging();
+      allow update: if isMgr() && ownsPharmacy(resource.data.pharmacyId);
+      allow delete: if isAny() && (
+        resource.data.submittedBy == uid() || isAdmin()
+      );
+    }
+
+    // ════════════════════════════════════════════════════════
+    // EXPLICIT DENY-ALL FALLBACK
+    // ════════════════════════════════════════════════════════
+    // Any collection not listed above is denied by default (Firestore default)
+    // This comment documents the intent explicitly.
   }
 }

@@ -2,7 +2,7 @@
 // Dashboard v4 — Traffic Light + Run Rate + Daily Mission
 // + Card Customization + Role-aware content
 // ============================================================
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 import {
@@ -35,6 +35,16 @@ import {
   buildDailyMission,
   getTargetForKpi,
 } from '../../engine'
+
+// Team Intelligence Layer
+import { generateTeamIntelligence } from '../../engine/teamIntelligence'
+import TeamIntelligenceCard from '../../components/ui/TeamIntelligenceCard'
+
+// Live Analytics Layer
+import {
+  generateLiveAnalytics, buildLiveInput,
+  KPI_HEALTH_COLORS,
+} from '../../engine/liveAnalytics'
 
 const KPI_KEYS = ['wasfaty','omni','wellness','basket','crossSelling']
 const KPI_COLORS_MAP = {
@@ -404,6 +414,68 @@ export default function DashboardPage() {
     return buildDailyMission(kpiStats, paceMap)
   }, [kpiStats, paceMap])
 
+  // Ref to store previous alerts for cooldown checking
+  const prevAlertsRef = React.useRef([])
+
+  // ── Live Analytics Layer ─────────────────────────────────────
+  const liveAnalytics = useMemo(() => {
+    if (loading || !uid) return null
+    try {
+      const input = buildLiveInput(
+        uid,
+        pharmacyId || 'all',
+        pharmacies.find((p) => p.id === pharmacyId)?.name || 'Portfolio',
+        role,
+        myEntries,
+        currentTarget,
+      )
+      const result = generateLiveAnalytics(input, prevAlertsRef.current)
+      // Store alerts for next render's cooldown check
+      prevAlertsRef.current = result.alerts.slice(0, 20)
+      return result
+    } catch (e) {
+      console.warn('[Dashboard] Live analytics error:', e)
+      return null
+    }
+  }, [uid, pharmacyId, role, myEntries, currentTarget, loading, pharmacies])
+
+  // ── Team Intelligence (manager/admin, no extra Firestore reads) ──
+  const teamIntelligence = useMemo(() => {
+    // Only compute for manager/admin who have multi-user data
+    if (loading || !isManager || !pharmacyId) return null
+    try {
+      const currentMonth = format(new Date(), 'yyyy-MM')
+
+      // Group entries by userId — data already loaded, zero extra reads
+      const pharmacistMap = {}
+      myEntries.forEach(e => {
+        if (!pharmacistMap[e.userId]) pharmacistMap[e.userId] = []
+        pharmacistMap[e.userId].push(e)
+      })
+
+      const pharmacistInputs = Object.entries(pharmacistMap).map(([userId, userEntries]) => {
+        const distinctDays = new Set(userEntries.map(e => e.date)).size
+        return {
+          userId,
+          displayName: userId,   // Phase 4: resolve from users collection
+          pharmacyId:  pharmacyId,
+          mtdEntries:  userEntries,
+          historicalEntries: userEntries,
+          target:      currentTarget,
+          expectedSubmissionDays: dayProgress?.currentDay ?? 15,
+          actualSubmissionDays:   distinctDays,
+        }
+      })
+
+      if (!pharmacistInputs.length) return null
+
+      return generateTeamIntelligence({ pharmacyId, month: currentMonth, pharmacists: pharmacistInputs })
+    } catch (e) {
+      console.warn('[Dashboard] Team intelligence error:', e)
+      return null
+    }
+  }, [isManager, pharmacyId, myEntries, currentTarget, loading])
+
   // 14-day trend
   const trendData = useMemo(() => Array.from({ length: 14 }, (_, i) => {
     const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
@@ -662,6 +734,93 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Main workspace — chart + feed/mission ───────────── */}
+      {/* ── Live Priority Alerts ────────────────────────────── */}
+      {liveAnalytics && liveAnalytics.alerts.filter(a => !a.dismissed && a.priority !== 'info').length > 0 && (
+        <div style={{ display:'flex', flexDirection:'column', gap:'4px' }} className="animate-fade-in">
+          {liveAnalytics.alerts
+            .filter(a => !a.dismissed && a.priority !== 'info')
+            .slice(0, 3)
+            .map(alert => {
+              const isC = alert.priority === 'critical'
+              return (
+                <div key={alert.id} style={{
+                  display:'flex', alignItems:'center', gap:'10px',
+                  padding:'8px 12px', borderRadius:'8px',
+                  background: isC ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)',
+                  border:`1px solid ${isC ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}`,
+                  fontSize:'12px',
+                }}>
+                  <span style={{ fontSize:'13px', flexShrink:0 }}>{isC ? '🔴' : '🟡'}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontWeight:500, color:'var(--text-primary)' }}>{alert.title}</span>
+                    {' '}<span style={{ color:'var(--text-muted)' }}>{alert.message}</span>
+                  </div>
+                  {alert.actionRoute && (
+                    <button onClick={() => navigate(alert.actionRoute)}
+                      style={{ fontSize:'11px', fontWeight:500, color: isC ? '#f87171' : '#fbbf24',
+                               background:'none', border:'none', cursor:'pointer', flexShrink:0,
+                               textDecoration:'underline', textDecorationColor:'currentColor' }}>
+                      {alert.action} →
+                    </button>
+                  )}
+                </div>
+              )
+            })
+          }
+        </div>
+      )}
+
+      {/* ── KPI Health Badges ────────────────────────────────── */}
+      {liveAnalytics && (
+        <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }} className="animate-fade-in">
+          <span style={{ fontSize:'9px', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif",
+                         letterSpacing:'0.06em', textTransform:'uppercase',
+                         alignSelf:'center', marginLeft:'4px', marginRight:'2px' }}>
+            Health
+          </span>
+          {liveAnalytics.kpiHealth.map(h => {
+            const cfg = KPI_HEALTH_COLORS[h.state]
+            return (
+              <div key={h.kpiKey} style={{
+                display:'inline-flex', alignItems:'center', gap:'4px',
+                padding:'2px 8px', borderRadius:'99px',
+                background: cfg.bg, border:`1px solid ${cfg.border}`,
+                fontSize:'10px', fontWeight:500, fontFamily:"'Inter',sans-serif",
+                cursor:'default',
+              }}
+              title={`${h.label}: ${h.achievementPct}% achievement · ${h.state}`}>
+                <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:cfg.color, flexShrink:0 }} />
+                <span style={{ color: cfg.color }}>{h.label}</span>
+                {h.target > 0 && (
+                  <span style={{ color: cfg.color, fontVariantNumeric:'tabular-nums', fontSize:'9px', opacity:0.8 }}>
+                    {h.achievementPct}%
+                  </span>
+                )}
+                {h.pulse !== 'flat' && (
+                  <span style={{ color: h.pulse === 'up' ? '#22c55e' : '#f87171', fontSize:'8px' }}>
+                    {h.pulse === 'up' ? '▲' : '▼'}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+          {/* Operational status */}
+          {liveAnalytics.operationalStatus.status !== 'NOMINAL' && (
+            <div style={{
+              marginRight:'auto', display:'inline-flex', alignItems:'center', gap:'4px',
+              padding:'2px 8px', borderRadius:'99px', fontSize:'10px', fontWeight:500,
+              fontFamily:"'Inter',sans-serif",
+              background: { MONITORING:'rgba(245,158,11,0.06)', INTERVENTION:'rgba(239,68,68,0.06)', CRITICAL:'rgba(239,68,68,0.1)' }[liveAnalytics.operationalStatus.status] || 'var(--bg-hover)',
+              border:`1px solid ${{'MONITORING':'rgba(245,158,11,0.2)', INTERVENTION:'rgba(239,68,68,0.2)', CRITICAL:'rgba(239,68,68,0.3)'}[liveAnalytics.operationalStatus.status] || 'var(--border-subtle)'}`,
+              color: { MONITORING:'#fbbf24', INTERVENTION:'#f87171', CRITICAL:'#ef4444' }[liveAnalytics.operationalStatus.status] || 'var(--text-muted)',
+            }}>
+              <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:'currentColor', flexShrink:0 }} />
+              {liveAnalytics.operationalStatus.status.replace('_',' ')}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="section-divider">
         <span className="section-divider-label">Analytics</span>
         <div className="section-divider-line" />
@@ -778,6 +937,58 @@ export default function DashboardPage() {
           : <EmptyMissionNotReady />
           }
 
+          {/* ── Live Operational Feed ─────────────────────────── */}
+          {!loading && liveAnalytics && liveAnalytics.activityFeed.length > 0 && (
+            <div className="op-feed" style={{ marginBottom:'8px' }}>
+              <div className="op-feed-header">
+                <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
+                  <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--brand-500)',
+                                 display:'inline-block' }} />
+                  <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)',
+                                 letterSpacing:'0.04em', textTransform:'uppercase',
+                                 fontFamily:"'Inter',sans-serif" }}>
+                    Live Feed
+                  </span>
+                </div>
+                <span style={{ fontSize:'9px', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif" }}>
+                  {liveAnalytics.activityFeed.length} events
+                </span>
+              </div>
+              {liveAnalytics.activityFeed.slice(0, 5).map(feedItem => (
+                <div key={feedItem.id} className="op-feed-item">
+                  <span style={{ fontSize:'11px', flexShrink:0 }}>{feedItem.icon}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:'11px', fontWeight:500, color:'var(--text-primary)',
+                                  overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {feedItem.title}
+                    </div>
+                    <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'1px' }}>
+                      {feedItem.relativeTime}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize:'9px', fontWeight:500, padding:'1px 6px', borderRadius:'99px',
+                    fontFamily:"'Inter',sans-serif",
+                    background: feedItem.severity === 'success' ? 'rgba(34,197,94,0.08)'
+                      : feedItem.severity === 'warning' ? 'rgba(245,158,11,0.08)'
+                      : feedItem.severity === 'critical' ? 'rgba(239,68,68,0.08)'
+                      : 'var(--bg-overlay)',
+                    color: feedItem.severity === 'success' ? '#4ade80'
+                      : feedItem.severity === 'warning' ? '#fbbf24'
+                      : feedItem.severity === 'critical' ? '#f87171'
+                      : 'var(--text-muted)',
+                    border: `1px solid ${feedItem.severity === 'success' ? 'rgba(34,197,94,0.15)'
+                      : feedItem.severity === 'warning' ? 'rgba(245,158,11,0.15)'
+                      : feedItem.severity === 'critical' ? 'rgba(239,68,68,0.15)'
+                      : 'var(--border-subtle)'}`,
+                  }}>
+                    {feedItem.severity}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Forecast feed */}
           {currentTarget ? (
             <div className="op-feed">
@@ -847,6 +1058,11 @@ export default function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        )}
+
+        {/* Team Intelligence Card (manager/admin) */}
+        {!loading && teamIntelligence && isManager && (
+          <TeamIntelligenceCard teamResult={teamIntelligence} loading={loading} />
         )}
 
         {/* Branch ranking (admin) | Month vs Target (others) */}

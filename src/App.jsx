@@ -30,6 +30,7 @@ import TargetsPage            from './pages/shared/TargetsPage'
 import ReportsPage            from './pages/shared/ReportsPage'
 import NotificationsPage      from './pages/shared/NotificationsPage'
 import PharmacistPerformancePage from './pages/pharmacist/PerformancePage'
+import TeamPage                  from './pages/manager/TeamPage'
 import AboutPage    from './pages/shared/AboutPage'
 
 const WIP = ({ t }) => (
@@ -81,7 +82,7 @@ export default function App() {
             <Route path="/settings"      element={<PR><SettingsPage /></PR>} />
 
             {/* Manager + Admin */}
-            <Route path="/team"     element={<PR roles={MGR_UP}><WIP t="إدارة الفريق" /></PR>} />
+            <Route path="/team"     element={<PR roles={MGR_UP}><TeamPage /></PR>} />
             <Route path="/targets"  element={<PR roles={MGR_UP}><TargetsPage /></PR>} />
             <Route path="/reports"  element={<PR roles={MGR_UP}><ReportsPage /></PR>} />
 

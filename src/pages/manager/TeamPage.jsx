@@ -1,271 +1,263 @@
 // ============================================================
-// Team Management Page - Store Manager view
+// Team Intelligence Page
+// Phase 3: operational team intelligence, not HR evaluation.
+// Connected to Team Intelligence Engine.
 // ============================================================
-
 import React, { useEffect, useMemo, useState } from 'react'
+import { Users, TrendingUp, Heart, Award, AlertTriangle, BookOpen } from 'lucide-react'
+import { format } from 'date-fns'
+import { useAuthStore }     from '../../store/authStore'
+import { useKpiStore }      from '../../store/kpiStore'
+import { usePharmacyStore } from '../../store/pharmacyStore'
+import EmptyState           from '../../components/ui/EmptyState'
+import { SkeletonStatCard, SkeletonChart } from '../../components/ui/SkeletonCard'
 import {
-  Users, TrendingUp, TrendingDown, Search, Filter,
-  ChevronDown, BarChart2, Mail, Phone, Award,
-} from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
-import { useKpiStore } from '../../store/kpiStore'
-import AchievementCircle from '../../components/charts/AchievementCircle'
-import PerformanceChart from '../../components/charts/PerformanceChart'
-import { todayStr, formatDateAr, getAchievementColor, currentMonthRange } from '../../utils/helpers'
-import { DUMMY_USERS } from '../../data/dummyData'
+  getTrafficLight, TRAFFIC_COLORS,
+  computeAchievementPct,
+} from '../../engine'
+import { generateTeamIntelligence } from '../../engine/teamIntelligence'
+
+const CARD = {
+  background:'var(--bg-surface)', border:'1px solid var(--border-subtle)',
+  borderRadius:'10px', padding:'14px 16px',
+  boxShadow:'inset 0 1px 0 rgba(255,255,255,0.04)',
+}
+
+const PRIORITY_COLOR = { immediate:'#ef4444', near_term:'#f59e0b', routine:'#00d2ad', recognition:'#22c55e' }
+const PRIORITY_LABEL = { immediate:'Immediate', near_term:'Near Term', routine:'Routine', recognition:'Recognition' }
+
+const MOMENTUM_COLOR = {
+  accelerating:'#22c55e', improving:'#00d2ad', stable:'#60a5fa',
+  cooling:'#f59e0b', needs_support:'#ef4444',
+}
+const RISK_COLOR = { none:'var(--text-muted)', low:'#60a5fa', medium:'#f59e0b', high:'#ef4444' }
+const STATUS_COLOR = {
+  stable:'#22c55e', monitoring:'#00d2ad',
+  intervention_required:'#f59e0b', critical_operation:'#ef4444',
+}
 
 export default function TeamPage() {
-  const { userProfile } = useAuthStore()
-  const { templates, entries, subscribeTemplates, subscribeEntries, subscribeAllEntries } = useKpiStore()
-  const [search, setSearch] = useState('')
-  const [selectedMember, setSelectedMember] = useState(null)
+  const { userProfile }    = useAuthStore()
+  const { entries, targets, subscribeAllEntries, subscribeAllTargets } = useKpiStore()
+  const { pharmacies, subscribe: subPh } = usePharmacyStore()
+
+  const [members,  setMembers]  = useState([])
+  const [loading,  setLoading]  = useState(true)
+
+  const role      = userProfile?.role
+  const isAdmin   = role === 'admin'
+  const pharmacyId = userProfile?.pharmacyId
+  const month     = format(new Date(), 'yyyy-MM')
 
   useEffect(() => {
-    const unsubT = subscribeTemplates()
-    const unsubE = subscribeEntries({ branchId: userProfile?.branchId })
-    return () => { unsubT(); unsubE() }
-  }, [userProfile?.branchId])
+    const u1 = subPh()
+    const u2 = subscribeAllEntries()
+    const u3 = subscribeAllTargets()
+    const t  = setTimeout(() => setLoading(false), 600)
+    return () => { u1(); u2?.(); u3?.(); clearTimeout(t) }
+  }, [userProfile?.uid])
 
-  const today = todayStr()
-  const { from: monthFrom, to: monthTo } = currentMonthRange()
-
-  const teamMembers = DUMMY_USERS.filter(
-    (u) => u.role === 'pharmacist' &&
-      (!userProfile?.branchId || u.branchId === userProfile?.branchId)
+  const pharmacy = useMemo(() =>
+    pharmacies.find((p) => p.id === pharmacyId) || pharmacies[0],
+    [pharmacies, pharmacyId]
   )
 
-  const memberStats = useMemo(() =>
-    teamMembers.map((member) => {
-      const todayEntries = entries.filter((e) => e.userId === member.uid && e.date === today)
-      const monthEntries = entries.filter((e) => e.userId === member.uid && e.date >= monthFrom && e.date <= monthTo)
+  // Build team intelligence from current data
+  const teamIntelligence = useMemo(() => {
+    if (loading || !entries.length) return null
+    const now = new Date()
+    const monthFrom = `${month}-01`
+    const monthLast = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const monthTo   = `${month}-${String(monthLast).padStart(2,'0')}`
+    const target    = targets.find((t) => t.pharmacyId === pharmacyId && t.month === month) || null
 
-      const todayAvg = todayEntries.length
-        ? Math.round(todayEntries.reduce((s, e) => s + e.achievement, 0) / todayEntries.length) : 0
-      const monthAvg = monthEntries.length
-        ? Math.round(monthEntries.reduce((s, e) => s + e.achievement, 0) / monthEntries.length) : 0
-
-      const kpiMap = {}
-      todayEntries.forEach((e) => { kpiMap[e.kpiId] = e })
-
-      return { ...member, todayAvg, monthAvg, kpiMap, todayEntries, monthEntries }
-    }).sort((a, b) => b.todayAvg - a.todayAvg),
-    [teamMembers, entries, today, monthFrom, monthTo]
-  )
-
-  const filtered = memberStats.filter((m) =>
-    m.displayName?.toLowerCase().includes(search.toLowerCase()) ||
-    m.email?.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const selected = selectedMember
-    ? memberStats.find((m) => m.uid === selectedMember)
-    : null
-
-  // Chart data for selected member
-  const memberChartData = useMemo(() => {
-    if (!selected) return []
-    const days = []
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const dateStr = d.toISOString().split('T')[0]
-      const dayEntries = entries.filter((e) => e.userId === selected.uid && e.date === dateStr)
-      const avg = dayEntries.length
-        ? Math.round(dayEntries.reduce((s, e) => s + e.achievement, 0) / dayEntries.length) : 0
-      days.push({
-        date: d.toLocaleDateString('ar-SA', { day: '2-digit', month: 'short' }),
-        value: avg,
-        target: 80,
+    // Group entries by userId
+    const userGroups = new Map()
+    entries.filter((e) => e.date >= monthFrom && e.date <= monthTo)
+      .forEach((e) => {
+        if (!userGroups.has(e.userId)) userGroups.set(e.userId, [])
+        userGroups.get(e.userId).push(e)
       })
-    }
-    return days
-  }, [selected, entries])
 
-  const activeKpis = templates.filter((t) => t.active)
+    if (!userGroups.size) return null
+
+    const pharmacists = Array.from(userGroups.entries()).map(([uid, mtd]) => ({
+      userId: uid, displayName: `User ${uid.slice(0,6)}`,
+      pharmacyId: pharmacyId || '',
+      mtdEntries: mtd, historicalEntries: mtd, target,
+    }))
+
+    try {
+      return generateTeamIntelligence({
+        pharmacyId: pharmacyId || 'all',
+        month,
+        pharmacists,
+      }, now)
+    } catch (e) {
+      console.warn('[TeamPage] Engine error:', e)
+      return null
+    }
+  }, [loading, entries, targets, pharmacyId, month, pharmacies])
+
+  if (loading) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-5">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">
+          {Array.from({length:4}).map((_,i) => <SkeletonStatCard key={i} />)}
+        </div>
+        <SkeletonChart height={200} />
+      </div>
+    )
+  }
+
+  if (!teamIntelligence) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="page-header">
+          <div><div className="page-title">Team Intelligence</div></div>
+        </div>
+        <EmptyState icon={Users}
+          title="No team data this month"
+          description="Team intelligence requires at least one pharmacist with KPI entries for this month" />
+      </div>
+    )
+  }
+
+  const { teamHealth, coachingRecommendations, accountabilityInsights,
+          teamMomentum, teamStability, pharmacistSummaries } = teamIntelligence
+
+  const statusCfg = {
+    stable:                { color:'#22c55e', label:'Stable'               },
+    monitoring:            { color:'#00d2ad', label:'Monitoring'           },
+    intervention_required: { color:'#f59e0b', label:'Intervention Required'},
+    critical_operation:    { color:'#ef4444', label:'Critical Operation'   },
+  }[teamHealth.status]
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="max-w-4xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-white">الفريق</h1>
-          <p className="text-sm text-slate-400 mt-0.5">{teamMembers.length} صيدلاني في الفرع</p>
+          <div className="page-title">Team Intelligence</div>
+          <div className="page-subtitle">
+            {teamHealth.teamSize} member{teamHealth.teamSize !== 1 ? 's' : ''} · {format(new Date(), 'MMMM yyyy')}
+            <span style={{ color:'var(--border-default)', margin:'0 6px' }}>·</span>
+            <span style={{ color: statusCfg.color }}>{statusCfg.label}</span>
+          </div>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="بحث عن صيدلاني..."
-          className="pr-9 text-sm"
-        />
+      {/* Team status strip */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">
+        {[
+          { label:'Team Status',    value: statusCfg.label,             color: statusCfg.color },
+          { label:'Avg Performance',value: `${teamHealth.avgPerformance}%`, color:'var(--brand-400)' },
+          { label:'Avg Consistency',value: `${teamHealth.avgConsistency}%`, color:'#6366f1' },
+          { label:'Active Members', value: `${teamHealth.activeMembers}/${teamHealth.teamSize}`, color:'var(--text-secondary)' },
+        ].map((s) => (
+          <div key={s.label} style={CARD}>
+            <div style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'5px', fontFamily:"'Inter',sans-serif" }}>
+              {s.label}
+            </div>
+            <div style={{ fontSize:'1.2rem', fontWeight:600, letterSpacing:'-0.03em', color:s.color, fontVariantNumeric:'tabular-nums' }}>
+              {s.value}
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Team list */}
-        <div className="space-y-3 lg:col-span-1">
-          {filtered.map((member, idx) => (
-            <div
-              key={member.uid}
-              onClick={() => setSelectedMember(member.uid === selectedMember ? null : member.uid)}
-              className={`kpi-card cursor-pointer transition-all ${
-                selectedMember === member.uid ? 'border-brand-500/40 bg-brand-500/5' : 'hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                {/* Rank badge */}
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                  idx === 0 ? 'bg-amber-500/20 text-amber-400' :
-                  idx === 1 ? 'bg-slate-600/30 text-slate-300' :
-                  'bg-slate-800 text-slate-500'
-                }`}>{idx + 1}</div>
-
-                {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                  {member.displayName?.[0]}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-slate-200 truncate">{member.displayName}</div>
-                  <div className="text-xs text-slate-500 truncate">{member.email}</div>
-                </div>
-
-                <div className="text-right flex-shrink-0">
-                  <div className={`text-sm font-bold ${getAchievementColor(member.todayAvg)}`}>
-                    {member.todayAvg}%
-                  </div>
-                  <div className="text-xs text-slate-600">اليوم</div>
-                </div>
-              </div>
-
-              {/* Mini progress */}
-              <div className="mt-2.5 w-full bg-slate-800 rounded-full h-1.5">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${Math.min(member.todayAvg, 100)}%`,
-                    background: member.todayAvg >= 80 ? '#1a9a7e' : member.todayAvg >= 60 ? '#eab308' : '#ef4444',
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-
-          {filtered.length === 0 && (
-            <div className="kpi-card text-center py-8 text-slate-500">
-              لا توجد نتائج
+      {/* Momentum + Stability */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+        <div style={CARD}>
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'10px', fontFamily:"'Inter',sans-serif", display:'flex', alignItems:'center', gap:'5px' }}>
+            <TrendingUp style={{ width:11, height:11 }} /> Team Momentum
+          </div>
+          <div style={{ fontSize:'1rem', fontWeight:600, color: MOMENTUM_COLOR[teamMomentum?.direction] || 'var(--text-secondary)', textTransform:'capitalize', marginBottom:'4px' }}>
+            {teamMomentum?.direction?.replace('_', ' ')}
+          </div>
+          <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>
+            {teamMomentum?.delta > 0 ? '+' : ''}{teamMomentum?.delta}% avg weekly change
+          </div>
+          {teamIntelligence.operationalStressDetected && (
+            <div style={{ marginTop:'8px', fontSize:'10px', color:'#f87171', display:'flex', alignItems:'center', gap:'4px' }}>
+              <AlertTriangle style={{ width:10, height:10 }} /> Operational stress detected
             </div>
           )}
         </div>
 
-        {/* Member detail */}
-        <div className="lg:col-span-2">
-          {selected ? (
-            <div className="space-y-4 animate-fade-in">
-              {/* Profile card */}
-              <div className="kpi-card">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-bold text-xl">
-                      {selected.displayName?.[0]}
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold text-white">{selected.displayName}</h2>
-                      <p className="text-sm text-slate-400">{selected.email}</p>
-                      {selected.phone && (
-                        <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3" />{selected.phone}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <AchievementCircle pct={selected.monthAvg} size={90} label="الشهر" />
-                  </div>
-                </div>
-
-                {/* Stats row */}
-                <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800/60">
-                  <div className="text-center">
-                    <div className={`text-xl font-bold ${getAchievementColor(selected.todayAvg)}`}>
-                      {selected.todayAvg}%
-                    </div>
-                    <div className="text-xs text-slate-500">إنجاز اليوم</div>
-                  </div>
-                  <div className="text-center">
-                    <div className={`text-xl font-bold ${getAchievementColor(selected.monthAvg)}`}>
-                      {selected.monthAvg}%
-                    </div>
-                    <div className="text-xs text-slate-500">إنجاز الشهر</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-xl font-bold text-slate-300">
-                      {selected.todayEntries.length}/{activeKpis.length}
-                    </div>
-                    <div className="text-xs text-slate-500">KPI مكتملة</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Chart */}
-              <div className="kpi-card">
-                <h3 className="text-sm font-semibold text-slate-200 mb-4">الأداء - آخر 14 يوم</h3>
-                <PerformanceChart
-                  data={memberChartData}
-                  dataKey="value"
-                  targetKey="target"
-                  label="الإنجاز %"
-                  color="#1a9a7e"
-                  height={200}
-                />
-              </div>
-
-              {/* Today's KPI breakdown */}
-              <div className="kpi-card">
-                <h3 className="text-sm font-semibold text-slate-200 mb-4">KPIs اليوم</h3>
-                <div className="space-y-2.5">
-                  {activeKpis.map((kpi) => {
-                    const entry = selected.kpiMap[kpi.id]
-                    const ach = entry?.achievement ?? null
-                    return (
-                      <div key={kpi.id} className="flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: kpi.color || '#1a9a7e' }} />
-                        <span className="text-sm text-slate-400 flex-1">{kpi.name}</span>
-                        {entry ? (
-                          <>
-                            <div className="w-20 bg-slate-800 rounded-full h-1.5">
-                              <div
-                                className="h-full rounded-full"
-                                style={{
-                                  width: `${Math.min(ach, 100)}%`,
-                                  background: kpi.color || '#1a9a7e',
-                                }}
-                              />
-                            </div>
-                            <span className={`text-xs font-bold w-10 text-left ${getAchievementColor(ach)}`}>
-                              {ach}%
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-700">لم يُدخل</span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="kpi-card flex flex-col items-center justify-center py-20 text-slate-600">
-              <Users className="w-10 h-10 mb-3" />
-              <p className="text-sm">اختر صيدلانياً لعرض تفاصيله</p>
-            </div>
-          )}
+        <div style={CARD}>
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'10px', fontFamily:"'Inter',sans-serif", display:'flex', alignItems:'center', gap:'5px' }}>
+            <Heart style={{ width:11, height:11 }} /> Team Stability
+          </div>
+          <div style={{ fontSize:'1rem', fontWeight:600, color: teamStability?.isStable ? '#22c55e' : '#f59e0b', marginBottom:'4px' }}>
+            {teamStability?.isStable ? 'Stable' : 'Variable'}
+          </div>
+          <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>{teamStability?.detail}</div>
         </div>
       </div>
+
+      {/* Pharmacist summaries */}
+      {pharmacistSummaries.length > 0 && (
+        <div style={CARD}>
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
+            Member Operational Summary
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
+            {pharmacistSummaries.map((s) => {
+              const riskCol = RISK_COLOR[s.operationalRisk]
+              return (
+                <div key={s.userId} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'6px 0', borderBottom:'1px solid var(--border-subtle)' }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:'12px', fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {s.displayName}
+                    </div>
+                    <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'1px' }}>
+                      {s.activeDays} days active · {s.submissionRate}% submission rate
+                    </div>
+                  </div>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontSize:'13px', fontWeight:600, color: TRAFFIC_COLORS[getTrafficLight(s.performanceScore, 1)]?.color, fontVariantNumeric:'tabular-nums' }}>
+                      {s.performanceScore}%
+                    </div>
+                    <div style={{ fontSize:'9px', color: riskCol, textTransform:'uppercase', letterSpacing:'0.04em' }}>
+                      {s.operationalRisk} risk
+                    </div>
+                  </div>
+                  <div style={{ width:'4px', height:'28px', borderRadius:'2px', background: MOMENTUM_COLOR[s.momentumDirection] || 'var(--border-subtle)', flexShrink:0 }} />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Coaching recommendations */}
+      {coachingRecommendations.length > 0 && (
+        <div style={CARD}>
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif", display:'flex', alignItems:'center', gap:'5px' }}>
+            <BookOpen style={{ width:11, height:11 }} /> Coaching Priorities
+            <span style={{ fontSize:'9px', background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)', borderRadius:'99px', padding:'0 6px', marginRight:'auto' }}>
+              {teamIntelligence.coachingFocusSummary}
+            </span>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:'7px' }}>
+            {coachingRecommendations.slice(0, 5).map((r) => (
+              <div key={r.id} style={{ display:'flex', alignItems:'flex-start', gap:'8px', fontSize:'12px', padding:'5px 0', borderBottom:'1px solid var(--border-subtle)' }}>
+                <div style={{ width:5, height:5, borderRadius:'50%', background: PRIORITY_COLOR[r.priority], flexShrink:0, marginTop:5 }} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <span style={{ fontWeight:500, color:'var(--text-primary)' }}>{r.title}</span>
+                  {' '}
+                  <span style={{ color:'var(--text-muted)', fontSize:'11px' }}>{r.detail}</span>
+                </div>
+                <span style={{ fontSize:'9px', fontWeight:500, padding:'1px 6px', borderRadius:'99px', flexShrink:0, fontFamily:"'Inter',sans-serif",
+                  background:`${PRIORITY_COLOR[r.priority]}14`, border:`1px solid ${PRIORITY_COLOR[r.priority]}30`, color: PRIORITY_COLOR[r.priority] }}>
+                  {PRIORITY_LABEL[r.priority]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

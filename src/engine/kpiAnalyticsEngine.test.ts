@@ -199,16 +199,27 @@ describe('findWeakestKpi', () => {
 
 // ── computeOverallAchievement ─────────────────────────────────
 describe('computeOverallAchievement', () => {
-  it('returns equal-weight average', () => {
+  it('returns business-weighted average excluding zero-target KPIs', () => {
+    // Must include target > 0 for KPI to be counted
     const map: Partial<Record<string, KpiStats>> = {
-      wasfaty:      { achievementPct: 100 } as KpiStats,
-      omni:         { achievementPct: 80  } as KpiStats,
-      wellness:     { achievementPct: 60  } as KpiStats,
-      basket:       { achievementPct: 40  } as KpiStats,
-      crossSelling: { achievementPct: 20  } as KpiStats,
+      wasfaty:      { achievementPct: 100, target: 200 } as KpiStats,
+      omni:         { achievementPct: 80,  target: 100 } as KpiStats,
+      wellness:     { achievementPct: 60,  target: 120 } as KpiStats,
+      basket:       { achievementPct: 40,  target: 80  } as KpiStats,
+      crossSelling: { achievementPct: 20,  target: 60  } as KpiStats,
     }
-    // (100+80+60+40+20)/5 = 60
-    expect(computeOverallAchievement(map as any)).toBe(60)
+    // wasfaty(0.25)×100 + omni(0.20)×80 + wellness(0.20)×60 + basket(0.20)×40 + crossSelling(0.15)×20 = 64
+    const result = computeOverallAchievement(map as any)
+    expect(result).toBe(64)
+  })
+
+  it('excludes KPI when target is 0 or missing', () => {
+    const map: Partial<Record<string, KpiStats>> = {
+      wasfaty: { achievementPct: 100, target: 200 } as KpiStats,
+      omni:    { achievementPct: 80,  target: 0   } as KpiStats,  // excluded
+    }
+    // Only wasfaty counts (weight=0.25/0.25=1.0) → 100%
+    expect(computeOverallAchievement(map as any)).toBe(100)
   })
 })
 

@@ -9,8 +9,7 @@ import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
   sumKpi, computeAchievementPct, getTrafficLight,
   findWeakestKpi, findStrongestKpi, getDayProgress,
-  computeKpiStats,
-} from '../kpiAnalyticsEngine'
+  computeKpiStats, safeReadTarget } from '../kpiAnalyticsEngine'
 
 import { computeExecutiveScore, scoreToGrade } from './executiveScore'
 import { computeBranchTrend }                  from './trendEngine'
@@ -45,7 +44,7 @@ export function generateBranchSummary(
     KPI_KEYS.map((k) => {
       const actual = sumKpi(branch.mtdEntries, k)
       const target = branch.target
-        ? (branch.target[KPI_META[k].targetField as keyof typeof branch.target] as number ?? 0)
+        ? safeReadTarget(branch.target as any, KPI_META[k].targetField)
         : 0
       return [k, computeKpiStats(actual, target, dp, k)]
     })
@@ -108,7 +107,7 @@ export function generateExecutiveReport(input: ExecutiveReportInput): ExecutiveR
       const totalActual  = branches.reduce((s, b) => s + sumKpi(b.mtdEntries, k), 0)
       const totalTarget  = branches.reduce((s, b) => {
         const t = b.target
-          ? (b.target[KPI_META[k].targetField as keyof typeof b.target] as number ?? 0)
+          ? safeReadTarget(b.target as any, KPI_META[k].targetField)
           : 0
         return s + t
       }, 0)
@@ -120,7 +119,7 @@ export function generateExecutiveReport(input: ExecutiveReportInput): ExecutiveR
 
   // Portfolio score = weighted avg of branch adjusted scores
   const activeBranches = allSummaries.filter(
-    (s) => branches.find((b) => b.pharmacyId === s.pharmacyId)?.mtdEntries.length ?? 0 > 0
+    (s) => (branches.find((b) => b.pharmacyId === s.pharmacyId)?.mtdEntries.length ?? 0) > 0
   )
   const portfolioScore = activeBranches.length > 0
     ? Math.round(

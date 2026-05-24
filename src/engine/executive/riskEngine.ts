@@ -8,8 +8,7 @@ import {
   KPI_KEYS, KPI_META,
   computeKpiStats, computePace, computeForecast,
   computeRiskLevel, getTrafficLight,
-  sumKpi, extractDailyValues, getDayProgress,
-} from '../kpiAnalyticsEngine'
+  sumKpi, extractDailyValues, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
 
 import type { BranchInput } from './executiveTypes'
 import type {
@@ -41,7 +40,7 @@ function buildRiskFlags(branch: BranchInput): RiskFlag[] {
     const label   = KPI_META[kpiKey].en
     const actual  = sumKpi(branch.mtdEntries, kpiKey)
     const target  = branch.target
-      ? (branch.target[KPI_META[kpiKey].targetField as keyof typeof branch.target] as number ?? 0)
+      ? safeReadTarget(branch.target as any, KPI_META[kpiKey].targetField)
       : 0
 
     if (!target) continue  // skip KPIs with no target
@@ -118,9 +117,15 @@ function buildRiskFlags(branch: BranchInput): RiskFlag[] {
   }
 
   // ── Submission rate flag ──
-  const total     = branch.pharmacistCount ?? 1
-  const submitted = branch.submittedToday ?? 0
-  const rate      = total > 0 ? submitted / total : 0
+  // Use unique userIds in mtdEntries as fallback when submittedToday not provided
+  const total = branch.pharmacistCount ?? Math.max(1, new Set(branch.mtdEntries.map(e => e.userId)).size)
+  const submitted = branch.submittedToday
+    ?? new Set(branch.mtdEntries.map(e => e.userId)).size  // count distinct submitters
+  const rate = total > 0 ? Math.min(submitted / total, 1) : 0
+
+  if (import.meta.env.DEV) {
+    console.debug(`[SUBMISSION] pharmacy=${branch.pharmacyId} total=${total} submitted=${submitted} rate=${Math.round(rate*100)}%`)
+  }
 
   if (rate < THRESHOLDS.submissionCritical) {
     flags.push({
@@ -161,7 +166,7 @@ export function computeBranchRiskProfile(branch: BranchInput): BranchRiskProfile
   const statuses = KPI_KEYS.map((k) => {
     const actual = sumKpi(branch.mtdEntries, k)
     const target = branch.target
-      ? (branch.target[KPI_META[k].targetField as keyof typeof branch.target] as number ?? 0)
+      ? safeReadTarget(branch.target as any, KPI_META[k].targetField)
       : 0
     const stats  = computeKpiStats(actual, target, dp, k)
     return stats.status

@@ -18,6 +18,7 @@ export const COL = {
   AUDIT_LOGS:         'audit_logs',
   NOTIFICATIONS:      'notifications',
   LEADERBOARD:        'leaderboard',
+  KPI_REGISTRY:       'kpi_registry',
   // Historical Data Layer V1
   DAILY_SUMMARIES:    'daily_summaries',
   MONTHLY_SUMMARIES:  'monthly_summaries',

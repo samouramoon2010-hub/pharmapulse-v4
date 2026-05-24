@@ -23,18 +23,39 @@ import {
   computeAchievementPct, sumKpi, getDayProgress,
 } from '../../engine'
 import {
+  getTargetInputConfigs,
+  buildFormInitialState,
+} from '../../engine/kpiRegistry'
+import {
   saveTarget, deleteTarget,
   subscribeAllTargets, subscribeTargets,
 } from '../../services/kpiService'
 
-// ── KPI field definitions ─────────────────────────────────────
-const KPI_FIELDS = [
-  { key:'wasfatyTarget',   kpi:'wasfaty',      label:'Wasfaty',      color:'#6366f1' },
-  { key:'omniTarget',      kpi:'omni',         label:'OmniHealth',   color:'#ef4444' },
-  { key:'wellnessTarget',  kpi:'wellness',     label:'Wellness',     color:'#f59e0b' },
-  { key:'basketTarget',    kpi:'basket',       label:'Basket',       color:'#22c55e' },
-  { key:'crossSellTarget', kpi:'crossSelling', label:'Cross Sell',   color:'#8b5cf6' },
-]
+// ── KPI field definitions — registry-driven ──────────────────
+// Replaces the hardcoded KPI_FIELDS array.
+
+// Legacy colour map keyed by registry key — preserved for visual continuity
+const KPI_COLORS = {
+  wasfaty:      '#6366f1',
+  omnihealth:   '#ef4444',
+  wellnessCard: '#f59e0b',
+  basket:       '#22c55e',
+  crossSelling: '#8b5cf6',
+}
+
+// getTargetInputConfigs() returns only active, target-input-enabled KPIs
+// in stable sortOrder. Each config has key (registry), engineKey, targetFieldName,
+// label, unit, and isVisibleForTargetInput.
+const TARGET_INPUT_CONFIGS = getTargetInputConfigs()
+
+// Backward-compatible alias: KPI_FIELDS still used by TargetCard and BulkModal
+// Each entry maps to the same shape those components expect.
+const KPI_FIELDS = TARGET_INPUT_CONFIGS.map(cfg => ({
+  key:   cfg.targetFieldName,  // e.g. 'wasfatyTarget'
+  kpi:   cfg.engineKey,        // e.g. 'wasfaty', 'omni', 'wellness'
+  label: cfg.shortLabel,
+  color: KPI_COLORS[cfg.key] ?? '#a1a1aa',
+}))
 
 function toMonthStr(d) {
   return format(d, 'yyyy-MM')
@@ -239,7 +260,7 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy }) {
 // ── Target Form Modal (add / edit) ────────────────────────────
 function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSave, saving }) {
   const EMPTY = { pharmacyId:'', month: toMonthStr(new Date()),
-    wasfatyTarget:0, omniTarget:0, wellnessTarget:0, basketTarget:0, crossSellTarget:0 }
+    ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, 0])) }
   const [form,   setForm]   = useState(EMPTY)
   const [errors, setErrors] = useState({})
   const dp = getDayProgress()
@@ -249,11 +270,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
     setErrors({})
     setForm(editTarget
       ? { pharmacyId: editTarget.pharmacyId, month: editTarget.month,
-          wasfatyTarget:   editTarget.wasfatyTarget   || 0,
-          omniTarget:      editTarget.omniTarget       || 0,
-          wellnessTarget:  editTarget.wellnessTarget   || 0,
-          basketTarget:    editTarget.basketTarget     || 0,
-          crossSellTarget: editTarget.crossSellTarget  || 0 }
+          ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, editTarget[c.targetFieldName] || 0])) }
       : EMPTY)
   }, [open, editTarget])
 
@@ -427,7 +444,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving }) {
     setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
     if (!rows[id]) {
       const ph = pharmacies.find(p => p.id === id)
-      setRows(r => ({ ...r, [id]: { name: ph?.name || id, wasfatyTarget:0, omniTarget:0, wellnessTarget:0, basketTarget:0, crossSellTarget:0 } }))
+      setRows(r => ({ ...r, [id]: { name: ph?.name || id, ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, 0])) } }))
     }
   }
 
@@ -634,11 +651,7 @@ export default function TargetsPage() {
       await saveTarget({
         pharmacyId:      form.pharmacyId,
         month:           form.month,
-        wasfatyTarget:   Number(form.wasfatyTarget)   || 0,
-        omniTarget:      Number(form.omniTarget)       || 0,
-        wellnessTarget:  Number(form.wellnessTarget)   || 0,
-        basketTarget:    Number(form.basketTarget)     || 0,
-        crossSellTarget: Number(form.crossSellTarget)  || 0,
+        ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, Number(form[c.targetFieldName]) || 0])),
         actorId:   userProfile?.uid,
         actorRole: userProfile?.role,
       })
@@ -657,10 +670,7 @@ export default function TargetsPage() {
         await saveTarget({
           pharmacyId:      row.pharmacyId,
           month:           row.month,
-          wasfatyTarget:   Number(row.wasfatyTarget)   || 0,
-          omniTarget:      Number(row.omniTarget)       || 0,
-          wellnessTarget:  Number(row.wellnessTarget)   || 0,
-          basketTarget:    Number(row.basketTarget)     || 0,
+          ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, Number(row[c.targetFieldName]) || 0])),
           crossSellTarget: Number(row.crossSellTarget)  || 0,
           actorId: userProfile?.uid, actorRole: userProfile?.role,
         })

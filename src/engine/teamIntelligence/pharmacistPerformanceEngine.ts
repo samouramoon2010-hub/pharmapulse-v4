@@ -11,8 +11,7 @@ import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
   computeKpiStats, computePace, getDayProgress,
   sumKpi, computeAchievementPct, getTrafficLight,
-  findWeakestKpi, findStrongestKpi, computeOverallAchievement,
-} from '../kpiAnalyticsEngine'
+  findWeakestKpi, findStrongestKpi, computeOverallAchievement, safeReadTarget } from '../kpiAnalyticsEngine'
 
 import type {
   PharmacistInput,
@@ -162,7 +161,7 @@ function detectImprovingAfterSupport(
   const recentAch = KPI_KEYS.reduce((sum, k) => {
     const last7   = hist.slice(-7)
     const prior7  = hist.slice(-14, -7)
-    const tgt     = Number((input.target as any)[KPI_META[k].targetField] ?? 0)
+    const tgt     = safeReadTarget(input.target as any, KPI_META[k].targetField)
     if (!tgt || !prior7.length) return sum
     const recentRate = sumKpi(last7, k) / Math.max(last7.length, 1)
     const priorRate  = sumKpi(prior7, k) / Math.max(prior7.length, 1)
@@ -189,7 +188,7 @@ export function computePharmacistPerformance(
   const kpiSnapshots: KpiSnapshot[] = KPI_KEYS.map(k => {
     const actual = sumKpi(input.mtdEntries, k)
     const target = input.target
-      ? Number((input.target as any)[KPI_META[k].targetField] ?? 0)
+      ? safeReadTarget(input.target as any, KPI_META[k].targetField)
       : 0
     const achievementPct = computeAchievementPct(actual, target)
     const status         = getTrafficLight(achievementPct, dp.ratio)

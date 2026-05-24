@@ -202,14 +202,18 @@ export const KPI_META: Record<KpiKey, { en: string; ar: string; unit: string; ta
   crossSelling: { en: 'Cross Selling', ar: 'البيع المتقاطع', unit: 'transactions',  targetField: 'crossSellTarget' },
 }
 
-// KPI equal weights (20% each) — configurable in future
+// KPI business weights — normalised to sum 1.0
+// wasfaty:25, omni:20, wellness:20, basket:20, crossSell:15 → total 100
 export const KPI_WEIGHTS: Record<KpiKey, number> = {
-  wasfaty:      0.20,
+  wasfaty:      0.25,
   omni:         0.20,
   wellness:     0.20,
   basket:       0.20,
-  crossSelling: 0.20,
+  crossSelling: 0.15,
 }
+
+/** Maximum achievement % to accept per KPI (caps unrealistic ratios) */
+export const ACHIEVEMENT_CAP = 200
 
 export const TRAFFIC_COLORS: Record<TrafficLightStatus, TrafficLightColors> = {
   excellent: { color:'#22c55e', bg:'rgba(34,197,94,0.10)',   border:'rgba(34,197,94,0.20)',   label:'Excellent',  labelAr:'ممتاز',        icon:'🟢' },
@@ -268,9 +272,25 @@ export function getDayProgress(referenceDate?: Date): DayProgress {
  * Compute achievement % for a single KPI.
  * Formula: (actual / target) × 100
  */
-export function computeAchievementPct(actual: number, target: number): number {
-  if (!target || target <= 0) return 0
-  return Math.round((actual / target) * 100)
+/**
+ * Compute achievement % for a single KPI with enterprise-safe guards.
+ * - Parses string numbers safely
+ * - Excludes invalid/missing targets (returns 0)
+ * - Coerces missing actual to 0
+ * - Caps at ACHIEVEMENT_CAP (200%) to prevent unrealistic values
+ * - Never returns NaN or Infinity
+ */
+export function computeAchievementPct(actual: number | string | undefined | null, target: number | string | undefined | null): number {
+  // Parse target safely
+  const tgt = typeof target === 'string' ? parseFloat(target) : Number(target ?? 0)
+  if (!tgt || tgt <= 0 || !isFinite(tgt) || isNaN(tgt)) return 0
+
+  // Parse actual safely — missing/null/undefined coerced to 0
+  const act = typeof actual === 'string' ? parseFloat(actual) : Number(actual ?? 0)
+  if (isNaN(act) || !isFinite(act)) return 0
+
+  const raw = (Math.max(0, act) / tgt) * 100
+  return Math.min(Math.round(raw), ACHIEVEMENT_CAP)  // cap at 200%
 }
 
 /**
@@ -758,22 +778,62 @@ export function rankKpisByPriority(
  * Default: equal weights (20% each KPI).
  * Formula from docs §2.4
  */
+/**
+ * Weighted composite overall achievement %.
+ * Enterprise-safe:
+ * - Excludes KPIs with missing/zero/NaN targets
+ * - Normalises weights to only valid KPIs
+ * - Caps each KPI contribution at ACHIEVEMENT_CAP
+ * - Never returns NaN or Infinity
+ *
+ * dev mode: pass diagnostics=true to console.log per-KPI breakdown
+ */
 export function computeOverallAchievement(
   kpiStatsMap: Partial<Record<KpiKey, KpiStats>>,
   weights:     Record<KpiKey, number> = KPI_WEIGHTS,
+  diagnostics: boolean = false,
 ): number {
   let weightedSum  = 0
   let totalWeight  = 0
 
   for (const key of KPI_KEYS) {
     const stat = kpiStatsMap[key]
-    if (!stat) continue
-    weightedSum += weights[key] * stat.achievementPct
-    totalWeight += weights[key]
+
+    // Exclude KPI with missing stat
+    if (!stat) {
+      if (diagnostics) console.debug(`[ACH] ${key}: EXCLUDED — no stat`)
+      continue
+    }
+
+    // Exclude KPI with invalid target
+    if (!stat.target || stat.target <= 0 || !isFinite(stat.target) || isNaN(stat.target)) {
+      if (diagnostics) console.debug(`[ACH] ${key}: EXCLUDED — target=${stat.target}`)
+      continue
+    }
+
+    // Cap achievementPct defensively
+    const cappedAch = Math.min(
+      isNaN(stat.achievementPct) || !isFinite(stat.achievementPct) ? 0 : stat.achievementPct,
+      ACHIEVEMENT_CAP
+    )
+    const w = weights[key] ?? 0
+
+    if (diagnostics) {
+      console.debug(
+        `[ACH] ${key}: actual=${stat.actual} target=${stat.target} raw=${stat.achievementPct}% capped=${cappedAch}% weight=${w}`
+      )
+    }
+
+    weightedSum += w * cappedAch
+    totalWeight += w
   }
 
   if (!totalWeight) return 0
-  return Math.round(weightedSum / totalWeight)
+  const result = Math.round(weightedSum / totalWeight)
+
+  if (diagnostics) console.debug(`[ACH] Overall: ${result}% (totalWeight=${totalWeight})`)
+
+  return isNaN(result) || !isFinite(result) ? 0 : result
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -895,7 +955,13 @@ export function filterToDate(entries: KpiEntry[], date: string): KpiEntry[] {
 /**
  * Get target value for a KPI key from a MonthlyTarget document.
  */
-export function getTargetForKpi(target: MonthlyTarget, kpiKey: KpiKey): number {
+/**
+ * Safely extract target value for a KPI.
+ * Returns 0 if target is missing, null, NaN, Infinity, or <= 0.
+ * Parses string values from Firestore gracefully.
+ */
+export function getTargetForKpi(target: MonthlyTarget | null | undefined, kpiKey: KpiKey): number {
+  if (!target) return 0
   const map: Record<KpiKey, keyof MonthlyTarget> = {
     wasfaty:      'wasfatyTarget',
     omni:         'omniTarget',
@@ -903,7 +969,35 @@ export function getTargetForKpi(target: MonthlyTarget, kpiKey: KpiKey): number {
     basket:       'basketTarget',
     crossSelling: 'crossSellTarget',
   }
-  return (target[map[kpiKey]] as number) || 0
+  const raw = target[map[kpiKey]]
+  const n   = typeof raw === 'string' ? parseFloat(raw) : Number(raw ?? 0)
+  if (isNaN(n) || !isFinite(n) || n <= 0) return 0
+  return n
+}
+
+/**
+ * Safe target reader for any object that may have target fields.
+ * Works with MonthlyTarget, inline objects, or Firestore docs.
+ * Returns 0 for missing / NaN / Infinity / negative / string-0 values.
+ */
+export function safeReadTarget(obj: Record<string, unknown> | null | undefined, field: string): number {
+  if (!obj) return 0
+  const raw = obj[field]
+  const n   = typeof raw === 'string' ? parseFloat(raw) : Number(raw ?? 0)
+  if (isNaN(n) || !isFinite(n) || n <= 0) return 0
+  return n
+}
+
+/**
+ * Safe actual KPI value reader.
+ * Returns 0 for missing / NaN / Infinity / negative.
+ */
+export function safeReadActual(obj: Record<string, unknown> | null | undefined, field: string): number {
+  if (!obj) return 0
+  const raw = obj[field]
+  const n   = typeof raw === 'string' ? parseFloat(raw) : Number(raw ?? 0)
+  if (isNaN(n) || !isFinite(n)) return 0
+  return Math.max(0, n)
 }
 
 // ══════════════════════════════════════════════════════════════

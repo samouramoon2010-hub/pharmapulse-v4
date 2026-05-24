@@ -9,8 +9,7 @@ import { format, subDays } from 'date-fns'
 import {
   KPI_KEYS, KPI_META,
   computeKpiStats, computePace, computeForecast,
-  sumKpi, getDayProgress,
-} from '../kpiAnalyticsEngine'
+  sumKpi, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
 
 import type { LiveAnalyticsInput } from './liveAnalyticsTypes'
 import type { KpiHealthSignal, KpiHealthState } from './liveAnalyticsTypes'
@@ -137,7 +136,7 @@ export function computeKpiHealth(input: LiveAnalyticsInput): KpiHealthSignal[] {
     const actual   = sumKpi(mtdEntries, k)
     const todayVal = sumKpi(todayEntries, k)
     const tgt      = target
-      ? (Number((target as any)[KPI_META[k].targetField] ?? 0))
+      ? safeReadTarget(target as any, KPI_META[k].targetField)
       : 0
 
     const stats    = computeKpiStats(actual, tgt, dp, k)

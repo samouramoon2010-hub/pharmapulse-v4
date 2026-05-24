@@ -219,6 +219,39 @@ service cloud.firestore {
       );
     }
 
+
+    // ════════════════════════════════════════════════════════
+    // KPI REGISTRY
+    // Collection: kpi_registry/{kpiKey}
+    // One document per KPI definition (doc ID = kpiKey).
+    //
+    // Governance:
+    //   - All authenticated users can read active definitions
+    //   - Only admins can create, update, or archive
+    //   - No hard delete permitted (no delete rule → denied)
+    //   - Protected core KPI keys: immutable key field enforced
+    //     by service layer; rules enforce admin-only writes
+    // ════════════════════════════════════════════════════════
+    match /kpi_registry/{kpiKey} {
+      // All authenticated users can read KPI definitions
+      // (needed for target forms, dashboards, and reports)
+      allow read: if isAuth();
+
+      // Only admins can create new KPI definitions
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll(['key','label','isActive','isCore'])
+        && request.resource.data.key == kpiKey;   // doc ID must match key field
+
+      // Only admins can update KPI definitions
+      // Key field is immutable after creation (cannot be changed in an update)
+      allow update: if isAdmin()
+        && request.resource.data.key == resource.data.key;  // key must not change
+
+      // Hard delete is NOT permitted for any role
+      // Archive by setting isActive=false instead
+      allow delete: if false;
+    }
+
     // ════════════════════════════════════════════════════════
     // EXPLICIT DENY-ALL FALLBACK
     // ════════════════════════════════════════════════════════

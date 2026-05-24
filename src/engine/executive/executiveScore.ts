@@ -99,9 +99,12 @@ export function computeExecutiveScore(branch: BranchInput): ExecutiveScore {
   // Per-KPI breakdown
   const kpiBreakdown: KpiScoreBreakdown[] = KPI_KEYS.map((kpiKey) => {
     const actual = sumKpi(branch.mtdEntries, kpiKey)
-    const target = branch.target
-      ? (branch.target[KPI_META[kpiKey].targetField as keyof typeof branch.target] as number ?? 0)
-      : 0
+    // Safe target extraction — parse strings, exclude NaN/negative
+    const rawT = branch.target
+      ? branch.target[KPI_META[kpiKey].targetField as keyof typeof branch.target]
+      : undefined
+    const tgtN = typeof rawT === 'string' ? parseFloat(rawT) : Number(rawT ?? 0)
+    const target = (isNaN(tgtN) || !isFinite(tgtN) || tgtN <= 0) ? 0 : tgtN
     const stats  = computeKpiStats(actual, target, dp, kpiKey)
     const weight = KPI_WEIGHTS[kpiKey]
 
@@ -126,10 +129,16 @@ export function computeExecutiveScore(branch: BranchInput): ExecutiveScore {
   const overall = computeOverallAchievement(kpiStatsMap as any)
 
   // Adjustments
-  const submissionRate = submissionAdjustment(
-    branch.submittedToday ?? branch.mtdEntries.length,
-    branch.pharmacistCount ?? 1,
-  )
+  // Submission rate: prefer explicit fields, fall back to distinct userId count
+  const distinctSubmitters = new Set(branch.mtdEntries.map(e => e.userId)).size
+  const totalPharmacists   = branch.pharmacistCount ?? Math.max(1, distinctSubmitters)
+  const submittedCount     = branch.submittedToday ?? distinctSubmitters
+
+  if (import.meta.env.DEV) {
+    console.debug(`[EXEC_SCORE] pharmacy=${branch.pharmacyId} submitters=${submittedCount}/${totalPharmacists} (distinct=${distinctSubmitters})`)
+  }
+
+  const submissionRate = submissionAdjustment(submittedCount, totalPharmacists)
 
   // Consistency from historical wasfaty (representative KPI)
   const historicalVals = branch.historicalEntries

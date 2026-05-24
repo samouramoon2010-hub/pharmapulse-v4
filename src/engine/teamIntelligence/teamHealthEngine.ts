@@ -7,8 +7,7 @@
 import { format } from 'date-fns'
 import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
-  sumKpi, computeAchievementPct, getTrafficLight, getDayProgress,
-} from '../kpiAnalyticsEngine'
+  sumKpi, computeAchievementPct, getTrafficLight, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
 
 import type {
   TeamHealthSummary,
@@ -58,7 +57,7 @@ function buildTeamKpiSnapshot(
       (s, p) => s + sumKpi(p.mtdEntries, k), 0)
     // Sum targets
     const totalTarget = input.pharmacists.reduce((s, p) => {
-      const t = p.target ? Number((p.target as any)[KPI_META[k].targetField] ?? 0) : 0
+      const t = p.target ? safeReadTarget(p.target as any, KPI_META[k].targetField) : 0
       return s + t
     }, 0)
     const achievementPct = computeAchievementPct(totalActual, totalTarget)

@@ -365,8 +365,18 @@ export default function DashboardPage() {
   )
 
   // ── Engine V1 — overall achievement (weighted) ────────────────
-  const overallAch = useMemo(() =>
-    computeOverallAchievement(kpiStats),
+  const overallAch = useMemo(() => {
+    const ach = computeOverallAchievement(kpiStats, undefined, import.meta.env.DEV)
+    if (import.meta.env.DEV) {
+      const keys = Object.keys(kpiStats)
+      const lines = keys.map(k => {
+        const s = kpiStats[k]
+        return s ? `  ${k}: actual=${s.actual} target=${s.target} ach=${s.achievementPct}% capped=${Math.min(s.achievementPct, 200)}%` : `  ${k}: missing`
+      }).join('\n')
+      console.debug('[DASHBOARD_ACH] overall=' + ach + '%\n' + lines)
+    }
+    return ach
+  },
     [kpiStats]
   )
   const overallStatus = getTrafficLight(overallAch, dayRatio)

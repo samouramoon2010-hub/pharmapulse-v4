@@ -6,7 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
   Target, BarChart2, FileSpreadsheet, ShieldCheck, Settings,
-  LogOut, Bell, X, PanelLeftClose, PanelLeft,
+  LogOut, Bell, X, PanelLeftClose, PanelLeft, BarChart3, Database,
 } from 'lucide-react'
 import { useAuthStore }    from '../../store/authStore'
 import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
@@ -18,13 +18,15 @@ const NAV_CONFIG = {
       { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
     { group: 'Analytics', items: [
-      { icon: TrendingUp,      label: 'Reports',    path: '/reports' },
-      { icon: Target,          label: 'Targets',    path: '/targets' },
+      { icon: TrendingUp,      label: 'Reports',      path: '/reports' },
+      { icon: Target,          label: 'Targets',      path: '/targets' },
+      { icon: BarChart3,       label: 'Executive BI', path: '/executive' },
     ]},
     { group: 'Administration', items: [
       { icon: Building2,       label: 'Pharmacies', path: '/pharmacies' },
       { icon: Users,           label: 'Users',      path: '/users' },
       { icon: FileSpreadsheet, label: 'Import',     path: '/import' },
+      { icon: Database,       label: 'KPI Registry', path: '/admin/kpis' },
     ]},
     { group: 'System', items: [
       { icon: ShieldCheck,     label: 'Audit Log',      path: '/audit' },

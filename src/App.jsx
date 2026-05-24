@@ -22,7 +22,8 @@ import KpiEntryPage   from './pages/pharmacist/KpiEntryPage'
 import PharmaciesPage   from './pages/admin/PharmaciesPage'
 import UsersPage        from './pages/admin/UsersPage'
 import ImportCenterPage from './pages/admin/ImportCenterPage'
-import AuditLogsPage    from './pages/admin/AuditLogsPage'
+import AuditLogsPage       from './pages/admin/AuditLogsPage'
+import KpiManagementPage  from './pages/admin/KpiManagementPage'
 
 // Shared
 import SettingsPage         from './pages/shared/SettingsPage'
@@ -32,6 +33,7 @@ import NotificationsPage      from './pages/shared/NotificationsPage'
 import PharmacistPerformancePage from './pages/pharmacist/PerformancePage'
 import TeamPage                  from './pages/manager/TeamPage'
 import AboutPage    from './pages/shared/AboutPage'
+import ExecutiveDashboard from './pages/executive/ExecutiveDashboard'
 
 const WIP = ({ t }) => (
   <div className="flex flex-col items-center justify-center min-h-[400px]"
@@ -87,10 +89,12 @@ export default function App() {
             <Route path="/reports"  element={<PR roles={MGR_UP}><ReportsPage /></PR>} />
 
             {/* Admin only */}
+            <Route path="/executive"  element={<PR roles={ADMIN}><ExecutiveDashboard /></PR>} />
             <Route path="/pharmacies" element={<PR roles={ADMIN}><PharmaciesPage /></PR>} />
             <Route path="/users"      element={<PR roles={ADMIN}><UsersPage /></PR>} />
             <Route path="/import"     element={<PR roles={ADMIN}><ImportCenterPage /></PR>} />
             <Route path="/audit"      element={<PR roles={ADMIN}><AuditLogsPage /></PR>} />
+            <Route path="/admin/kpis" element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

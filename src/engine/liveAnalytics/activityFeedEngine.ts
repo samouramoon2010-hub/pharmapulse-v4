@@ -5,7 +5,7 @@
 // ============================================================
 
 import { format, formatDistanceToNow, parseISO, subDays, differenceInHours } from 'date-fns'
-import { KPI_META, KPI_KEYS, sumKpi, computeAchievementPct, getDayProgress } from '../kpiAnalyticsEngine'
+import { KPI_META, KPI_KEYS, sumKpi, computeAchievementPct, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
 import type { LiveAnalyticsInput, ActivityFeedItem, ActivityType, ActivitySeverity } from './liveAnalyticsTypes'
 import type { MonthlyTarget } from '../kpiAnalyticsEngine'
 
@@ -72,7 +72,7 @@ function todayEntryEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
       if (val <= 0) return null
 
       const tgt = target
-        ? (Number((target as any)[KPI_META[k].targetField] ?? 0))
+        ? safeReadTarget(target as any, KPI_META[k].targetField)
         : 0
       const mtd = sumKpi(input.mtdEntries, k)
       const ach = tgt > 0 ? computeAchievementPct(mtd, tgt) : 0
@@ -98,7 +98,7 @@ function milestoneEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
 
   for (const k of KPI_KEYS) {
     const actual = sumKpi(mtdEntries, k)
-    const tgt    = Number((target as any)[KPI_META[k].targetField] ?? 0)
+    const tgt    = safeReadTarget(target as any, KPI_META[k].targetField)
     if (!tgt) continue
     const pct = computeAchievementPct(actual, tgt)
 

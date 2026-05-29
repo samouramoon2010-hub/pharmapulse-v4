@@ -47,7 +47,10 @@ export const useAuthStore = create(
       _fetchProfile: async (uid) => {
         try {
           const snap = await getDoc(doc(db, COL.USERS, uid))
-          return snap.exists() ? { id: snap.id, ...snap.data() } : null
+          // Always include both 'id' (Firestore doc id = Auth uid) and
+          // explicit 'uid' field so all consumers resolve correctly regardless
+          // of whether the Firestore user document stores a 'uid' field.
+          return snap.exists() ? { id: snap.id, uid: snap.id, ...snap.data() } : null
         } catch { return null }
       },
 

@@ -32,8 +32,12 @@ export const useKpiStore = create((set, get) => ({
   },
 
   // ── Save entry ────────────────────────────────────────────
-  saveEntry: async (data) => {
-    return saveKpiEntry(data)
+  // registry: optional live KpiRegistry from caller (e.g. KpiEntryPage).
+  // When provided, sanitizeKpiEntryFields uses it as the allowlist so
+  // custom KPIs added via Firestore registry are persisted correctly.
+  // Falls back to DEFAULT_KPI_REGISTRY when omitted.
+  saveEntry: async (data, registry) => {
+    return saveKpiEntry({ ...data, registry })
   },
 
   // ── Targets ───────────────────────────────────────────────

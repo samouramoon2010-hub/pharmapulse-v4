@@ -1,7 +1,16 @@
 // ============================================================
 // Pharmacist Performance Page
-// Connected to: kpiStore (subscribeMyEntries, subscribeAllTargets)
-// Engine V1: traffic light, pace, trend
+// Phase 5A: Static KPI_FIELDS replaced with live-registry-
+//           driven field list. All .color accesses guarded
+//           with safe fallbacks. Custom KPIs render safely.
+//
+// Engine compatibility:
+//   computeKpiStats / sumKpi / computeOverallAchievement still
+//   operate on the engine-key subset only (wasfaty/omni/
+//   wellness/basket/crossSelling). Custom KPI stats are
+//   computed as-available: actual summed from entries, target
+//   read from the target doc, achievement clamped safely.
+//   This is non-breaking for existing analytics.
 // ============================================================
 import React, { useEffect, useMemo, useState } from 'react'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
@@ -10,25 +19,47 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { TrendingUp, Target, Calendar, Award } from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
-import { useKpiStore }  from '../../store/kpiStore'
-import EmptyState       from '../../components/ui/EmptyState'
+import { useAuthStore }            from '../../store/authStore'
+import { useKpiStore }             from '../../store/kpiStore'
+import { subscribeKpiRegistry }    from '../../services/kpiRegistryService'
+import {
+  DEFAULT_KPI_REGISTRY,
+  getKpisForSurface,
+  getTargetFieldName,
+  DEFAULT_KPI_UI_CONFIG,
+} from '../../engine/kpiRegistry'
+import EmptyState                  from '../../components/ui/EmptyState'
 import { SkeletonChart, SkeletonStatCard } from '../../components/ui/SkeletonCard'
 import {
   getDayProgress, getTrafficLight, TRAFFIC_COLORS,
   computeAchievementPct, computePace,
   sumKpi, findWeakestKpi, findStrongestKpi,
   computeOverallAchievement, computeKpiStats,
-  getTargetForKpi,
 } from '../../engine'
 
-const KPI_FIELDS = [
-  { key:'wasfaty',      targetKey:'wasfatyTarget',   label:'Wasfaty',      color:'#6366f1' },
-  { key:'omni',         targetKey:'omniTarget',       label:'OmniHealth',   color:'#ef4444' },
-  { key:'wellness',     targetKey:'wellnessTarget',   label:'Wellness',     color:'#f59e0b' },
-  { key:'basket',       targetKey:'basketTarget',     label:'Basket',       color:'#22c55e' },
-  { key:'crossSelling', targetKey:'crossSellTarget',  label:'Cross Sell',   color:'#8b5cf6' },
-]
+// Safe fallback color — never undefined
+const FALLBACK_COLOR = DEFAULT_KPI_UI_CONFIG.defaultColor  // '#a1a1aa'
+
+// ── Registry → performance field list ─────────────────────────
+// Each field drives both rendering (buttons, bars) and stats.
+// engineKey = aliasFor ?? key; targetFieldName from registry.
+function buildPerfFields(registry) {
+  return getKpisForSurface(registry, 'dashboardEnabled').map((kpi) => {
+    const engineKey     = kpi.aliasFor ?? kpi.key
+    const targetField   = getTargetFieldName(kpi.key)
+    return {
+      key:         engineKey,
+      registryKey: kpi.key,
+      targetKey:   targetField,
+      label:       kpi.shortLabel || kpi.label || engineKey,
+      labelAr:     kpi.labelAr   || kpi.label || engineKey,
+      // Color: registry KpiDefinition has no .color field →
+      // always use FALLBACK_COLOR. Traffic-light color used for
+      // achievement rendering instead (cfg?.color).
+      color: FALLBACK_COLOR,
+    }
+  })
+}
 
 const ChartTip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -40,7 +71,7 @@ const ChartTip = ({ active, payload, label }) => {
       <p style={{ color:'var(--text-muted)', marginBottom:'3px' }}>{label}</p>
       {payload.map((p, i) => (
         <div key={i} style={{ display:'flex', gap:'5px', color:'var(--text-primary)', fontWeight:600 }}>
-          <div style={{ width:6, height:6, borderRadius:'50%', background:p.color, marginTop:3, flexShrink:0 }} />
+          <div style={{ width:6, height:6, borderRadius:'50%', background: p.color ?? FALLBACK_COLOR, marginTop:3, flexShrink:0 }} />
           <span style={{ fontVariantNumeric:'tabular-nums' }}>{p.value}</span>
         </div>
       ))}
@@ -49,18 +80,32 @@ const ChartTip = ({ active, payload, label }) => {
 }
 
 export default function PharmacistPerformancePage() {
-  const { userProfile }  = useAuthStore()
-  const {
-    entries,
-    targets,
-    subscribeMyEntries,
-    subscribeMyTargets,
-  } = useKpiStore()
+  const { userProfile } = useAuthStore()
+  const { entries, targets, subscribeMyEntries, subscribeMyTargets } = useKpiStore()
 
-  const [loading,    setLoading]    = useState(true)
-  const [focusKpi,   setFocusKpi]   = useState(KPI_FIELDS[0].key)
+  const [loading,      setLoading]      = useState(true)
+  const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
 
-  const uid        = userProfile?.uid
+  // ── Live KPI registry ─────────────────────────────────────────
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      ()    => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
+
+  // ── Registry-driven field list ────────────────────────────────
+  const perfFields = useMemo(() => buildPerfFields(liveRegistry), [liveRegistry])
+
+  // Safe initial focusKpi — first field key or '' if no fields yet
+  const [focusKpi, setFocusKpi] = useState('')
+  useEffect(() => {
+    if (!focusKpi && perfFields.length > 0) {
+      setFocusKpi(perfFields[0].key)
+    }
+  }, [perfFields, focusKpi])
+
+  const uid        = userProfile?.uid ?? userProfile?.id
   const pharmacyId = userProfile?.pharmacyId
   const dp         = getDayProgress()
   const currentMonth = format(new Date(), 'yyyy-MM')
@@ -73,7 +118,6 @@ export default function PharmacistPerformancePage() {
     return () => { u1?.(); u2?.(); clearTimeout(t) }
   }, [uid, pharmacyId])
 
-  // Current month entries for this pharmacist
   const monthFrom = format(startOfMonth(new Date()), 'yyyy-MM-dd')
   const monthTo   = format(endOfMonth(new Date()),   'yyyy-MM-dd')
 
@@ -87,22 +131,25 @@ export default function PharmacistPerformancePage() {
     [myEntries, monthFrom, monthTo]
   )
 
-  // Current target
   const myTarget = useMemo(() =>
     targets.find((t) => t.pharmacyId === pharmacyId && t.month === currentMonth),
     [targets, pharmacyId, currentMonth]
   )
 
-  // Per-KPI stats using Engine V1
+  // ── Per-KPI stats — registry-driven ──────────────────────────
+  // For core KPIs: uses engine computeKpiStats (traffic-light aware).
+  // For custom KPIs: computes actual/target directly; no engine weight.
   const kpiStatsMap = useMemo(() => {
     const map = {}
-    KPI_FIELDS.forEach(({ key, targetKey }) => {
+    perfFields.forEach(({ key, targetKey }) => {
       const actual = sumKpi(monthEntries, key)
       const target = myTarget?.[targetKey] || 0
+      // computeKpiStats is safe with unknown keys — it returns a
+      // stats object based purely on actual/target/pace math.
       map[key] = computeKpiStats(actual, target, dp, key)
     })
     return map
-  }, [monthEntries, myTarget, dp])
+  }, [monthEntries, myTarget, dp, perfFields])
 
   const overallAch    = useMemo(() => computeOverallAchievement(kpiStatsMap), [kpiStatsMap])
   const overallStatus = getTrafficLight(overallAch, dp.ratio)
@@ -114,6 +161,13 @@ export default function PharmacistPerformancePage() {
     if (!s) return null
     return computePace(s.actual, s.target, dp)
   }, [kpiStatsMap, focusKpi, dp])
+
+  // Focus KPI field descriptor (safe: returns undefined if not found)
+  const focusField = perfFields.find((f) => f.key === focusKpi)
+  // Safe color for focus KPI — traffic light preferred, then fallback
+  const focusColor = (focusKpi && kpiStatsMap[focusKpi]
+    ? TRAFFIC_COLORS[kpiStatsMap[focusKpi].status]?.color
+    : null) ?? FALLBACK_COLOR
 
   // 30-day trend for focus KPI
   const trendData = useMemo(() =>
@@ -139,15 +193,20 @@ export default function PharmacistPerformancePage() {
       const tgt   = targets.find((t) => t.pharmacyId === pharmacyId && t.month === mon)
       if (!tgt) return { month: format(d, 'MMM'), ach: 0 }
       const sm = {}
-      KPI_FIELDS.forEach(({ key, targetKey }) => {
+      perfFields.forEach(({ key, targetKey }) => {
         const actual = sumKpi(me, key)
         const target = tgt[targetKey] || 0
         sm[key] = { achievementPct: computeAchievementPct(actual, target) }
       })
       return { month: format(d, 'MMM'), ach: computeOverallAchievement(sm) }
     }).reverse(),
-    [myEntries, targets, pharmacyId]
+    [myEntries, targets, pharmacyId, perfFields]
   )
+
+  // Safe label helpers
+  const labelFor   = (key) => perfFields.find((f) => f.key === key)?.label || key
+  const weakestKey  = findWeakestKpi(kpiStatsMap)
+  const strongestKey = findStrongestKpi(kpiStatsMap)
 
   const CARD = {
     background:'var(--bg-surface)', border:'1px solid var(--border-subtle)',
@@ -175,8 +234,8 @@ export default function PharmacistPerformancePage() {
               {
                 label:'Overall Achievement', icon: Target,
                 value: `${overallAch}%`,
-                color: overallColors.color,
-                sub: overallColors.labelAr,
+                color: overallColors?.color ?? FALLBACK_COLOR,
+                sub: overallColors?.labelAr ?? '—',
               },
               {
                 label:'Entries This Month', icon: Calendar,
@@ -186,15 +245,15 @@ export default function PharmacistPerformancePage() {
               },
               {
                 label:'Best KPI', icon: Award,
-                value: `${kpiStatsMap[findStrongestKpi(kpiStatsMap)]?.achievementPct || 0}%`,
+                value: `${kpiStatsMap[strongestKey]?.achievementPct || 0}%`,
                 color: '#22c55e',
-                sub: KPI_FIELDS.find((k) => k.key === findStrongestKpi(kpiStatsMap))?.label || '—',
+                sub: labelFor(strongestKey),
               },
               {
                 label:'Focus KPI', icon: TrendingUp,
-                value: `${kpiStatsMap[findWeakestKpi(kpiStatsMap)]?.achievementPct || 0}%`,
-                color: TRAFFIC_COLORS[kpiStatsMap[findWeakestKpi(kpiStatsMap)]?.status || 'critical']?.color,
-                sub: KPI_FIELDS.find((k) => k.key === findWeakestKpi(kpiStatsMap))?.label || '—',
+                value: `${kpiStatsMap[weakestKey]?.achievementPct || 0}%`,
+                color: TRAFFIC_COLORS[kpiStatsMap[weakestKey]?.status || 'critical']?.color ?? FALLBACK_COLOR,
+                sub: labelFor(weakestKey),
               },
             ].map((s) => (
               <div key={s.label} style={CARD}>
@@ -216,23 +275,26 @@ export default function PharmacistPerformancePage() {
           KPI Monthly Progress
         </div>
 
-        {/* KPI selector */}
+        {/* KPI selector — registry-driven */}
         <div style={{ display:'flex', gap:'4px', flexWrap:'wrap', marginBottom:'14px' }}>
-          {KPI_FIELDS.map(({ key, label, color }) => {
-            const s = kpiStatsMap[key]
-            const cfg = s ? TRAFFIC_COLORS[s.status] : null
+          {perfFields.map(({ key, label }) => {
+            const s     = kpiStatsMap[key]
+            const cfg   = s ? TRAFFIC_COLORS[s.status] : null
+            const isFocus = focusKpi === key
+            // Button accent: traffic-light color preferred; fallback to FALLBACK_COLOR
+            const accent = cfg?.color ?? FALLBACK_COLOR
             return (
               <button key={key} onClick={() => setFocusKpi(key)}
                 style={{
                   padding:'4px 10px', borderRadius:'6px', fontSize:'11px', cursor:'pointer', transition:'all 0.12s',
-                  background: focusKpi === key ? `${color}14` : 'var(--bg-overlay)',
-                  border: `1px solid ${focusKpi === key ? `${color}30` : 'var(--border-subtle)'}`,
-                  color: focusKpi === key ? color : 'var(--text-muted)',
+                  background: isFocus ? `${accent}14` : 'var(--bg-overlay)',
+                  border: `1px solid ${isFocus ? `${accent}30` : 'var(--border-subtle)'}`,
+                  color: isFocus ? accent : 'var(--text-muted)',
                   display:'flex', alignItems:'center', gap:'4px',
                 }}>
                 {label}
                 {s && (
-                  <span style={{ fontSize:'9px', fontWeight:700, color: cfg?.color, fontVariantNumeric:'tabular-nums' }}>
+                  <span style={{ fontSize:'9px', fontWeight:700, color: cfg?.color ?? FALLBACK_COLOR, fontVariantNumeric:'tabular-nums' }}>
                     {s.achievementPct}%
                   </span>
                 )}
@@ -241,18 +303,20 @@ export default function PharmacistPerformancePage() {
           })}
         </div>
 
-        {/* Per-KPI bars */}
+        {/* Per-KPI progress bars — registry-driven */}
         <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
-          {KPI_FIELDS.map(({ key, label, color }) => {
+          {perfFields.map(({ key, label }) => {
             const s   = kpiStatsMap[key]
             const cfg = s ? TRAFFIC_COLORS[s.status] : null
+            // Bar color: traffic-light preferred, then FALLBACK_COLOR
+            const barColor = cfg?.color ?? FALLBACK_COLOR
             return (
               <div key={key} style={{ display:'flex', alignItems:'center', gap:'10px' }}>
                 <div style={{ width:'80px', textAlign:'right', fontSize:'11px', color:'var(--text-secondary)', flexShrink:0 }}>{label}</div>
                 <div style={{ flex:1, height:'5px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
-                  <div style={{ height:'100%', borderRadius:'99px', background: cfg?.color || color, width:`${Math.min(s?.achievementPct || 0, 100)}%`, transition:'width 0.6s ease' }} />
+                  <div style={{ height:'100%', borderRadius:'99px', background: barColor, width:`${Math.min(s?.achievementPct || 0, 100)}%`, transition:'width 0.6s ease' }} />
                 </div>
-                <div style={{ width:'36px', textAlign:'left', fontSize:'11px', fontWeight:600, color: cfg?.color || color, fontVariantNumeric:'tabular-nums' }}>
+                <div style={{ width:'36px', textAlign:'left', fontSize:'11px', fontWeight:600, color: barColor, fontVariantNumeric:'tabular-nums' }}>
                   {s?.target > 0 ? `${s.achievementPct}%` : '—'}
                 </div>
                 <div style={{ width:'70px', textAlign:'left', fontSize:'10px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
@@ -283,7 +347,7 @@ export default function PharmacistPerformancePage() {
       {/* 30-day trend for focus KPI */}
       <div style={{ ...CARD }}>
         <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
-          30-Day Trend — {KPI_FIELDS.find((k) => k.key === focusKpi)?.label}
+          30-Day Trend — {focusField?.label ?? focusKpi ?? '—'}
         </div>
         {loading ? <SkeletonChart height={180} /> : (
           trendData.some((d) => d.value > 0)
@@ -291,8 +355,9 @@ export default function PharmacistPerformancePage() {
                 <AreaChart data={trendData} margin={{ top:5, right:0, bottom:0, left:-30 }}>
                   <defs>
                     <linearGradient id="perf_grad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={KPI_FIELDS.find((k) => k.key === focusKpi)?.color} stopOpacity={0.25} />
-                      <stop offset="95%" stopColor={KPI_FIELDS.find((k) => k.key === focusKpi)?.color} stopOpacity={0} />
+                      {/* Safe color: focusColor always defined */}
+                      <stop offset="5%"  stopColor={focusColor} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={focusColor} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
@@ -300,7 +365,7 @@ export default function PharmacistPerformancePage() {
                   <YAxis tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTip />} />
                   <Area type="monotone" dataKey="value"
-                    stroke={KPI_FIELDS.find((k) => k.key === focusKpi)?.color}
+                    stroke={focusColor}
                     strokeWidth={1.5} fill="url(#perf_grad)" dot={false}
                     activeDot={{ r:3, strokeWidth:0 }} />
                 </AreaChart>

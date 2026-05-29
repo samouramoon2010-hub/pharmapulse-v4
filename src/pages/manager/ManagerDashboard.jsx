@@ -173,7 +173,9 @@ export default function ManagerDashboard() {
               <tr>
                 <th className="text-right text-slate-500 pb-2 font-medium">الصيدلاني</th>
                 {activeKpis.slice(0,3).map((k)=>(
-                  <th key={k.id} className="text-center text-slate-500 pb-2 font-medium px-2" style={{color:k.color}}>{k.name.slice(0,7)}</th>
+                  // k.color from legacy kpi_templates — may be undefined for custom KPIs;
+                  // undefined in CSS style is a no-op (falls back to inherited color) — safe.
+                  <th key={k.id} className="text-center text-slate-500 pb-2 font-medium px-2" style={{color: k.color ?? '#a1a1aa'}}>{k.name.slice(0,7)}</th>
                 ))}
               </tr>
             </thead>

@@ -109,15 +109,20 @@ export function getTargetFieldName(registryKey: string): string {
  * Render-ready UI configuration for a single KPI.
  * Consumed by form fields, table columns, and display chips.
  */
+// ── Extended section / component type enums ──────────────────
+
+export type KpiUiSection =
+  | 'FINANCIALS' | 'COMMERCIAL' | 'CARE_SERVICES' | 'DIGITAL_SERVICES'
+  | 'WELLNESS' | 'HEALTH_PROGRAMS' | 'OPERATIONS' | 'COMPLIANCE'
+  | 'DERMO_COSMETICS' | 'OTHER'
+
+export type KpiComponentType =
+  | 'NUMERIC_INPUT' | 'CURRENCY_FIELD' | 'PERCENTAGE_RATE' | 'READ_ONLY_CALCULATED'
+
 export interface KpiUiConfig {
   // ── Identity ───────────────────────────────────────────────
-  /** Registry key (business-facing) */
   key:             string
-
-  /** Resolved engine key (for KpiEntry/engine operations) */
   engineKey:       string
-
-  /** Firestore target document field name */
   targetFieldName: string
 
   // ── Labels ─────────────────────────────────────────────────
@@ -129,43 +134,62 @@ export interface KpiUiConfig {
   unit:         string
   unitAr:       string
   valueType:    KpiDefinition['valueType']
-
-  /**
-   * Decimal places for display.
-   * currency → 2, percentage → 1, count/number → 0
-   */
   precision:     number
-
-  /**
-   * Format pattern for display libraries.
-   * 'number' | 'currency_sar' | 'percent_0' | 'percent_1'
-   */
   displayFormat: string
 
-  // ── Form configuration ─────────────────────────────────────
-  /** Placeholder text for target input fields */
+  // ── Visual ─────────────────────────────────────────────────
+  /** Safe hex color — always defined, never undefined */
+  defaultColor:   string
+  /** Whether this KPI value renders with tabular-nums font */
+  isTabularNum:   boolean
+  /** Whether the KPI card/chip is highlighted in dashboards */
+  isHighlighted:  boolean
+  /** Grid column span for dashboard layouts (1 or 2) */
+  gridColSpan:    1 | 2
+
+  // ── Component / input ──────────────────────────────────────
+  componentType:    KpiComponentType
   inputPlaceholder: string
-
-  /** Short hint shown below the input */
   inputHint:        string
-
-  /** Whether a non-zero value is required for form validation */
   isRequired:       boolean
-
-  /** Whether this KPI appears in the Monthly Target form */
+  isMandatoryInput: boolean
+  minAllowedValue:  number
+  maxAllowedValue:  number | null   // null = uncapped
+  allowUncappedGrowth: boolean
   isVisibleForTargetInput: boolean
 
   // ── Grouping ───────────────────────────────────────────────
   category:   KpiDefinition['category']
-
-  /** Display section label for grouping in complex forms */
-  uiSection:  string
-
-  /** Stable 1-based position in the target form */
+  uiSection:  KpiUiSection
   inputOrder: number
 
   // ── Status ─────────────────────────────────────────────────
   uiStatus:   KpiUiStatus
+}
+
+// ── Safe default for unknown/custom KPIs — never crash ────────
+
+export const DEFAULT_KPI_UI_CONFIG: Omit<KpiUiConfig,
+  'key' | 'engineKey' | 'targetFieldName' | 'label' | 'shortLabel' | 'labelAr'
+  | 'unit' | 'unitAr' | 'valueType' | 'category' | 'uiStatus'
+> = {
+  precision:           0,
+  displayFormat:       'number',
+  defaultColor:        '#a1a1aa',
+  isTabularNum:        true,
+  isHighlighted:       false,
+  gridColSpan:         1,
+  componentType:       'NUMERIC_INPUT',
+  inputPlaceholder:    '0',
+  inputHint:           'Monthly target',
+  isRequired:          false,
+  isMandatoryInput:    false,
+  minAllowedValue:     0,
+  maxAllowedValue:     null,
+  allowUncappedGrowth: false,
+  isVisibleForTargetInput: false,
+  uiSection:           'OTHER',
+  inputOrder:          999,
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -188,17 +212,47 @@ function deriveDisplayFormat(kpi: KpiDefinition): string {
   }
 }
 
-const SECTION_LABELS: Record<KpiDefinition['category'], string> = {
-  prescription:   'Prescription',
-  digital:        'Digital Health',
-  wellness:       'Wellness',
-  commercial:     'Commercial',
-  operational:    'Operational',
-  health_program: 'Health Programmes',
+const CATEGORY_TO_UI_SECTION: Record<KpiDefinition['category'], KpiUiSection> = {
+  prescription:   'CARE_SERVICES',
+  digital:        'DIGITAL_SERVICES',
+  wellness:       'WELLNESS',
+  commercial:     'COMMERCIAL',
+  operational:    'OPERATIONS',
+  health_program: 'HEALTH_PROGRAMS',
 }
 
-function deriveUiSection(kpi: KpiDefinition): string {
-  return SECTION_LABELS[kpi.category] ?? kpi.category
+function deriveUiSection(kpi: KpiDefinition): KpiUiSection {
+  return CATEGORY_TO_UI_SECTION[kpi.category] ?? 'OTHER'
+}
+
+const COLOR_MAP: Record<string, string> = {
+  wasfaty:      '#6366f1',
+  omnihealth:   '#ef4444',
+  wellnessCard: '#f59e0b',
+  basket:       '#22c55e',
+  crossSelling: '#8b5cf6',
+  sales:        '#06b6d4',
+  sl:           '#ec4899',
+  ndf:          '#84cc16',
+  inbody:       '#f97316',
+  liberation:   '#a855f7',
+}
+
+function deriveDefaultColor(kpi: KpiDefinition): string {
+  return COLOR_MAP[kpi.key] ?? '#a1a1aa'
+}
+
+function deriveComponentType(kpi: KpiDefinition): KpiComponentType {
+  switch (kpi.valueType) {
+    case 'currency':   return 'CURRENCY_FIELD'
+    case 'percentage': return 'PERCENTAGE_RATE'
+    default:           return 'NUMERIC_INPUT'
+  }
+}
+
+function deriveMaxAllowed(kpi: KpiDefinition): number | null {
+  if (kpi.valueType === 'percentage') return 100
+  return null  // numeric/count/currency = uncapped
 }
 
 function deriveInputHint(kpi: KpiDefinition): string {
@@ -245,9 +299,18 @@ export function toKpiUiConfig(
     valueType:       kpi.valueType,
     precision:       derivePrecision(kpi),
     displayFormat:   deriveDisplayFormat(kpi),
+    defaultColor:    deriveDefaultColor(kpi),
+    isTabularNum:    true,
+    isHighlighted:   kpi.isCore,
+    gridColSpan:     1,
+    componentType:   deriveComponentType(kpi),
     inputPlaceholder: deriveInputPlaceholder(kpi),
     inputHint:       deriveInputHint(kpi),
     isRequired:      kpi.isCore,
+    isMandatoryInput: kpi.isCore,
+    minAllowedValue: 0,
+    maxAllowedValue: deriveMaxAllowed(kpi),
+    allowUncappedGrowth: kpi.valueType !== 'percentage',
     isVisibleForTargetInput: kpi.isActive && targetEnabled,
     category:        kpi.category,
     uiSection:       deriveUiSection(kpi),
@@ -351,18 +414,34 @@ export function buildTargetPayload(
   month:      string,
   formValues: Record<string, number>,
   configs:    KpiUiConfig[],
-): EngineTarget {
-  const registryTarget: RegistryTarget = { pharmacyId, month }
+): EngineTarget & Record<string, unknown> {
+  // Start with the 5 legacy core fields from the engine alias adapter
+  // This ensures omniTarget / wellnessTarget / etc. are correctly resolved
+  const coreRegistryTarget: RegistryTarget = { pharmacyId, month }
+  const extraFields: Record<string, number> = {}
+
+  // Core/alias KPI keys that mapRegistryTargetsToEngineTargets handles
+  const CORE_REGISTRY_KEYS = new Set([
+    'wasfaty', 'omnihealth', 'wellnessCard', 'basket', 'crossSelling', 'sales',
+  ])
 
   for (const cfg of configs) {
     const rawValue = formValues[cfg.targetFieldName] ?? 0
-    const value    = isNaN(rawValue) ? 0 : Math.max(0, Number(rawValue))
-    // Map targetFieldName back to registry key for the adapter
-    // e.g. 'wasfatyTarget' → 'wasfaty', 'omniTarget' → 'omnihealth'
-    registryTarget[cfg.key] = value
+    const value    = isNaN(Number(rawValue)) ? 0 : Math.max(0, Number(rawValue))
+
+    if (CORE_REGISTRY_KEYS.has(cfg.key)) {
+      // Let the alias adapter handle field name translation (omnihealth→omniTarget etc.)
+      coreRegistryTarget[cfg.key] = value
+    } else {
+      // Dynamic / custom KPI: use targetFieldName directly in the payload
+      // e.g. nps → npsTarget, manuka → manukaTarget
+      extraFields[cfg.targetFieldName] = value
+    }
   }
 
-  return mapRegistryTargetsToEngineTargets(registryTarget)
+  const corePayload = mapRegistryTargetsToEngineTargets(coreRegistryTarget)
+  // Merge: core engine fields + dynamic custom KPI fields
+  return { ...corePayload, ...extraFields }
 }
 
 /**

@@ -126,12 +126,22 @@ export default function TeamPage() {
   const { teamHealth, coachingRecommendations, accountabilityInsights,
           teamMomentum, teamStability, pharmacistSummaries } = teamIntelligence
 
+  // teamHealth.status → teamHealth.overallTeamStatus (correct field name from TeamHealthSummary)
+  // All accesses guarded with nullish fallback in case engine returns an unexpected value.
+  const teamStatus = teamHealth.overallTeamStatus ?? teamHealth.status ?? 'stable'
   const statusCfg = {
     stable:                { color:'#22c55e', label:'Stable'               },
     monitoring:            { color:'#00d2ad', label:'Monitoring'           },
     intervention_required: { color:'#f59e0b', label:'Intervention Required'},
     critical_operation:    { color:'#ef4444', label:'Critical Operation'   },
-  }[teamHealth.status]
+  }[teamStatus] ?? { color:'#a1a1aa', label: teamStatus ?? 'Unknown' }
+
+  // TeamHealthSummary uses: memberCount, teamPerformanceScore, teamConsistencyScore, activeMembers
+  // The page previously used: teamSize, avgPerformance, avgConsistency — none existed on the type.
+  const teamSize       = teamHealth.memberCount          ?? 0
+  const avgPerformance = teamHealth.teamPerformanceScore ?? 0
+  const avgConsistency = teamHealth.teamConsistencyScore ?? 0
+  const activeMembers  = teamHealth.activeMembers        ?? 0
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -140,7 +150,7 @@ export default function TeamPage() {
         <div>
           <div className="page-title">Team Intelligence</div>
           <div className="page-subtitle">
-            {teamHealth.teamSize} member{teamHealth.teamSize !== 1 ? 's' : ''} · {format(new Date(), 'MMMM yyyy')}
+            {teamSize} member{teamSize !== 1 ? 's' : ''} · {format(new Date(), 'MMMM yyyy')}
             <span style={{ color:'var(--border-default)', margin:'0 6px' }}>·</span>
             <span style={{ color: statusCfg.color }}>{statusCfg.label}</span>
           </div>
@@ -151,9 +161,9 @@ export default function TeamPage() {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">
         {[
           { label:'Team Status',    value: statusCfg.label,             color: statusCfg.color },
-          { label:'Avg Performance',value: `${teamHealth.avgPerformance}%`, color:'var(--brand-400)' },
-          { label:'Avg Consistency',value: `${teamHealth.avgConsistency}%`, color:'#6366f1' },
-          { label:'Active Members', value: `${teamHealth.activeMembers}/${teamHealth.teamSize}`, color:'var(--text-secondary)' },
+          { label:'Avg Performance',value: `${avgPerformance}%`,         color:'var(--brand-400)' },
+          { label:'Avg Consistency',value: `${avgConsistency}%`,         color:'#6366f1' },
+          { label:'Active Members', value: `${activeMembers}/${teamSize}`,color:'var(--text-secondary)' },
         ].map((s) => (
           <div key={s.label} style={CARD}>
             <div style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'5px', fontFamily:"'Inter',sans-serif" }}>

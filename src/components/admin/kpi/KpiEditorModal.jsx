@@ -249,12 +249,18 @@ export default function KpiEditorModal({ open, onClose, onSave, editingKpi, exis
                 {DIRECTIONS.map((d) => <option key={d} value={d}>{d === 'higher_is_better' ? '↑ Higher' : '↓ Lower'}</option>)}
               </select>
             </FL>
-            <FL label="Weight" hint="0..1, core KPIs only">
+            <FL label="Weight" hint="Decimal 0–1, core KPIs only. e.g. 0.20 = 20%">
               <input type="number" min="0" max="1" step="0.01"
                 value={form.weight} onChange={(e) => sf('weight', e.target.value)}
                 disabled={isProtected && editingKpi?.isCore}
                 style={{ ...INP, opacity: isProtected && editingKpi?.isCore ? 0.6 : 1 }}
               />
+              <p style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'4px', lineHeight:1.5 }}>
+                Use decimal: <strong style={{ color:'var(--text-secondary)' }}>0.20</strong> = 20% ·
+                {' '}<strong style={{ color:'var(--text-secondary)' }}>0.15</strong> = 15%.
+                {' '}Core KPI weights must total <strong style={{ color:'var(--text-secondary)' }}>1.00</strong>.
+                {' '}Custom KPIs: use <strong style={{ color:'var(--text-secondary)' }}>0</strong>.
+              </p>
               {errors.weight && <p style={{ fontSize:'11px', color:'#f87171', marginTop:'2px' }}>{errors.weight}</p>}
             </FL>
           </div>

@@ -858,3 +858,159 @@
   .kpi-tile-value { font-size: 1.2rem; }
   .op-feed-item { padding: 8px 10px; font-size: 11px; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   DESIGN TOKENS FOUNDATION — Phase: Tokens Lite
+   Safe additions only — no overrides of existing classes.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── KPI Semantic CSS Variables (extends :root) ───────────── */
+:root {
+  /* KPI core palette — per-KPI fixed brand colors */
+  --kpi-wasfaty:      #6366f1;
+  --kpi-omni:         #ef4444;
+  --kpi-wellness:     #f59e0b;
+  --kpi-basket:       #22c55e;
+  --kpi-crossSelling: #8b5cf6;
+  --kpi-fallback:     #a1a1aa;
+
+  /* Traffic-light semantic (mirrors TRAFFIC_COLORS in engine) */
+  --traffic-excellent: #22c55e;
+  --traffic-good:      #00d2ad;
+  --traffic-warning:   #f59e0b;
+  --traffic-critical:  #ef4444;
+
+  /* Risk colors */
+  --risk-low:      #22c55e;
+  --risk-medium:   #f59e0b;
+  --risk-high:     #ef4444;
+  --risk-critical: #dc2626;
+
+  /* Executive palette */
+  --exec-momentum:  #22c55e;
+  --exec-declining: #ef4444;
+  --exec-stable:    #00d2ad;
+  --exec-benchmark: #6366f1;
+
+  /* Spacing tokens */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Radius tokens */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-card: 12px;
+  --radius-full: 9999px;
+
+  /* Shadow tokens */
+  --shadow-card:  0 0 0 1px rgba(255,255,255,0.04), 0 2px 4px rgba(0,0,0,0.3);
+  --shadow-inner: inset 0 1px 0 rgba(255,255,255,0.04);
+  --shadow-float: 0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+  --shadow-focus: 0 0 0 2px rgba(0,210,173,0.12);
+}
+
+/* ── Typography utilities (additive) ─────────────────────── */
+@layer utilities {
+  /* Tabular numbers — critical for all metric/KPI values */
+  .nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Metric size utilities */
+  .text-metric    { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
+  .text-metric-sm { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+  .text-metric-xs { font-size: 1rem;    font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+
+  /* Caps label — section headers, metric labels */
+  .text-caps {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Enterprise text hierarchy helpers */
+  .text-enterprise-primary   { color: var(--text-primary);   }
+  .text-enterprise-secondary { color: var(--text-secondary); }
+  .text-enterprise-muted     { color: var(--text-muted);     }
+  .text-enterprise-brand     { color: var(--text-brand);     }
+
+  /* KPI status color utilities */
+  .text-kpi-excellent { color: var(--traffic-excellent); }
+  .text-kpi-good      { color: var(--traffic-good);      }
+  .text-kpi-warning   { color: var(--traffic-warning);   }
+  .text-kpi-critical  { color: var(--traffic-critical);  }
+  .text-kpi-fallback  { color: var(--kpi-fallback);      }
+
+  /* Surface utilities (additive — alongside existing .card) */
+  .surface-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-inner);
+  }
+  .surface-overlay {
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-card);
+  }
+
+  /* Progress bar semantic variants */
+  .progress-excellent { background: var(--traffic-excellent); }
+  .progress-good      { background: var(--traffic-good);      }
+  .progress-warning   { background: var(--traffic-warning);   }
+  .progress-critical  { background: var(--traffic-critical);  }
+  .progress-fallback  { background: var(--kpi-fallback);      }
+
+  /* KPI dot indicators */
+  .kpi-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+  }
+  .kpi-dot-sm {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+  }
+}
+
+/* ── Improved scrollbar — slightly refined ───────────────── */
+::-webkit-scrollbar       { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ── Number rendering — global tabular nums for inputs ───── */
+input[type="number"],
+.metric-value,
+.metric-value-sm,
+[data-numeric="true"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── Focus ring standardization ──────────────────────────── */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* ── Print — hide UI chrome, show data ───────────────────── */
+@media print {
+  .mobile-nav, .sidebar, .topbar, .btn, [data-print-hide] { display: none !important; }
+  body { background: white; color: black; }
+}

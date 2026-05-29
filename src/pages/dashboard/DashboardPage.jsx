@@ -45,16 +45,17 @@ import {
   generateLiveAnalytics, buildLiveInput,
   KPI_HEALTH_COLORS,
 } from '../../engine/liveAnalytics'
+import { subscribeKpiRegistry }                              from '../../services/kpiRegistryService'
+import { mergeRemoteRegistryWithDefaults }                   from '../../services/kpiRegistryLogic'
+import { getKpisForSurface, DEFAULT_KPI_UI_CONFIG }          from '../../engine/kpiRegistry'
+import { DEFAULT_KPI_REGISTRY, getTargetFieldName }          from '../../engine/kpiRegistry'
 
-const KPI_KEYS = ['wasfaty','omni','wellness','basket','crossSelling']
-const KPI_COLORS_MAP = {
+// ── Static fallback colors (for render safety before registry loads) ──
+const FALLBACK_COLORS = {
   wasfaty:'#6366f1', omni:'#ef4444', wellness:'#f59e0b',
   basket:'#22c55e', crossSelling:'#8b5cf6',
 }
-const KPI_LABELS_MAP = {
-  wasfaty:'Wasfaty', omni:'OmniHealth', wellness:'Wellness',
-  basket:'Basket', crossSelling:'Cross Sell',
-}
+const DEFAULT_KPI_COLOR = '#a1a1aa'
 
 // ── Premium Chart Tooltip ─────────────────────────────────────
 const ChartTip = ({ active, payload, label }) => {
@@ -286,7 +287,10 @@ export default function DashboardPage() {
   const role      = userProfile?.role
   const isAdmin   = role === 'admin'
   const isManager = ['manager','admin'].includes(role)
-  const uid        = userProfile?.uid
+  // uid resolution: userProfile.uid (explicit field) OR userProfile.id (Firestore doc id = Auth uid).
+  // _fetchProfile returns { id: snap.id, ...snap.data() } — the doc may not have a 'uid' field
+  // in the data(), but snap.id is always the Firebase Auth UID. Use both for safety.
+  const uid        = userProfile?.uid ?? userProfile?.id
   const pharmacyId = userProfile?.pharmacyId
   const noBranch   = !isAdmin && !pharmacyId
 
@@ -328,10 +332,60 @@ export default function DashboardPage() {
   const todayEntries = useMemo(() => myEntries.filter((e) => e.date === today),  [myEntries, today])
   const monthEntries = useMemo(() => myEntries.filter((e) => e.date >= monthStart && e.date <= monthEnd), [myEntries])
 
-  const currentTarget = useMemo(() =>
-    targets.find((t) => t.pharmacyId === pharmacyId && t.month === thisMonth),
-    [targets, pharmacyId]
+  // ── Target lookup — admin aggregates across all branches ─────
+  // Admin has no pharmacyId, so targets.find(t => t.pharmacyId === undefined) never matches.
+  // Fix: for admin, sum all current-month targets across all pharmacies (mirrors ReportsPage).
+  // For manager/pharmacist: find the single target for their pharmacy (existing behavior).
+  const currentTarget = useMemo(() => {
+    if (!targets.length) return undefined
+
+    if (isAdmin) {
+      // Build aggregated synthetic target by summing all pharmacy targets for this month.
+      // This matches how ReportsPage computes totalTarget in kpiSummary.
+      const monthTargets = targets.filter((t) => t.month === thisMonth)
+      if (!monthTargets.length) return undefined
+
+      // Start with identity fields, then sum every *Target field
+      const aggregated = { pharmacyId: 'all', month: thisMonth }
+      for (const t of monthTargets) {
+        for (const [k, v] of Object.entries(t)) {
+          if (!k.endsWith('Target')) continue
+          aggregated[k] = (aggregated[k] || 0) + (Number(v) || 0)
+        }
+      }
+      return aggregated
+    }
+
+    // Manager / pharmacist: find their specific pharmacy target
+    return targets.find((t) => t.pharmacyId === pharmacyId && t.month === thisMonth)
+  }, [targets, pharmacyId, thisMonth, isAdmin])
+
+  // ── Live Registry-driven KPI list ──────────────────────────
+  const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      ()    => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
+
+  // KPI configs for dashboard — active + dashboardEnabled
+  const registryKpis = useMemo(() => {
+    return getKpisForSurface(liveRegistry, 'dashboardEnabled')
+  }, [liveRegistry])
+
+  // Engine keys only — for reading from kpi_entries
+  const KPI_KEYS = useMemo(
+    () => registryKpis.map(cfg => cfg.aliasFor ?? cfg.key),
+    [registryKpis]
   )
+
+  // Color lookup — safe fallback to defaultColor
+  const kpiColor = (engineKey) =>
+    FALLBACK_COLORS[engineKey] ??
+    registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.visibility?.dashboardEnabled
+      ? (registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.defaultColor ?? DEFAULT_KPI_COLOR)
+      : DEFAULT_KPI_COLOR
 
   // ── KPI Engine V1 — per-KPI stats ────────────────────────────
   const dp = useMemo(() => getDayProgress(), [])
@@ -342,18 +396,29 @@ export default function DashboardPage() {
 
   const kpiStats = useMemo(() => {
     const map = {}
-    KPI_KEYS.forEach((k) => {
-      const actual = monthEntries.reduce((s, e) => s + (Number(e[k]) || 0), 0)
-      const target = currentTarget ? getTargetForKpi(currentTarget, k) : 0
-      map[k] = {
-        ...computeKpiStats(actual, target, dp, k),
-        // legacy aliases for existing JSX below
-        achPct: computeKpiStats(actual, target, dp, k).achievementPct,
-        colors: TRAFFIC_COLORS[computeKpiStats(actual, target, dp, k).status],
+    KPI_KEYS.forEach((engineKey) => {
+      // Find registry config for this engine key (handles aliases)
+      const cfg = registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)
+      const actual = monthEntries.reduce((s, e) => s + (Number(e[engineKey]) || 0), 0)
+      // Use targetFieldName from registry for dynamic target fields, fall back to engine
+      const targetField = cfg ? getTargetFieldName(cfg.key) : null
+      const target = currentTarget
+        ? (targetField && (currentTarget[targetField] != null)
+            ? (Number(currentTarget[targetField]) || 0)
+            : getTargetForKpi(currentTarget, engineKey))
+        : 0
+      const stats = computeKpiStats(actual, target, dp, engineKey)
+      map[engineKey] = {
+        ...stats,
+        achPct: stats.achievementPct,
+        colors: TRAFFIC_COLORS[stats.status],
+        // attach registry metadata for rendering
+        _label: cfg?.shortLabel ?? engineKey,
+        _color: cfg?.defaultColor ?? FALLBACK_COLORS[engineKey] ?? DEFAULT_KPI_COLOR,
       }
     })
     return map
-  }, [monthEntries, currentTarget, dp])
+  }, [monthEntries, currentTarget, dp, KPI_KEYS, registryKpis])
 
   // Today totals (unchanged — used by bar chart)
   const todayTotals = useMemo(() =>
@@ -361,7 +426,7 @@ export default function DashboardPage() {
       acc[k] = todayEntries.reduce((s, e) => s + (Number(e[k]) || 0), 0)
       return acc
     }, {}),
-    [todayEntries]
+    [todayEntries, KPI_KEYS]
   )
 
   // ── Engine V1 — overall achievement (weighted) ────────────────
@@ -684,8 +749,8 @@ export default function DashboardPage() {
                 <div key={k} className="kpi-tile animate-slide-up" style={{ animationDelay:`${i*40}ms` }}>
                   {/* Label + status */}
                   <div className="kpi-tile-label">
-                    <div style={{ width:5, height:5, borderRadius:'50%', background:KPI_COLORS_MAP[k], flexShrink:0 }} />
-                    {KPI_LABELS_MAP[k]}
+                    <div style={{ width:5, height:5, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), flexShrink:0 }} />
+                    {(kpiStats[k]?._label ?? k)}
                     <span className="status-dot" style={{ color:cfg.color, marginRight:'auto', fontSize:'9px' }}>
                       {cfg.labelAr}
                     </span>
@@ -727,9 +792,9 @@ export default function DashboardPage() {
         {loading ? <SkeletonInsightsStrip count={6} /> : [
           { label:'Run Rate',      value:`${Math.round(dayRatio*100)}%`,     sub:`Day ${daysPassed}/${totalDays}`,    color:'var(--text-secondary)' },
           { label:'Today Entries', value:todayEntries.length,                sub:'submissions',                       color:'var(--brand-400)' },
-          { label:'Focus KPI',     value:`${kpiStats[weakestKpi]?.achievementPct||0}%`, sub:KPI_LABELS_MAP[weakestKpi]||'—', color:TRAFFIC_COLORS[kpiStats[weakestKpi]?.status||'critical']?.color },
-          { label:'Best KPI',      value:`${kpiStats[strongestKpi]?.achievementPct||0}%`,sub:KPI_LABELS_MAP[strongestKpi]||'—',color:TRAFFIC_COLORS[kpiStats[strongestKpi]?.status||'good']?.color },
-          { label:'Required/day',  value:(paceMap[weakestKpi]?.requiredDailyPace||0).toLocaleString(), sub:KPI_LABELS_MAP[weakestKpi],  color:'var(--text-secondary)' },
+          { label:'Focus KPI',     value:`${kpiStats[weakestKpi]?.achievementPct||0}%`, sub:kpiStats[weakestKpi]?._label||weakestKpi||'—', color:TRAFFIC_COLORS[kpiStats[weakestKpi]?.status||'critical']?.color },
+          { label:'Best KPI',      value:`${kpiStats[strongestKpi]?.achievementPct||0}%`,sub:kpiStats[strongestKpi]?._label||strongestKpi||'—',color:TRAFFIC_COLORS[kpiStats[strongestKpi]?.status||'good']?.color },
+          { label:'Required/day',  value:(paceMap[weakestKpi]?.requiredDailyPace||0).toLocaleString(), sub:kpiStats[weakestKpi]?._label||weakestKpi,  color:'var(--text-secondary)' },
           { label:'Risk Level',    value:{ ON_TRACK:'✓ OK', LOW_RISK:'Low', MEDIUM_RISK:'Medium', HIGH_RISK:'⚠ High' }[riskLevel]||riskLevel,
             sub:'portfolio risk', color:{ ON_TRACK:'var(--kpi-good)', LOW_RISK:'var(--kpi-good)', MEDIUM_RISK:'var(--kpi-warning)', HIGH_RISK:'var(--kpi-critical)' }[riskLevel] },
         ].map((item, i) => (
@@ -851,8 +916,8 @@ export default function DashboardPage() {
                 <div style={{ display:'flex', gap:'8px' }}>
                   {['wasfaty','omni','wellness'].map((k) => (
                     <div key={k} style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'9px', color:'var(--text-muted)' }}>
-                      <div style={{ width:6, height:6, borderRadius:'50%', background:KPI_COLORS_MAP[k] }} />
-                      {KPI_LABELS_MAP[k]}
+                      <div style={{ width:6, height:6, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR) }} />
+                      {(kpiStats[k]?._label ?? k)}
                     </div>
                   ))}
                 </div>
@@ -862,8 +927,8 @@ export default function DashboardPage() {
                   <defs>
                     {['wasfaty','omni','wellness'].map((k) => (
                       <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={KPI_COLORS_MAP[k]} stopOpacity={0.2} />
-                        <stop offset="95%" stopColor={KPI_COLORS_MAP[k]} stopOpacity={0}   />
+                        <stop offset="5%"  stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0.2} />
+                        <stop offset="95%" stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0}   />
                       </linearGradient>
                     ))}
                   </defs>
@@ -872,8 +937,8 @@ export default function DashboardPage() {
                   <YAxis tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTip />} />
                   {['wasfaty','omni','wellness'].map((k) => (
-                    <Area key={k} type="monotone" dataKey={k} name={KPI_LABELS_MAP[k]}
-                      stroke={KPI_COLORS_MAP[k]} strokeWidth={1.5} fill={`url(#g_${k})`}
+                    <Area key={k} type="monotone" dataKey={k} name={(kpiStats[k]?._label ?? k)}
+                      stroke={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} strokeWidth={1.5} fill={`url(#g_${k})`}
                       dot={false} activeDot={{ r:3, strokeWidth:0 }} />
                   ))}
                 </AreaChart>
@@ -1018,17 +1083,17 @@ export default function DashboardPage() {
                 const cfg = fc ? TRAFFIC_COLORS[getTrafficLight(fc.forecastAchPct, 1)] : null
                 return (
                   <div key={k} className="op-feed-item">
-                    <div className="op-feed-dot" style={{ background: KPI_COLORS_MAP[k] }} />
+                    <div className="op-feed-dot" style={{ background: (kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR) }} />
                     <div style={{ flex:1 }}>
                       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                        <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{KPI_LABELS_MAP[k]}</span>
+                        <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{(kpiStats[k]?._label ?? k)}</span>
                         <span style={{ fontSize:'11px', fontWeight:600, color:cfg?.color||'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
                           {fc?.forecastAchPct ?? 0}%
                         </span>
                       </div>
                       {fc && (
                         <div style={{ marginTop:'3px', height:'2px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
-                          <div style={{ height:'100%', borderRadius:'99px', background:cfg?.color||KPI_COLORS_MAP[k], width:`${Math.min(fc.forecastAchPct,100)}%`, transition:'width 0.5s ease' }} />
+                          <div style={{ height:'100%', borderRadius:'99px', background:cfg?.color||(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), width:`${Math.min(fc.forecastAchPct,100)}%`, transition:'width 0.5s ease' }} />
                         </div>
                       )}
                     </div>
@@ -1052,9 +1117,9 @@ export default function DashboardPage() {
             <div className="section-title" style={{ fontSize:'12px' }}>Today's KPIs</div>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={KPI_KEYS.map((k) => ({
-                name: KPI_LABELS_MAP[k],
+                name: (kpiStats[k]?._label ?? k),
                 value: todayEntries.reduce((s, e) => s + (e[k]||0), 0),
-                color: KPI_COLORS_MAP[k],
+                color: (kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR),
               }))} margin={{ top:5, right:5, bottom:0, left:-25 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                 <XAxis dataKey="name" tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
@@ -1062,7 +1127,7 @@ export default function DashboardPage() {
                 <Tooltip content={<ChartTip />} />
                 <Bar dataKey="value" radius={[4,4,0,0]}>
                   {KPI_KEYS.map((k, i) => (
-                    <Cell key={i} fill={KPI_COLORS_MAP[k]} fillOpacity={0.85} />
+                    <Cell key={i} fill={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} fillOpacity={0.85} />
                   ))}
                 </Bar>
               </BarChart>
@@ -1112,8 +1177,8 @@ export default function DashboardPage() {
                 const cfg = s?.colors || TRAFFIC_COLORS.critical
                 return (
                   <div key={k} className="metric-row">
-                    <div style={{ width:5, height:5, borderRadius:'50%', background:KPI_COLORS_MAP[k], flexShrink:0 }} />
-                    <span className="metric-row-label">{KPI_LABELS_MAP[k]}</span>
+                    <div style={{ width:5, height:5, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), flexShrink:0 }} />
+                    <span className="metric-row-label">{(kpiStats[k]?._label ?? k)}</span>
                     <div className="metric-row-bar">
                       <div className="metric-row-fill" style={{ width:`${Math.min(s?.achPct||0,100)}%`, background:cfg.color }} />
                     </div>

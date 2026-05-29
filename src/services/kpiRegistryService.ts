@@ -32,7 +32,13 @@ import {
 } from './kpiRegistryLogic'
 
 // ── Re-export from pure logic layer ────────────────────────────
-export { PROTECTED_CORE_KEYS, mergeRemoteRegistryWithDefaults } from './kpiRegistryLogic'
+export {
+  PROTECTED_CORE_KEYS,
+  mergeRemoteRegistryWithDefaults,
+  ENTRY_METADATA_FIELDS,
+  buildAllowedEntryKeys,
+  sanitizeKpiEntryFields,
+} from './kpiRegistryLogic'
 
 // ── Collection reference ──────────────────────────────────────
 const registryCol = () => collection(db, COL.KPI_REGISTRY)
@@ -52,6 +58,11 @@ function buildDocPayload(
     label:        def.label,
     shortLabel:   def.shortLabel,
     labelAr:      def.labelAr,
+    // aliasFor must be persisted so engineKey resolution survives edits.
+    // omnihealth.aliasFor = 'omni', wellnessCard.aliasFor = 'wellness'.
+    // Without this, editing a KPI wipes aliasFor → engine key falls back to
+    // registry key → entry data lookup uses wrong field name.
+    ...(def.aliasFor != null ? { aliasFor: def.aliasFor } : {}),
     // Classification
     category:     def.category,
     valueType:    def.valueType,
@@ -77,9 +88,10 @@ function buildDocPayload(
     regionalEnabled:    def.visibility.regionalEnabled,
     targetInputEnabled: def.visibility.targetInputEnabled ?? false,
     // Ordering & Metadata
-    sortOrder: def.sortOrder ?? 999,
-    updatedAt: serverTimestamp(),
-    updatedBy: uid,
+    sortOrder:   def.sortOrder ?? 999,
+    description: def.description ?? '',
+    updatedAt:   serverTimestamp(),
+    updatedBy:   uid,
     ...(isNew ? { createdAt: serverTimestamp() } : {}),
   }
 }

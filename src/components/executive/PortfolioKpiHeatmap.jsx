@@ -1,6 +1,16 @@
 // ============================================================
 // PortfolioKpiHeatmap — renders pre-computed portfolio KPI data
 // Receives processed ExecutiveReport output. No analytics here.
+//
+// INTENTIONALLY CORE-ANALYTICS-ONLY (by design):
+//   Uses KPI_KEYS + KPI_META from kpiAnalyticsEngine.
+//   Renders only the 5 core KPIs that ExecutiveReport computes.
+//   Custom KPIs are not yet scored by the executive engine;
+//   they will appear here once executiveEngine is extended.
+//   This is documented as a deferred non-blocking limitation.
+//
+// Phase 5B safety: cfg guaranteed via ?? TRAFFIC_COLORS.good
+// fallback — no crash if ach.status is unexpected.
 // ============================================================
 import React from 'react'
 import { TRAFFIC_COLORS, KPI_META, KPI_KEYS } from '../../engine'
@@ -20,8 +30,8 @@ export default function PortfolioKpiHeatmap({  report  }) {
         {KPI_KEYS.map((kpiKey) => {
           const ach    = portfolioAch[kpiKey]
           if (!ach) return null
-          const cfg    = TRAFFIC_COLORS[ach.status] ?? TRAFFIC_COLORS.good
-          const meta   = KPI_META[kpiKey]
+          const cfg    = TRAFFIC_COLORS[ach.status] ?? TRAFFIC_COLORS.good ?? { color: '#a1a1aa', bg: 'transparent', border: '#a1a1aa', labelAr: '—' }
+          const meta   = KPI_META[kpiKey] ?? { en: kpiKey, ar: kpiKey, unit: '', targetField: '' }
           const pct    = Math.min(ach.achievementPct, 100)
 
           return (

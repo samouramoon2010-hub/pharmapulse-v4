@@ -1,5 +1,8 @@
 // ============================================================
 // KPI Service — kpi_entries + targets (Production Firestore)
+// Phase 4B: saveKpiEntry is now fully dynamic — no hardcoded
+//           KPI field destructuring. Payload built from the
+//           live registry via sanitizeKpiEntryFields().
 // ============================================================
 import {
   collection, doc, setDoc, getDoc, getDocs,
@@ -8,6 +11,10 @@ import {
 import { auth, db, COL } from './firebase'
 import { logAction, AUDIT_ACTION } from './auditService'
 import { triggerHistorySnapshots } from './historyService'
+import {
+  sanitizeKpiEntryFields,
+  ENTRY_METADATA_FIELDS,
+} from './kpiRegistryLogic'
 
 const clean = (obj) =>
   Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined))
@@ -18,18 +25,20 @@ function entryId(userId, pharmacyId, date) {
 }
 
 // ── Save / upsert daily KPI entry ─────────────────────────────
+// Phase 4B: No hardcoded KPI field destructuring.
+// Accepts any shape of input; sanitizeKpiEntryFields() resolves
+// which keys are valid KPI fields using the live registry.
+// Metadata fields (userId, pharmacyId, date, notes, timestamps,
+// actorId, actorRole) are handled explicitly and separately.
 export async function saveKpiEntry({
-  userId,       // from auth.currentUser.uid — verified below
-  pharmacyId,   // from userProfile.pharmacyId
-  date,         // "yyyy-MM-dd"
-  wasfaty      = 0,
-  omni         = 0,
-  wellness     = 0,
-  basket       = 0,
-  crossSelling = 0,
-  notes        = '',
+  userId,
+  pharmacyId,
+  date,
+  notes       = '',
   actorId,
   actorRole,
+  registry,   // optional: pass live registry from caller for full dynamic support
+  ...kpiFields  // all remaining fields treated as candidate KPI values
 }) {
   // ── Step 1: resolve userId from Firebase Auth (source of truth) ──
   const resolvedUserId = auth?.currentUser?.uid || userId
@@ -53,28 +62,39 @@ export async function saveKpiEntry({
   const existing = await getDoc(doc(db, COL.KPI_ENTRIES, docId))
   const isNew    = !existing.exists()
 
-  // ── Step 3: build clean payload ──────────────────────────────
+  // ── Step 3: sanitize KPI value fields ────────────────────────
+  // sanitizeKpiEntryFields():
+  //   - Resolves allowed keys from the live registry (or default)
+  //   - Skips metadata fields (userId, pharmacyId, etc.)
+  //   - Converts strings → numbers; rejects NaN/Infinity
+  //   - Clamps negatives to 0
+  //   - Backward compatible: wasfaty/omni/wellness/basket/crossSelling
+  //     are always in the default registry allowlist
+  const safeKpiValues = sanitizeKpiEntryFields(kpiFields, registry)
+
+  // ── Step 4: build clean Firestore payload ────────────────────
   const payload = clean({
-    userId:       resolvedUserId,
-    pharmacyId:   pharmacyId.trim(),
+    // Ownership + identity (always present)
+    userId:    resolvedUserId,
+    pharmacyId: pharmacyId.trim(),
     date,
-    wasfaty:      Number(wasfaty)      || 0,
-    omni:         Number(omni)         || 0,
-    wellness:     Number(wellness)     || 0,
-    basket:       Number(basket)       || 0,
-    crossSelling: Number(crossSelling) || 0,
-    notes:        notes?.trim()        || '',
-    updatedAt:    serverTimestamp(),
-    createdBy:    actorId || resolvedUserId || null,
+
+    // All sanitized KPI values (dynamic — driven by registry)
+    ...safeKpiValues,
+
+    // Non-KPI fields
+    notes:     notes?.trim() || '',
+    updatedAt: serverTimestamp(),
+    createdBy: actorId || resolvedUserId || null,
     ...(isNew
       ? { createdAt: serverTimestamp(), submittedBy: actorId || resolvedUserId || null }
       : {}),
   })
 
-  // ── Step 4: write to Firestore ────────────────────────────────
+  // ── Step 5: write to Firestore ────────────────────────────────
   await setDoc(doc(db, COL.KPI_ENTRIES, docId), payload, { merge: true })
 
-  // ── Step 5: audit log ─────────────────────────────────────────
+  // ── Step 6: audit log ─────────────────────────────────────────
   await logAction({
     action:     isNew ? AUDIT_ACTION.CREATE : AUDIT_ACTION.UPDATE,
     collection: COL.KPI_ENTRIES,
@@ -85,9 +105,7 @@ export async function saveKpiEntry({
     after:      payload,
   })
 
-  // ── Step 6: History Layer V1 snapshots ──────────────────────
-  // Fire-and-forget: KPI save already succeeded at step 4.
-  // Failures here are logged but never propagate to the caller.
+  // ── Step 7: History Layer V1 snapshots (fire-and-forget) ─────
   triggerHistorySnapshots(
     resolvedUserId,
     payload.pharmacyId,
@@ -95,8 +113,6 @@ export async function saveKpiEntry({
     actorId || resolvedUserId,
     actorRole,
   ).catch((e) => {
-    // Safety net — triggerHistorySnapshots has its own internal try/catch
-    // but this catches unexpected throws from the function setup itself.
     console.error('[kpiService] Unexpected error in triggerHistorySnapshots:', e.message)
   })
 
@@ -125,21 +141,25 @@ export function subscribeAllKpiEntries(callback) {
 // ── Targets ────────────────────────────────────────────────────
 export async function saveTarget({
   pharmacyId, month,
-  salesTarget = 0, wasfatyTarget = 0, omniTarget = 0,
-  wellnessTarget = 0, crossSellTarget = 0,
   actorId, actorRole,
+  ...targetFields   // accepts ALL *Target fields: legacy + dynamic KPIs
 }) {
   const docId    = `${pharmacyId}_${month}`
   const existing = await getDoc(doc(db, COL.TARGETS, docId))
 
+  // Accept any key ending in 'Target' as a safe dynamic KPI target field.
+  const safeTargetFields = {}
+  for (const [key, raw] of Object.entries(targetFields)) {
+    if (!key.endsWith('Target')) continue
+    const n = Number(raw)
+    if (isNaN(n) || !isFinite(n)) continue
+    safeTargetFields[key] = Math.max(0, n)
+  }
+
   const payload = clean({
     pharmacyId, month,
-    salesTarget:     Number(salesTarget),
-    wasfatyTarget:   Number(wasfatyTarget),
-    omniTarget:      Number(omniTarget),
-    wellnessTarget:  Number(wellnessTarget),
-    crossSellTarget: Number(crossSellTarget),
-    updatedAt:       serverTimestamp(),
+    ...safeTargetFields,
+    updatedAt: serverTimestamp(),
     ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
   })
 

@@ -207,7 +207,7 @@ export default function AdminDashboard() {
                 <div key={kpi.id} className="flex items-center gap-3">
                   <div
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{ background: kpi.color }}
+                    style={{ background: kpi.color ?? '#a1a1aa' }}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
@@ -221,7 +221,7 @@ export default function AdminDashboard() {
                         className="h-full rounded-full"
                         style={{
                           width: `${Math.min(kpi.achievement, 100)}%`,
-                          background: kpi.color,
+                          background: kpi.color ?? '#a1a1aa',
                           transition: 'width 0.7s ease-out',
                         }}
                       />

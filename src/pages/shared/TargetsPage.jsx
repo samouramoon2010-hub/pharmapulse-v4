@@ -27,14 +27,16 @@ import {
   buildFormInitialState,
 } from '../../engine/kpiRegistry'
 import {
+  subscribeKpiRegistry,
+} from '../../services/kpiRegistryService'
+import { mergeRemoteRegistryWithDefaults } from '../../services/kpiRegistryLogic'
+import { DEFAULT_KPI_REGISTRY } from '../../engine/kpiRegistry'
+import {
   saveTarget, deleteTarget,
   subscribeAllTargets, subscribeTargets,
 } from '../../services/kpiService'
 
-// ── KPI field definitions — registry-driven ──────────────────
-// Replaces the hardcoded KPI_FIELDS array.
-
-// Legacy colour map keyed by registry key — preserved for visual continuity
+// ── KPI color map — safe fallback for dynamic KPIs ────────────
 const KPI_COLORS = {
   wasfaty:      '#6366f1',
   omnihealth:   '#ef4444',
@@ -42,20 +44,10 @@ const KPI_COLORS = {
   basket:       '#22c55e',
   crossSelling: '#8b5cf6',
 }
-
-// getTargetInputConfigs() returns only active, target-input-enabled KPIs
-// in stable sortOrder. Each config has key (registry), engineKey, targetFieldName,
-// label, unit, and isVisibleForTargetInput.
-const TARGET_INPUT_CONFIGS = getTargetInputConfigs()
-
-// Backward-compatible alias: KPI_FIELDS still used by TargetCard and BulkModal
-// Each entry maps to the same shape those components expect.
-const KPI_FIELDS = TARGET_INPUT_CONFIGS.map(cfg => ({
-  key:   cfg.targetFieldName,  // e.g. 'wasfatyTarget'
-  kpi:   cfg.engineKey,        // e.g. 'wasfaty', 'omni', 'wellness'
-  label: cfg.shortLabel,
-  color: KPI_COLORS[cfg.key] ?? '#a1a1aa',
-}))
+const DEFAULT_KPI_COLOR = '#a1a1aa'
+// targetInputConfigs and kpiFields are live useMemo hooks inside TargetsPage()
+// and passed as props to TargetCard, TargetFormModal, BulkModal
+// using the live Firestore-backed registry (see useRegistryData hook below).
 
 function toMonthStr(d) {
   return format(d, 'yyyy-MM')
@@ -105,16 +97,16 @@ function AchPill({ actual, target, dp }) {
 }
 
 // ── Target Card ───────────────────────────────────────────────
-function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy }) {
+function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiFields }) {
   const [open, setOpen] = useState(false)
 
   const kpiActuals = useMemo(() =>
-    Object.fromEntries(KPI_FIELDS.map(({ key, kpi }) => [key, sumKpi(mtdEntries, kpi)])),
+    Object.fromEntries(kpiFields.map(({ key, kpi }) => [key, sumKpi(mtdEntries, kpi)])),
     [mtdEntries]
   )
 
   const overallPct = useMemo(() => {
-    const vals = KPI_FIELDS
+    const vals = kpiFields
       .filter(({ key }) => target[key] > 0)
       .map(({ key }) => computeAchievementPct(kpiActuals[key], target[key]))
     return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0
@@ -199,7 +191,7 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy }) {
         display:'grid', gridTemplateColumns:'repeat(5,1fr)',
         borderTop:'1px solid var(--border-subtle)', padding:'8px 14px', gap:'4px',
       }}>
-        {KPI_FIELDS.map(({ key, label, color, kpi }) => {
+        {kpiFields.map(({ key, label, color, kpi }) => {
           const tgt    = target[key] || 0
           const actual = kpiActuals[key] || 0
           return (
@@ -227,7 +219,7 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy }) {
           <div style={{ fontSize:'9px', letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'8px', fontFamily:"'Inter',sans-serif" }}>
             MTD Achievement vs Target
           </div>
-          {KPI_FIELDS.map(({ key, kpi, label, color }) => {
+          {kpiFields.map(({ key, kpi, label, color }) => {
             const tgt    = target[key] || 0
             const actual = kpiActuals[key] || 0
             const pct    = computeAchievementPct(actual, tgt)
@@ -258,9 +250,9 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy }) {
 }
 
 // ── Target Form Modal (add / edit) ────────────────────────────
-function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSave, saving }) {
+function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSave, saving, targetInputConfigs, kpiFields }) {
   const EMPTY = { pharmacyId:'', month: toMonthStr(new Date()),
-    ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, 0])) }
+    ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, 0])) }
   const [form,   setForm]   = useState(EMPTY)
   const [errors, setErrors] = useState({})
   const dp = getDayProgress()
@@ -270,7 +262,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
     setErrors({})
     setForm(editTarget
       ? { pharmacyId: editTarget.pharmacyId, month: editTarget.month,
-          ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, editTarget[c.targetFieldName] || 0])) }
+          ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, editTarget[c.targetFieldName] || 0])) }
       : EMPTY)
   }, [open, editTarget])
 
@@ -296,7 +288,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
     const e = {}
     if (!form.pharmacyId) e.pharmacyId = 'Required'
     if (!form.month)      e.month      = 'Required'
-    const allZero = KPI_FIELDS.every(({ key }) => !form[key] || Number(form[key]) <= 0)
+    const allZero = kpiFields.every(({ key }) => !form[key] || Number(form[key]) <= 0)
     if (allZero) e._global = 'At least one KPI target must be greater than 0'
     return e
   }
@@ -373,7 +365,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
               Monthly KPI Targets
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
-              {KPI_FIELDS.map(({ key, label, color, kpi }) => {
+              {kpiFields.map(({ key, label, color, kpi }) => {
                 const actual = sumKpi(previewEntries, kpi)
                 return (
                   <div key={key}>
@@ -426,7 +418,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
 }
 
 // ── Bulk Modal ────────────────────────────────────────────────
-function BulkModal({ open, onClose, pharmacies, onSave, saving }) {
+function BulkModal({ open, onClose, pharmacies, onSave, saving, targetInputConfigs, kpiFields }) {
   const [month,    setMonth]    = useState(toMonthStr(new Date()))
   const [selected, setSelected] = useState([])
   const [rows,     setRows]     = useState({})
@@ -444,7 +436,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving }) {
     setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
     if (!rows[id]) {
       const ph = pharmacies.find(p => p.id === id)
-      setRows(r => ({ ...r, [id]: { name: ph?.name || id, ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, 0])) } }))
+      setRows(r => ({ ...r, [id]: { name: ph?.name || id, ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, 0])) } }))
     }
   }
 
@@ -522,7 +514,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving }) {
                 <thead>
                   <tr>
                     <th style={{ padding:'6px 10px', fontSize:'10px', fontWeight:500, letterSpacing:'0.06em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'right', borderBottom:'1px solid var(--border-subtle)', whiteSpace:'nowrap', fontFamily:"'Inter',sans-serif" }}>Branch</th>
-                    {KPI_FIELDS.map(({ key, label, color }) => (
+                    {kpiFields.map(({ key, label, color }) => (
                       <th key={key} style={{ padding:'6px 8px', fontSize:'9px', fontWeight:500, letterSpacing:'0.06em', textTransform:'uppercase', color:'var(--text-muted)', textAlign:'center', borderBottom:'1px solid var(--border-subtle)', whiteSpace:'nowrap', fontFamily:"'Inter',sans-serif" }}>
                         <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'4px' }}>
                           <div style={{ width:5, height:5, borderRadius:'50%', background:color }} />{label}
@@ -537,7 +529,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving }) {
                       <td style={{ padding:'6px 10px', fontSize:'12px', fontWeight:500, color:'var(--text-primary)', borderBottom:'1px solid var(--border-subtle)', whiteSpace:'nowrap' }}>
                         {rows[id]?.name || id}
                       </td>
-                      {KPI_FIELDS.map(({ key }) => (
+                      {kpiFields.map(({ key }) => (
                         <td key={key} style={{ padding:'4px 5px', borderBottom:'1px solid var(--border-subtle)' }}>
                           <input type="number" min="0" dir="ltr"
                             value={rows[id]?.[key] || ''}
@@ -589,6 +581,30 @@ export default function TargetsPage() {
   const [showBulk,   setShowBulk]   = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [confirm,    setConfirm]    = useState(null)
+
+  // ── Live Firestore-backed KPI registry ───────────────────────
+  const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      () => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
+
+  // KPI configs computed from live registry — reactive to Firestore changes
+  const targetInputConfigs = useMemo(
+    () => getTargetInputConfigs(liveRegistry),
+    [liveRegistry],
+  )
+  const kpiFields = useMemo(
+    () => targetInputConfigs.map(cfg => ({
+      key:   cfg.targetFieldName,
+      kpi:   cfg.engineKey,
+      label: cfg.shortLabel,
+      color: cfg.defaultColor ?? DEFAULT_KPI_COLOR,
+    })),
+    [targetInputConfigs],
+  )
 
   const role       = userProfile?.role
   const isAdmin    = role === 'admin'
@@ -651,7 +667,7 @@ export default function TargetsPage() {
       await saveTarget({
         pharmacyId:      form.pharmacyId,
         month:           form.month,
-        ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, Number(form[c.targetFieldName]) || 0])),
+        ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, Number(form[c.targetFieldName]) || 0])),
         actorId:   userProfile?.uid,
         actorRole: userProfile?.role,
       })
@@ -670,8 +686,7 @@ export default function TargetsPage() {
         await saveTarget({
           pharmacyId:      row.pharmacyId,
           month:           row.month,
-          ...Object.fromEntries(TARGET_INPUT_CONFIGS.map(c => [c.targetFieldName, Number(row[c.targetFieldName]) || 0])),
-          crossSellTarget: Number(row.crossSellTarget)  || 0,
+          ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, Number(row[c.targetFieldName]) || 0])),
           actorId: userProfile?.uid, actorRole: userProfile?.role,
         })
         ok++
@@ -792,6 +807,7 @@ export default function TargetsPage() {
         <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
           {viewTargets.map(t => (
             <TargetCard
+              kpiFields={kpiFields}
               key={t.id}
               target={t}
               mtdEntries={getEntries(t.pharmacyId)}
@@ -813,6 +829,8 @@ export default function TargetsPage() {
         entries={entries}
         onSave={handleSave}
         saving={saving}
+        targetInputConfigs={targetInputConfigs}
+        kpiFields={kpiFields}
       />
       <BulkModal
         open={showBulk}
@@ -820,6 +838,8 @@ export default function TargetsPage() {
         pharmacies={pharmacies}
         onSave={handleBulkSave}
         saving={saving}
+        targetInputConfigs={targetInputConfigs}
+        kpiFields={kpiFields}
       />
       <ConfirmModal
         open={!!confirm}

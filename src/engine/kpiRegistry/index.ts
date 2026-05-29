@@ -64,10 +64,13 @@ export {
 // ── UI Adapter ────────────────────────────────────────────────
 export type {
   KpiUiStatus,
+  KpiUiSection,
+  KpiComponentType,
   KpiUiConfig,
 } from './kpiUiAdapter'
 
 export {
+  DEFAULT_KPI_UI_CONFIG,
   getTargetFieldName,
   toKpiUiConfig,
   getTargetInputConfigs,

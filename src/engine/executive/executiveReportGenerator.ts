@@ -102,15 +102,30 @@ export function generateExecutiveReport(input: ExecutiveReportInput): ExecutiveR
   }
 
   // Portfolio KPI aggregation
+  // Enterprise rule: only branches with a valid, positive target for a given KPI
+  // contribute BOTH their actual AND their target to the portfolio sum.
+  // A branch with no target for KPI X is excluded from KPI X's portfolio calculation
+  // entirely — including its actual — to prevent denominator/numerator asymmetry
+  // that would produce artificially inflated achievement percentages.
   const portfolioAch = Object.fromEntries(
     KPI_KEYS.map((k) => {
-      const totalActual  = branches.reduce((s, b) => s + sumKpi(b.mtdEntries, k), 0)
-      const totalTarget  = branches.reduce((s, b) => {
+      let totalActual = 0
+      let totalTarget = 0
+
+      for (const b of branches) {
         const t = b.target
           ? safeReadTarget(b.target as any, KPI_META[k].targetField)
           : 0
-        return s + t
-      }, 0)
+
+        // Only include this branch in the portfolio aggregate when it has
+        // a valid, positive target. Including the actual without a matching
+        // target inflates the numerator and produces incorrect achievement %.
+        if (!t || t <= 0 || !isFinite(t) || isNaN(t)) continue
+
+        totalActual += sumKpi(b.mtdEntries, k)
+        totalTarget += t
+      }
+
       const achievementPct = computeAchievementPct(totalActual, totalTarget)
       const status         = getTrafficLight(achievementPct, getDayProgress().ratio)
       return [k, { totalActual, totalTarget, achievementPct, status }]

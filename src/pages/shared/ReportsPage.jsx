@@ -23,6 +23,9 @@ import {
   computeAchievementPct, sumKpi, getDayProgress,
   computeOverallAchievement, computeKpiStats,
 } from '../../engine'
+import { subscribeKpiRegistry }                    from '../../services/kpiRegistryService'
+import { DEFAULT_KPI_REGISTRY, getTargetFieldName,
+         getKpisForSurface, DEFAULT_KPI_UI_CONFIG } from '../../engine/kpiRegistry'
 
 // Executive Intelligence Layer
 import {
@@ -32,13 +35,12 @@ import {
 import { format as dateFnsFormat } from 'date-fns'
 
 // ── Constants ─────────────────────────────────────────────────
-const KPI_FIELDS = [
-  { key:'wasfaty',      targetKey:'wasfatyTarget',   label:'Wasfaty',      color:'#6366f1' },
-  { key:'omni',         targetKey:'omniTarget',       label:'OmniHealth',   color:'#ef4444' },
-  { key:'wellness',     targetKey:'wellnessTarget',   label:'Wellness',     color:'#f59e0b' },
-  { key:'basket',       targetKey:'basketTarget',     label:'Basket',       color:'#22c55e' },
-  { key:'crossSelling', targetKey:'crossSellTarget',  label:'Cross Sell',   color:'#8b5cf6' },
-]
+// KPI_FIELDS is now registry-driven — see useMemo inside the component
+const FALLBACK_COLORS_REPORTS = {
+  wasfaty:'#6366f1', omni:'#ef4444', wellness:'#f59e0b',
+  basket:'#22c55e', crossSelling:'#8b5cf6',
+}
+const DEFAULT_KPI_COLOR_REPORTS = '#a1a1aa'
 
 const REPORT_TYPES = [
   { id:'daily',   label:'Today',        icon: Calendar   },
@@ -101,6 +103,26 @@ export default function ReportsPage() {
   const [useCustom,      setUseCustom]      = useState(false)
   const [loading,        setLoading]        = useState(true)
 
+  // ── Live registry-driven KPI list ─────────────────────────
+  const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      ()    => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
+
+  // KPI configs: active + dashboardEnabled (reports read same surface)
+  const KPI_FIELDS = useMemo(() => {
+    return getKpisForSurface(liveRegistry, 'dashboardEnabled').map(cfg => ({
+      key:       cfg.aliasFor ?? cfg.key,   // engine key (for entry data)
+      registryKey: cfg.key,                  // business key (for target lookup)
+      targetKey: getTargetFieldName(cfg.key), // e.g. 'omniTarget', 'npsTarget'
+      label:     cfg.shortLabel,
+      color:     cfg.defaultColor ?? FALLBACK_COLORS_REPORTS[cfg.aliasFor ?? cfg.key] ?? DEFAULT_KPI_COLOR_REPORTS,
+    }))
+  }, [liveRegistry])
+
   const role      = userProfile?.role
   const isAdmin   = role === 'admin'
   const isManager = ['admin','manager'].includes(role)
@@ -158,7 +180,7 @@ export default function ReportsPage() {
       const status   = totalTarget > 0 ? getTrafficLight(achPct, dp.ratio) : null
       return { key, label, color, total, totalTarget, achPct, status, entryCount: rangeEntries.length }
     })
-  }, [rangeEntries, targets, selectedBranch, currentMonth, dp])
+  }, [rangeEntries, targets, selectedBranch, currentMonth, dp, KPI_FIELDS])
 
   // Overall achievement
   const overallAch = useMemo(() => {
@@ -253,13 +275,20 @@ export default function ReportsPage() {
     }
   }, [selectedBranch, pharmacies, targets, entries])
 
-  // ── CSV Export ───────────────────────────────────────────────
+  // ── CSV Export — registry-driven ─────────────────────────
+  // Headers and row values built from live KPI_FIELDS (same source
+  // as the report table) so custom KPIs always get named columns.
   const exportCSV = () => {
-    const header = 'Date,Pharmacy,Wasfaty,OmniHealth,Wellness,Basket,CrossSelling\n'
+    // Build header: fixed metadata columns + one per active KPI
+    const kpiHeaders = KPI_FIELDS.map((f) => f.label ?? f.key)
+    const header = ['Date', 'Pharmacy', ...kpiHeaders].join(',') + '\n'
+
     const rows = rangeEntries.map((e) => {
-      const ph = pharmacies.find((p) => p.id === e.pharmacyId)
-      return `${e.date},${ph?.name || e.pharmacyId},${e.wasfaty||0},${e.omni||0},${e.wellness||0},${e.basket||0},${e.crossSelling||0}`
+      const ph    = pharmacies.find((p) => p.id === e.pharmacyId)
+      const kpis  = KPI_FIELDS.map((f) => e[f.key] ?? 0)
+      return [e.date, ph?.name || e.pharmacyId, ...kpis].join(',')
     }).join('\n')
+
     const blob = new Blob(['\uFEFF' + header + rows], { type:'text/csv;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')

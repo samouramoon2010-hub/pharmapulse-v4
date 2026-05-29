@@ -259,12 +259,12 @@ export default function TeamManagementPage() {
                     const entry = selectedMember.todayEntries.find((e) => e.kpiId === kpi.id)
                     return (
                       <div key={kpi.id} className="flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: kpi.color }} />
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: kpi.color ?? kpi.defaultColor ?? '#a1a1aa' }} />
                         <span className="flex-1 text-sm text-slate-400">{kpi.name}</span>
                         {entry ? (
                           <>
                             <div className="w-20 bg-slate-800 rounded-full h-1.5">
-                              <div className="h-full rounded-full" style={{ width: `${Math.min(entry.achievement, 100)}%`, background: kpi.color }} />
+                              <div className="h-full rounded-full" style={{ width: `${Math.min(entry.achievement, 100)}%`, background: kpi.color ?? kpi.defaultColor ?? '#a1a1aa' }} />
                             </div>
                             <span className={`text-xs font-bold w-10 text-left ${getAchievementColor(entry.achievement)}`}>{entry.achievement}%</span>
                           </>

@@ -5,12 +5,14 @@ import React, { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
+  Map, Layers, UserCheck, ClipboardCheck, PlayCircle,
   Target, BarChart2, FileSpreadsheet, ShieldCheck, Settings,
   LogOut, Bell, X, PanelLeftClose, PanelLeft, BarChart3, Database,
 } from 'lucide-react'
 import { useAuthStore }    from '../../store/authStore'
 import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
 import Logo, { LogoIcon } from '../brand/Logo'
+import { useI18n }         from '../../hooks/useI18n'
 
 const NAV_CONFIG = {
   admin: [
@@ -19,14 +21,22 @@ const NAV_CONFIG = {
     ]},
     { group: 'Analytics', items: [
       { icon: TrendingUp,      label: 'Reports',      path: '/reports' },
-      { icon: Target,          label: 'Targets',      path: '/targets' },
+      { icon: Target,          label: 'Targets',           path: '/targets' },
+      { icon: UserCheck,        label: 'Personal Targets',  path: '/personal-targets' },
       { icon: BarChart3,       label: 'Executive BI', path: '/executive' },
     ]},
     { group: 'Administration', items: [
       { icon: Building2,       label: 'Pharmacies', path: '/pharmacies' },
       { icon: Users,           label: 'Users',      path: '/users' },
       { icon: FileSpreadsheet, label: 'Import',     path: '/import' },
-      { icon: Database,       label: 'KPI Registry', path: '/admin/kpis' },
+      { icon: Database,        label: 'KPI Registry',          path: '/admin/kpis' },
+      // ER-0 — Evaluation Registry
+      { icon: ClipboardCheck,  label: 'Evaluation Registry',   path: '/admin/evaluation-registry' },
+      // ER-2A — Evaluation execution
+      { icon: PlayCircle,       label: 'Run Evaluation',        path: '/admin/evaluation-run' },
+      // RBAC Phase 1 — Territory Infrastructure
+      { icon: Map,    label: 'Regions',   path: '/admin/regions' },
+      { icon: Layers, label: 'Districts', path: '/admin/districts' },
     ]},
     { group: 'System', items: [
       { icon: ShieldCheck,     label: 'Audit Log',      path: '/audit' },
@@ -38,10 +48,14 @@ const NAV_CONFIG = {
     { group: '', items: [
       { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
+    { group: 'My Work', items: [
+      { icon: ClipboardList, label: 'KPI Entry',        path: '/entry' },
+    ]},
     { group: 'Analytics', items: [
       { icon: TrendingUp, label: 'Reports',  path: '/reports' },
-      { icon: Target,     label: 'Targets',  path: '/targets' },
-      { icon: Users,      label: 'Team',     path: '/team' },
+      { icon: Target,     label: 'Targets',         path: '/targets' },
+      { icon: UserCheck,  label: 'Personal Targets', path: '/personal-targets' },
+      { icon: Users,      label: 'Team',             path: '/team' },
     ]},
     { group: 'System', items: [
       { icon: Bell,     label: 'Notifications', path: '/notifications' },
@@ -63,7 +77,19 @@ const NAV_CONFIG = {
   ],
 }
 
-const ROLE_LABELS = { admin:'Admin', manager:'Manager', pharmacist:'Pharmacist' }
+// RBAC Phase 0: branch_manager is an alias for manager nav.
+// district_supervisor and regional_manager fall through to the
+// pharmacist fallback — their nav is built in Phase 1.
+NAV_CONFIG.branch_manager = NAV_CONFIG.manager
+
+const ROLE_LABELS = {
+  admin:               'Admin',
+  manager:             'Manager',
+  branch_manager:      'Branch Manager',
+  district_supervisor: 'District Supervisor',
+  regional_manager:    'Regional Manager',
+  pharmacist:          'Pharmacist',
+}
 
 function resolveNav(role) {
   return NAV_CONFIG[role] || NAV_CONFIG.pharmacist
@@ -120,6 +146,22 @@ export default function Sidebar({ mobileOpen, onClose }) {
   const location = useLocation()
   const { userProfile, logout } = useAuthStore()
   const { sidebarMode, toggleSidebar } = useSettingsStore()
+  const { t } = useI18n()
+
+  // Nav label i18n map — translates known sidebar labels to current language.
+  // Unknown labels fall through unchanged (safe for any hardcoded label).
+  const navLabel = (label) => {
+    const KEY_MAP = {
+      'Dashboard':    t('nav.dashboard'),
+      'Reports':      t('nav.reports'),
+      'Targets':      t('nav.targets'),
+      'Team':         t('nav.team'),
+      'Performance':  t('nav.performance'),
+      'KPI Entry':    t('nav.entry'),
+      'Settings':     t('nav.settings'),
+    }
+    return KEY_MAP[label] ?? label
+  }
 
   const role       = userProfile?.role || 'pharmacist'
   const navGroups  = resolveNav(role)
@@ -203,9 +245,10 @@ export default function Sidebar({ mobileOpen, onClose }) {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const active = isActive(item.path, item.exact)
+                const translatedItem = { ...item, label: navLabel(item.label) }
                 return collapsed && !isMobile
-                  ? <NavCollapsed key={item.path} item={item} active={active} onClick={() => go(item.path)} />
-                  : <NavExpanded  key={item.path} item={item} active={active} onClick={() => go(item.path)} />
+                  ? <NavCollapsed key={item.path} item={translatedItem} active={active} onClick={() => go(item.path)} />
+                  : <NavExpanded  key={item.path} item={translatedItem} active={active} onClick={() => go(item.path)} />
               })}
             </div>
           </div>

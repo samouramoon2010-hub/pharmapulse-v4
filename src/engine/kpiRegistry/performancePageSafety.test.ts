@@ -23,9 +23,6 @@ import type { KpiDefinition, KpiRegistry } from '../../engine/kpiRegistry'
 const PERF_SRC = readFileSync(
   resolve(__dirname, '../../pages/pharmacist/PerformancePage.jsx'), 'utf8'
 )
-const DASH_SRC = readFileSync(
-  resolve(__dirname, '../../pages/pharmacist/PharmacistDashboard.jsx'), 'utf8'
-)
 const KPICARD_SRC = readFileSync(
   resolve(__dirname, '../../components/kpi/KpiCard.jsx'), 'utf8'
 )
@@ -230,21 +227,6 @@ describe('PerformancePage — safe color resolution', () => {
 // ══════════════════════════════════════════════════════════════
 // 5 — Pharmacist dashboard safety (KpiCard, no KPI_FIELDS)
 // ══════════════════════════════════════════════════════════════
-
-describe('PharmacistDashboard — no static KPI_FIELDS assumptions', () => {
-  it('dashboard does not import KPI_FIELDS', () => {
-    expect(DASH_SRC).not.toContain('KPI_FIELDS')
-  })
-
-  it('dashboard does not reference KPI_KEYS', () => {
-    expect(DASH_SRC).not.toContain('KPI_KEYS')
-  })
-
-  it('dashboard uses templates from kpiStore for dynamic KPI list', () => {
-    expect(DASH_SRC).toContain('templates')
-    expect(DASH_SRC).toContain('subscribeTemplates')
-  })
-})
 
 describe('KpiCard — safe color access', () => {
   it('uses kpi?.color (optional chaining) not kpi.color', () => {

@@ -33,7 +33,7 @@ import { mergeRemoteRegistryWithDefaults } from '../../services/kpiRegistryLogic
 import { DEFAULT_KPI_REGISTRY } from '../../engine/kpiRegistry'
 import {
   saveTarget, deleteTarget,
-  subscribeAllTargets, subscribeTargets,
+  subscribeRecentTargets, subscribeTargets,
 } from '../../services/kpiService'
 
 // ── KPI color map — safe fallback for dynamic KPIs ────────────
@@ -568,7 +568,7 @@ export default function TargetsPage() {
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const {
     entries,
-    subscribeAllEntries,
+    subscribeRecentEntries,
     subscribePharmacyEntries,
   } = useKpiStore()
   const toast = useToastStore()
@@ -617,8 +617,8 @@ export default function TargetsPage() {
     let u3 = () => {}
 
     if (isAdmin) {
-      u2 = subscribeAllTargets(list => { setTargets(list); setLoading(false) })
-      u3 = subscribeAllEntries()
+      u2 = subscribeRecentTargets((list) => { setTargets(list); setLoading(false) })
+      u3 = subscribeRecentEntries()
     } else if (pharmacyId) {
       u2 = subscribeTargets(pharmacyId, list => { setTargets(list); setLoading(false) })
       u3 = subscribePharmacyEntries(pharmacyId)

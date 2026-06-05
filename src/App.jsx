@@ -24,6 +24,12 @@ import UsersPage        from './pages/admin/UsersPage'
 import ImportCenterPage from './pages/admin/ImportCenterPage'
 import AuditLogsPage       from './pages/admin/AuditLogsPage'
 import KpiManagementPage  from './pages/admin/KpiManagementPage'
+// RBAC Phase 1 — Territory Admin Pages
+import PersonalTargetsPage from './pages/manager/PersonalTargetsPage'
+import EvaluationRegistryPage from './pages/admin/EvaluationRegistryPage'
+import EvaluationRunPage      from './pages/admin/EvaluationRunPage'
+import RegionsPage   from './pages/admin/RegionsPage'
+import DistrictsPage from './pages/admin/DistrictsPage'
 
 // Shared
 import SettingsPage         from './pages/shared/SettingsPage'
@@ -45,8 +51,11 @@ const WIP = ({ t }) => (
 )
 
 const ADMIN  = ['admin']
-const MGR_UP = ['admin','manager']
-const ALL    = ['admin','manager','pharmacist']
+// RBAC Phase 0: branch_manager added alongside manager (alias).
+// district_supervisor and regional_manager are NOT added yet —
+// they have no routes in Phase 0.
+const MGR_UP = ['admin','manager','branch_manager']
+const ALL    = ['admin','manager','branch_manager','pharmacist']
 const PR     = ({ roles = ALL, children }) => <ProtectedRoute allowedRoles={roles}>{children}</ProtectedRoute>
 
 function HomeRedirect() {
@@ -86,6 +95,7 @@ export default function App() {
             {/* Manager + Admin */}
             <Route path="/team"     element={<PR roles={MGR_UP}><TeamPage /></PR>} />
             <Route path="/targets"  element={<PR roles={MGR_UP}><TargetsPage /></PR>} />
+            <Route path="/personal-targets" element={<PR roles={MGR_UP}><PersonalTargetsPage /></PR>} />
             <Route path="/reports"  element={<PR roles={MGR_UP}><ReportsPage /></PR>} />
 
             {/* Admin only */}
@@ -94,7 +104,12 @@ export default function App() {
             <Route path="/users"      element={<PR roles={ADMIN}><UsersPage /></PR>} />
             <Route path="/import"     element={<PR roles={ADMIN}><ImportCenterPage /></PR>} />
             <Route path="/audit"      element={<PR roles={ADMIN}><AuditLogsPage /></PR>} />
-            <Route path="/admin/kpis" element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
+            <Route path="/admin/kpis"      element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
+            {/* RBAC Phase 1 — Territory Infrastructure (Admin only) */}
+            <Route path="/admin/evaluation-registry" element={<PR roles={ADMIN}><EvaluationRegistryPage /></PR>} />
+            <Route path="/admin/evaluation-run"      element={<PR roles={ADMIN}><EvaluationRunPage /></PR>} />
+            <Route path="/admin/regions"   element={<PR roles={ADMIN}><RegionsPage /></PR>} />
+            <Route path="/admin/districts" element={<PR roles={ADMIN}><DistrictsPage /></PR>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

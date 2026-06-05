@@ -20,9 +20,14 @@ import ConfirmModal from '../../components/ui/ConfirmModal'
 import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
 
 const ROLES = [
-  { value:'admin',      label:'Admin',    icon:'👑', needsPharmacy:false },
-  { value:'manager',    label:'Manager',  icon:'🏪', needsPharmacy:true  },
-  { value:'pharmacist', label:'Pharmacist',icon:'💊', needsPharmacy:true  },
+  { value:'admin',               label:'Admin',               icon:'👑', needsPharmacy:false },
+  { value:'manager',             label:'Manager (legacy)',     icon:'🏪', needsPharmacy:true  },
+  { value:'branch_manager',      label:'Branch Manager',       icon:'🏪', needsPharmacy:true  },
+  // Phase 0: district_supervisor and regional_manager are selectable
+  // but have no dedicated UI yet — they use the pharmacist dashboard as fallback.
+  { value:'district_supervisor', label:'District Supervisor',  icon:'🗺️', needsPharmacy:false },
+  { value:'regional_manager',    label:'Regional Manager',     icon:'📊', needsPharmacy:false },
+  { value:'pharmacist',          label:'Pharmacist',           icon:'💊', needsPharmacy:true  },
 ]
 
 function pwStrength(pw) {
@@ -211,7 +216,7 @@ export default function UsersPage() {
     },
     {
       key:'role', label:'Role', sortable:true,
-      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',pharmacist:'Pharmacist'}[val]||val} />,
+      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',branch_manager:'Branch Manager',district_supervisor:'District Supervisor',regional_manager:'Regional Manager',pharmacist:'Pharmacist'}[val]||val} />,
     },
     {
       key:'pharmacyId', label:'Branch',
@@ -260,9 +265,12 @@ export default function UsersPage() {
       <div style={{ display:'flex', gap:'2px' }}>
         {[
           { role:'all',       label:'All',         count:stats.total,              color:'var(--text-muted)' },
-          { role:'admin',     label:'Admin',        count:stats.counts.admin||0,    color:'#f87171' },
-          { role:'manager',   label:'Manager',      count:stats.counts.manager||0,  color:'#fbbf24' },
-          { role:'pharmacist',label:'Pharmacist',   count:stats.counts.pharmacist||0,color:'var(--brand-400)' },
+          { role:'admin',               label:'Admin',               count:stats.counts.admin||0,               color:'#f87171' },
+          { role:'manager',             label:'Manager',             count:stats.counts.manager||0,             color:'#fbbf24' },
+          { role:'branch_manager',      label:'Branch Mgr',          count:stats.counts.branch_manager||0,      color:'#fbbf24' },
+          { role:'district_supervisor', label:'District Sup',        count:stats.counts.district_supervisor||0, color:'#fb923c' },
+          { role:'regional_manager',    label:'Regional Mgr',        count:stats.counts.regional_manager||0,    color:'#a78bfa' },
+          { role:'pharmacist',          label:'Pharmacist',          count:stats.counts.pharmacist||0,          color:'var(--brand-400)' },
         ].map((s) => (
           <button key={s.role}
             onClick={() => setFilterRole(s.role)}

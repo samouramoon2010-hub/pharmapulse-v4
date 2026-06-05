@@ -48,11 +48,23 @@ async function createFirebaseAuthUser(email, password) {
   return data.localId
 }
 
+
+// ── RBAC Phase 0: compute initial accessScopes from role + pharmacyId ──────
+// This is advisory-only in Phase 0 — scopes are stored but not enforced.
+// The scope engine and enforcement are built in future phases.
+function computeInitialScopes(role, pharmacyId) {
+  if (role === 'admin') return ['tenant:default']
+  if (pharmacyId)       return [`store:${pharmacyId}`]
+  return []
+}
+
 // ── Create user: Auth + Firestore ─────────────────────────────
 export async function createUser({
   displayName, email, password,
   role, status = 'active',
   pharmacyId = null, regionId = null,
+  // RBAC Phase 1: optional territory fields
+  districtId = null, regionIds = null,
   phone = '', employeeId = '',
   sendWelcomeEmail = true,
   actorId, actorRole,
@@ -69,11 +81,23 @@ export async function createUser({
     active:       status === 'active',
     pharmacyId:   pharmacyId || null,
     regionId:     regionId   || null,
+    // ── RBAC Phase 1: territory assignment fields ────────────
+    // Optional — only populated for district_supervisor and regional_manager.
+    // Existing users without these fields remain valid (treated as null/[]).
+    districtId:   districtId || null,
+    regionIds:    regionIds  || [],
     phone:        phone?.trim()      || '',
     employeeId:   employeeId?.trim() || '',
     createdAt:    serverTimestamp(),
     createdBy:    actorId || null,
     updatedAt:    serverTimestamp(),
+    // ── RBAC Phase 0 fields ──────────────────────────────────
+    // Advisory-only in Phase 0: stored but not yet enforced.
+    // Missing on existing documents — treated as defaults by readers.
+    tenantId:        'default',
+    accessScopes:    computeInitialScopes(role, pharmacyId),
+    temporaryScopes: [],
+    scopeVersion:    1,
   })
 
   try {
@@ -123,4 +147,19 @@ export async function employeeIdExists(employeeId, excludeUid = null) {
   if (snap.empty) return false
   if (excludeUid && snap.docs.length === 1 && snap.docs[0].id === excludeUid) return false
   return true
+}
+
+// ── Get users by pharmacy (PT-1 — personal targets) ──────────
+// Returns all active pharmacist users assigned to a given pharmacy.
+// Used by the Personal Targets page to build the allocation table.
+export async function getUsersByPharmacy(pharmacyId) {
+  const { collection, query, where, getDocs } = await import('firebase/firestore')
+  const { db, COL } = await import('./firebase')
+  const q    = query(
+    collection(db, COL.USERS),
+    where('pharmacyId', '==', pharmacyId),
+    where('active', '==', true),
+  )
+  const snap = await getDocs(q)
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
 }

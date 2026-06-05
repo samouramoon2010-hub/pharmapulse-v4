@@ -22,6 +22,35 @@ import type {
   CoachingPriority,
 } from './teamIntelligenceTypes'
 
+// ── PT-2: personal target resolver ───────────────────────────
+//
+// Returns the effective target value for a KPI key, preferring the
+// pharmacist's personal target when available and falling back to the
+// branch target. This is the single resolution point — no other part
+// of this engine needs to know about personal targets directly.
+//
+// personalTarget.targets is keyed by targetFieldName (e.g. 'wasfatyTarget').
+// KPI_META[k].targetField is the same naming scheme.
+// Direct field access is safe here because KPI_META covers all KPI_KEYS.
+function resolveTargetValue(
+  kpiKey:         typeof KPI_KEYS[number],
+  branchTarget:   import('../kpiAnalyticsEngine').MonthlyTarget | null,
+  personalTarget: import('../../services/personalTargetService').PersonalTargetDoc | null | undefined,
+): number {
+  // Personal target takes precedence when present and non-zero
+  if (personalTarget?.targets) {
+    const fieldName = KPI_META[kpiKey].targetField
+    const personal  = personalTarget.targets[fieldName]
+    if (personal != null && personal > 0) return personal
+    // Personal target exists but this field is zero/missing → use zero
+    // (the manager explicitly gave this pharmacist no target for this KPI)
+    if (personal != null) return 0
+  }
+  // Fall back to branch target
+  if (!branchTarget) return 0
+  return safeReadTarget(branchTarget as any, KPI_META[kpiKey].targetField)
+}
+
 // ── EMA smoother ──────────────────────────────────────────────
 function ema(values: number[], alpha = 0.4): number {
   if (!values.length) return 0
@@ -161,7 +190,7 @@ function detectImprovingAfterSupport(
   const recentAch = KPI_KEYS.reduce((sum, k) => {
     const last7   = hist.slice(-7)
     const prior7  = hist.slice(-14, -7)
-    const tgt     = safeReadTarget(input.target as any, KPI_META[k].targetField)
+    const tgt     = resolveTargetValue(k, input.target, input.personalTarget)
     if (!tgt || !prior7.length) return sum
     const recentRate = sumKpi(last7, k) / Math.max(last7.length, 1)
     const priorRate  = sumKpi(prior7, k) / Math.max(prior7.length, 1)
@@ -184,12 +213,10 @@ export function computePharmacistPerformance(
   const dp    = getDayProgress(now)
   const month = format(now, 'yyyy-MM')
 
-  // Per-KPI snapshots
+  // Per-KPI snapshots — PT-2: uses personal target when present, branch target as fallback
   const kpiSnapshots: KpiSnapshot[] = KPI_KEYS.map(k => {
     const actual = sumKpi(input.mtdEntries, k)
-    const target = input.target
-      ? safeReadTarget(input.target as any, KPI_META[k].targetField)
-      : 0
+    const target = resolveTargetValue(k, input.target, input.personalTarget)
     const achievementPct = computeAchievementPct(actual, target)
     const status         = getTrafficLight(achievementPct, dp.ratio)
     return { kpiKey: k, label: KPI_META[k].en, actual, target, achievementPct, status }

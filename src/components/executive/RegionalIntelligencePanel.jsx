@@ -2,13 +2,18 @@
 // RegionalIntelligencePanel
 // Renders pre-computed RegionalIntelligenceOutput.
 // No analytics logic — all data flows from the hook.
+// Phase 4B-1B-β: Branch × KPI heatmap preview added.
 // ============================================================
-import React, { useState } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import {
   Globe, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, AlertTriangle,
   Activity, Zap, ShieldAlert, RotateCcw,
+  LayoutGrid,
 } from 'lucide-react'
+import Heatmap from '../heatmap/Heatmap'
+import { buildBranchKpiMatrix } from '../../engine/regionalIntelligence/heatmapSelectors'
+import { KPI_KEYS } from '../../engine/kpiAnalyticsEngine'
 
 // ── Risk level colours (matches executive layer palette) ───────
 
@@ -79,8 +84,9 @@ function SectionRow({ icon: Icon, iconColor, label, children, noBorder }) {
 
 // ── Main component ─────────────────────────────────────────────
 
-export default function RegionalIntelligencePanel({ intelligence }) {
+export default function RegionalIntelligencePanel({ intelligence, branchRollups = [] }) {
   const [open, setOpen] = useState(false)
+  const [heatmapOpen, setHeatmapOpen] = useState(false)
 
   if (!intelligence) return null
 
@@ -90,6 +96,54 @@ export default function RegionalIntelligencePanel({ intelligence }) {
 
   const hasWarnings = dqWarn.length > 0
   const hasFocus    = focus.length > 0
+
+  // ── Executive filter state ────────────────────────────────
+  // Region filter: '' = All Regions
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [selectedRegion, setSelectedRegion] = useState('')
+  // KPI filter: '' = All KPIs
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [selectedKpi,    setSelectedKpi]    = useState('')
+
+  // Derive unique region options from branchRollups (no Firestore reads)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const regionOptions = useMemo(() => {
+    const seen = new Set()
+    const opts = []
+    for (const b of branchRollups) {
+      if (b.region && !seen.has(b.region)) {
+        seen.add(b.region)
+        opts.push(b.region)
+      }
+    }
+    return opts.sort((a, b) => a.localeCompare(b))
+  }, [branchRollups])
+
+  // KPI options come from the column keys of the full unfiltered matrix
+  const kpiColKeys   = KPI_KEYS   // always the engine's core key list
+  const activeKpiKeys = selectedKpi ? [selectedKpi] : kpiColKeys
+
+  // ── Branch × KPI matrix — filtered by region + KPI ───────
+  // Show worst-performing branches first (sort by risk then score).
+  // Capped at 12 rows by default to avoid cognitive overload.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const branchKpiMatrix = useMemo(() => {
+    if (!branchRollups.length) return null
+    return buildBranchKpiMatrix(branchRollups, activeKpiKeys, {
+      rowSort: 'risk',
+      scale:   'categorical',
+      regions: selectedRegion ? [selectedRegion] : [],
+    })
+  }, [branchRollups, selectedRegion, selectedKpi]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Selected cell from heatmap click ──────────────────────
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [heatmapSelectedCell, setHeatmapSelectedCell] = useState(null)
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const handleHeatmapCellClick = useCallback((cell) => {
+    setHeatmapSelectedCell(cell)
+  }, [])
 
   return (
     <div className="card" style={{ background: 'var(--bg-surface)', overflow: 'hidden' }}>
@@ -272,6 +326,184 @@ export default function RegionalIntelligencePanel({ intelligence }) {
                   </p>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── Branch × KPI Heatmap Preview ───────────────────── */}
+          {branchRollups.length > 0 && (
+            <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+
+              {/* ── Header row: title + inline filter controls ── */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+
+                {/* Toggle button (title only — no duplicate filter badges) */}
+                <button
+                  onClick={() => setHeatmapOpen((v) => !v)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    padding: '2px 0', flexShrink: 0,
+                  }}
+                >
+                  <LayoutGrid style={{ width: 12, height: 12, color: 'var(--text-muted)' }} strokeWidth={1.75} />
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Branch × KPI Achievement Map
+                  </span>
+                  <span style={{
+                    fontSize: '10px', color: 'var(--text-muted)',
+                    padding: '1px 6px', borderRadius: '99px',
+                    background: 'var(--bg-overlay)',
+                    border: '1px solid var(--border-subtle)',
+                  }}>
+                    {(branchKpiMatrix?.rowKeys.length ?? 0)} branches
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                    {heatmapOpen ? '▲' : '▼'}
+                  </span>
+                </button>
+
+                {/* ── Inline filter controls (always visible when heatmap section shown) ── */}
+                {/* Region filter — always rendered regardless of region count */}
+                {regionOptions.length >= 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                    <select
+                      value={selectedRegion}
+                      onChange={(e) => setSelectedRegion(e.target.value)}
+                      data-testid="region-filter-select"
+                      aria-label="Filter by region"
+                      style={{
+                        fontSize: '11px', fontFamily: 'inherit',
+                        padding: '3px 8px', borderRadius: '6px',
+                        background: selectedRegion ? 'rgba(0,210,173,0.10)' : 'var(--bg-overlay)',
+                        border: `1px solid ${selectedRegion ? 'rgba(0,210,173,0.30)' : 'var(--border-default)'}`,
+                        color: selectedRegion ? 'var(--brand-400, #26e8b4)' : 'var(--text-secondary)',
+                        cursor: 'pointer', outline: 'none',
+                      }}
+                    >
+                      <option value="">All Regions</option>
+                      {regionOptions.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+
+                    {/* KPI filter */}
+                    <select
+                      value={selectedKpi}
+                      onChange={(e) => setSelectedKpi(e.target.value)}
+                      data-testid="kpi-filter-select"
+                      aria-label="Filter by KPI"
+                      style={{
+                        fontSize: '11px', fontFamily: 'inherit',
+                        padding: '3px 8px', borderRadius: '6px',
+                        background: selectedKpi ? 'rgba(99,102,241,0.10)' : 'var(--bg-overlay)',
+                        border: `1px solid ${selectedKpi ? 'rgba(99,102,241,0.30)' : 'var(--border-default)'}`,
+                        color: selectedKpi ? '#818cf8' : 'var(--text-secondary)',
+                        cursor: 'pointer', outline: 'none',
+                      }}
+                    >
+                      <option value="">All KPIs</option>
+                      {kpiColKeys.map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+
+                    {/* Clear — only when a filter is active */}
+                    {(selectedRegion || selectedKpi) && (
+                      <button
+                        onClick={() => { setSelectedRegion(''); setSelectedKpi('') }}
+                        data-testid="clear-filters-btn"
+                        style={{
+                          fontSize: '10px', padding: '3px 8px', borderRadius: '6px',
+                          background: 'transparent', cursor: 'pointer',
+                          border: '1px solid var(--border-default)',
+                          color: 'var(--text-muted)', fontFamily: 'inherit',
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Active filter summary — single source of truth, shown only when open */}
+              {heatmapOpen && (selectedRegion || selectedKpi) && (
+                <div
+                  data-testid="heatmap-filter-controls"
+                  style={{
+                    display: 'flex', gap: '6px', marginTop: '8px',
+                    flexWrap: 'wrap', alignItems: 'center',
+                  }}
+                >
+                  {selectedRegion && (
+                    <span
+                      data-testid="active-region-filter"
+                      style={{
+                        fontSize: '10px', color: 'var(--brand-400, #26e8b4)',
+                        padding: '1px 8px', borderRadius: '99px',
+                        background: 'rgba(0,210,173,0.10)',
+                        border: '1px solid rgba(0,210,173,0.25)',
+                      }}
+                    >
+                      Region: {selectedRegion}
+                    </span>
+                  )}
+                  {selectedKpi && (
+                    <span
+                      data-testid="active-kpi-filter"
+                      style={{
+                        fontSize: '10px', color: '#818cf8',
+                        padding: '1px 8px', borderRadius: '99px',
+                        background: 'rgba(99,102,241,0.10)',
+                        border: '1px solid rgba(99,102,241,0.25)',
+                      }}
+                    >
+                      KPI: {selectedKpi}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Heatmap body */}
+              {heatmapOpen && (
+                <div style={{ marginTop: '10px' }}>
+                  {branchKpiMatrix && branchKpiMatrix.rowKeys.length > 0
+                    ? (
+                      <Heatmap
+                        matrix={branchKpiMatrix}
+                        cellSize={40}
+                        maxRows={12}
+                        showLegend={true}
+                        onCellClick={handleHeatmapCellClick}
+                      />
+                    ) : (
+                      <div
+                        data-testid="heatmap-empty-filter-state"
+                        style={{
+                          padding: '20px', textAlign: 'center',
+                          background: 'var(--bg-hover)', borderRadius: '8px',
+                          border: '1px dashed var(--border-subtle)',
+                        }}
+                      >
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          No branches match the selected filters
+                        </div>
+                        <button
+                          onClick={() => { setSelectedRegion(''); setSelectedKpi('') }}
+                          style={{
+                            marginTop: '8px', fontSize: '11px', padding: '4px 12px',
+                            borderRadius: '6px', background: 'transparent', cursor: 'pointer',
+                            border: '1px solid var(--border-default)',
+                            color: 'var(--text-secondary)', fontFamily: 'inherit',
+                          }}
+                        >
+                          Clear Filters
+                        </button>
+                      </div>
+                    )
+                  }
+                </div>
+              )}
             </div>
           )}
 

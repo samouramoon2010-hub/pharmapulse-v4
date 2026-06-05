@@ -3,6 +3,7 @@
 // ============================================================
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { applyLanguage, normaliseLang } from '../i18n/index'
 
 export const THEMES = {
   DARK:      'dark',
@@ -34,7 +35,7 @@ export const DASHBOARD_CARDS = {
   wasfaty:             { label: 'Wasfaty',              labelAr: 'وصفتي' },
   omni:                { label: 'OmniHealth',           labelAr: 'أومني هيلث' },
   wellness:            { label: 'Wellness',             labelAr: 'ويلنس' },
-  cross_selling:       { label: 'Cross Selling',        labelAr: 'البيع المتقاطع' },
+  crossSelling:        { label: 'Cross Selling',        labelAr: 'البيع المتقاطع' },
   branch_rank:         { label: 'Branch Rank',          labelAr: 'ترتيب الفرع' },
   month_progress:      { label: 'Month Progress',       labelAr: 'تقدم الشهر' },
   forecast:            { label: 'Forecast',             labelAr: 'التوقع' },
@@ -51,10 +52,17 @@ export const useSettingsStore = create(
       reducedMotion:  false,
       fontSize:       'normal',
       dashboardCards: DEFAULT_CARDS,
+      language:       'ar',   // 'ar' | 'en' — default Arabic
 
       setTheme: (theme) => {
         set({ theme })
         applyTheme(theme)
+      },
+
+      setLanguage: (lang) => {
+        const safe = normaliseLang(lang)
+        set({ language: safe })
+        applyLanguage(safe)
       },
 
       toggleSidebar: () => {
@@ -75,7 +83,10 @@ export const useSettingsStore = create(
     {
       name: 'pharma-settings-v4',
       onRehydrateStorage: () => (state) => {
-        if (state) applyTheme(state.theme)
+        if (state) {
+          applyTheme(state.theme)
+          applyLanguage(normaliseLang(state.language))
+        }
       },
     }
   )

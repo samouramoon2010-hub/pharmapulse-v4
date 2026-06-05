@@ -24,6 +24,7 @@ import {
 
 import type {
   BranchRollupInput,
+  BranchRollupSummary,
   RegionalPeriod,
   RegionalIntelligenceOutput,
 } from '../engine/regionalIntelligence'
@@ -142,21 +143,25 @@ export function useRegionalIntelligence(): UseRegionalIntelligenceResult {
 
   // ── Build BranchRollupSummary[] + generate intelligence ──
   // Both steps are pure engine calls — no business logic here.
-  const intelligence = useMemo<RegionalIntelligenceOutput | null>(() => {
-    if (!branchInputs.length) return null
+  const [branchRollups, intelligence] = useMemo<[BranchRollupSummary[], RegionalIntelligenceOutput | null]>(() => {
+    if (!branchInputs.length) return [[], null]
 
     const rollupSummaries = branchInputs.map((input) =>
       generateBranchRollup(input, period),
     )
 
-    return generateRegionalIntelligence({
-      branchRollups: rollupSummaries,
-      period,
-    })
+    return [
+      rollupSummaries,
+      generateRegionalIntelligence({
+        branchRollups: rollupSummaries,
+        period,
+      }),
+    ]
   }, [branchInputs, period])
 
   return {
     intelligence,
+    branchRollups,
     loading,
     empty: !loading && !intelligence,
   }

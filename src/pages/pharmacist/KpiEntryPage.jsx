@@ -174,19 +174,24 @@ export default function KpiEntryPage() {
     // saveEntry(payload, liveRegistry) threads the live Firestore registry
     // through to sanitizeKpiEntryFields, so custom KPIs (nps, sl, ndf…)
     // are persisted when they are active in the live registry.
+    // CRITICAL: always read auth.currentUser.uid AT SAVE TIME, not from
+    // the `uid` const which may have been computed before auth resolved.
+    // Firestore isOwnData() rule compares payload.userId == request.auth.uid.
+    // If these differ (userProfile.uid ≠ Auth UID), isOwnData() → false → DENIED.
+    const saveUid = auth?.currentUser?.uid
+    if (!saveUid) { toast.error('يرجى تسجيل الدخول مجدداً'); return }
     const payload = {
-      userId:    uid,
+      userId:    saveUid,    // MUST equal request.auth.uid for isOwnData()
       pharmacyId,
       date:      selectedDate,
       notes:     form.notes?.trim() || '',
-      actorId:   uid,
+      actorId:   saveUid,    // audit attribution
       actorRole: userProfile?.role,
     }
     for (const { key } of entryFields) {
       payload[key] = Number(form[key]) || 0
     }
 
-    console.log('[KpiEntryPage] payload before save:', payload)
 
     setSaving(true)
     try {

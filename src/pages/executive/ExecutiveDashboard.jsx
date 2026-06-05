@@ -30,13 +30,13 @@ import RegionalIntelligencePanel  from '../../components/executive/RegionalIntel
 /** @typedef {import('../../engine/executive').BranchExecutiveSummary} BranchExecutiveSummary */
 
 export default function ExecutiveDashboard() {
-  const { subscribeAllEntries, subscribeAllTargets } = useKpiStore()
+  const { subscribeRecentEntries, subscribeRecentTargets } = useKpiStore()
   const { subscribe: subscribePharmacies }            = usePharmacyStore()
 
   // ── Activate store subscriptions (reused if already active) ──
   useEffect(() => {
-    const unsubEntries    = subscribeAllEntries()
-    const unsubTargets    = subscribeAllTargets()
+    const unsubEntries    = subscribeRecentEntries()
+    const unsubTargets    = subscribeRecentTargets()
     const unsubPharmacies = subscribePharmacies()
     return () => {
       unsubEntries()
@@ -47,7 +47,7 @@ export default function ExecutiveDashboard() {
 
   // ── Report data from hook ─────────────────────────────────
   const { report, loading, empty } = useExecutiveReport()
-  const { intelligence }            = useRegionalIntelligence()
+  const { intelligence, branchRollups }     = useRegionalIntelligence()
 
   // ── Branch drill-down selection ───────────────────────────
   const [selectedBranch, setSelectedBranch] = useState(null)
@@ -158,7 +158,7 @@ export default function ExecutiveDashboard() {
 
       {/* Row 5: Regional Intelligence (collapsible) */}
       {intelligence && (
-        <RegionalIntelligencePanel intelligence={intelligence} />
+        <RegionalIntelligencePanel intelligence={intelligence} branchRollups={branchRollups ?? []} />
       )}
 
     </div>

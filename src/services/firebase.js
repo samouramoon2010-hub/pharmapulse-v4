@@ -25,6 +25,17 @@ export const COL = {
   FORECAST_SNAPSHOTS: 'forecast_snapshots',
   RISK_SNAPSHOTS:     'risk_snapshots',
   RANKING_HISTORY:    'ranking_history',
+  // Ingestion Pipeline
+  STAGING_ENTRIES:    'staging_entries',
+  // RBAC Phase 1 — Territory Infrastructure
+  DISTRICTS:          'districts',
+  REGIONS:            'regions',
+  // Personal Targets — PT-1
+  PERSONAL_TARGETS:   'personal_targets',
+  // Evaluation Registry — ER-0
+  EVALUATION_PROFILES: 'evaluation_profiles',
+  // Evaluation Ledger — ER-2A
+  EVALUATION_RESULTS:  'evaluation_results',
 }
 
 // ── Config from .env ─────────────────────────────────────────

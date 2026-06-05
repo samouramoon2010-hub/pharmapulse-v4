@@ -89,9 +89,9 @@ const ChartTip = ({ active, payload, label }) => {
 export default function ReportsPage() {
   const { userProfile }  = useAuthStore()
   const {
-    entries, targets,
-    subscribeAllEntries, subscribePharmacyEntries,
-    subscribeAllTargets, subscribeMyTargets,
+    targets,
+    fetchEntriesRange,
+    subscribeRecentTargets, subscribeMyTargets,
   } = useKpiStore()
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const toast = useToastStore()
@@ -102,6 +102,16 @@ export default function ReportsPage() {
   const [customTo,       setCustomTo]       = useState('')
   const [useCustom,      setUseCustom]      = useState(false)
   const [loading,        setLoading]        = useState(true)
+
+  // ── Fetched entries (local state — not global Zustand store) ─
+  // Populated by fetchEntriesRange on every dateRange / role change.
+  // Admin: all branches. Manager/pharmacist: own branch only.
+  // Effective fetch window = max(dateRange, 60 days) so that
+  // trendData (14-day) and executiveSummary (60-day historical)
+  // are always within the fetched window regardless of dateRange.
+  const [fetchedEntries,  setFetchedEntries]  = useState([])
+  const [fetchLoading,    setFetchLoading]    = useState(false)
+  const [fetchError,      setFetchError]      = useState(null)
 
   // ── Live registry-driven KPI list ─────────────────────────
   const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
@@ -129,18 +139,17 @@ export default function ReportsPage() {
   const pharmacyId = userProfile?.pharmacyId
   const dp = getDayProgress()
 
+  // ── Pharmacies + targets: real-time subscriptions (unchanged) ─
   useEffect(() => {
     const u1 = subPh()
-    let u2 = () => {}, u3 = () => {}
+    let u2 = () => {}
     if (isAdmin) {
-      u2 = subscribeAllEntries()
-      u3 = subscribeAllTargets()
+      u2 = subscribeRecentTargets()
     } else if (pharmacyId) {
-      u2 = subscribePharmacyEntries(pharmacyId)
-      u3 = subscribeMyTargets(pharmacyId)
+      u2 = subscribeMyTargets(pharmacyId)
     }
     const t = setTimeout(() => setLoading(false), 600)
-    return () => { u1(); u2?.(); u3?.(); clearTimeout(t) }
+    return () => { u1(); u2?.(); clearTimeout(t) }
   }, [userProfile?.uid])
 
   const today = todayStr()
@@ -149,15 +158,62 @@ export default function ReportsPage() {
     ? { from: customFrom, to: customTo }
     : baseRange
 
-  // Filter entries to date range + branch
+  // ── On-demand entry fetch triggered by dateRange or role change ─
+  // Fetches an effective window = max(dateRange, 60 days) so that
+  // trendData (last 14 days) and executiveSummary (last 60 days)
+  // are always covered regardless of the selected report range.
+  // Admin: no pharmacyId filter. Manager/pharmacist: own branch only.
+  // Does NOT write to the global Zustand store.
+  useEffect(() => {
+    // Don't fetch until auth is resolved
+    if (!userProfile?.uid) return
+
+    let cancelled = false
+    setFetchLoading(true)
+    setFetchError(null)
+
+    // Effective from-date: earlier of dateRange.from and 60 days ago
+    const sixtyDaysAgo = new Date()
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
+    const sixtyDaysAgoStr = sixtyDaysAgo.toISOString().split('T')[0]
+    const effectiveFrom = dateRange.from < sixtyDaysAgoStr
+      ? dateRange.from
+      : sixtyDaysAgoStr
+    const effectiveTo = todayStr()
+
+    const options = (!isAdmin && pharmacyId) ? { pharmacyId } : {}
+
+    fetchEntriesRange(effectiveFrom, effectiveTo, options)
+      .then((rows) => {
+        if (!cancelled) {
+          setFetchedEntries(rows)
+          setFetchLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('[ReportsPage] fetchEntriesRange failed:', err)
+          setFetchError(err.message || 'Failed to load report data')
+          setFetchLoading(false)
+        }
+      })
+
+    return () => { cancelled = true }
+  }, [userProfile?.uid, isAdmin, pharmacyId, dateRange.from, dateRange.to])
+
+  // Filter fetched entries to the exact report date range + selected branch.
+  // fetchedEntries may span a wider window (up to 60 days) to support
+  // trendData and executiveSummary — the dateRange filter here scopes the
+  // report body to exactly what the user selected.
   const rangeEntries = useMemo(() =>
-    entries.filter((e) => {
+    fetchedEntries.filter((e) => {
       const inRange  = e.date >= dateRange.from && e.date <= dateRange.to
       const inBranch = selectedBranch === 'all' || e.pharmacyId === selectedBranch
       return inRange && inBranch
     }),
-    [entries, dateRange, selectedBranch]
+    [fetchedEntries, dateRange, selectedBranch]
   )
+
 
   // Current month for targets
   const currentMonth = format(new Date(), 'yyyy-MM')
@@ -215,14 +271,14 @@ export default function ReportsPage() {
     Array.from({ length: 14 }, (_, i) => {
       const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
       const label = format(subDays(new Date(), 13 - i), 'dd/MM')
-      const de    = entries.filter((e) =>
+      const de    = fetchedEntries.filter((e) =>
         e.date === date && (selectedBranch === 'all' || e.pharmacyId === selectedBranch)
       )
       const total = de.reduce((s, e) =>
         KPI_FIELDS.reduce((ss, { key }) => ss + (Number(e[key]) || 0), s), 0)
       return { date: label, total }
     }),
-    [entries, selectedBranch]
+    [fetchedEntries, selectedBranch]
   )
 
   // ── Executive Intelligence Summary ─────────────────────────────
@@ -248,10 +304,10 @@ export default function ReportsPage() {
     const from = `${thisMonth}-01`
     const last = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()
     const to   = `${thisMonth}-${String(last).padStart(2,'0')}`
-    const branchMTD = entries.filter(
+    const branchMTD = fetchedEntries.filter(
       (e) => e.pharmacyId === targetPharmacyId && e.date >= from && e.date <= to
     )
-    const historical = [...entries]
+    const historical = [...fetchedEntries]
       .filter((e) => e.pharmacyId === targetPharmacyId)
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-60)
@@ -273,7 +329,7 @@ export default function ReportsPage() {
     } catch {
       return null
     }
-  }, [selectedBranch, pharmacies, targets, entries])
+  }, [selectedBranch, pharmacies, targets, fetchedEntries])
 
   // ── CSV Export — registry-driven ─────────────────────────
   // Headers and row values built from live KPI_FIELDS (same source
@@ -538,8 +594,12 @@ export default function ReportsPage() {
         <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
           KPI Achievement — {useCustom ? 'Custom range' : REPORT_TYPES.find((r) => r.id === reportType)?.label}
         </div>
-        {loading ? (
+        {(loading || fetchLoading) ? (
           <div style={{ height:80, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', fontSize:'12px' }}>Loading...</div>
+        ) : fetchError ? (
+          <div style={{ height:80, display:'flex', alignItems:'center', justifyContent:'center', color:'#f87171', fontSize:'12px' }}>
+            Failed to load data — {fetchError}
+          </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
             {kpiSummary.map(({ key, label, color, total, totalTarget, achPct, status }) => {
@@ -571,7 +631,7 @@ export default function ReportsPage() {
         <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
           14-Day Entry Volume
         </div>
-        {loading ? <SkeletonChart height={160} /> : (
+        {(loading || fetchLoading) ? <SkeletonChart height={160} /> : (
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={trendData} margin={{ top:0, right:0, bottom:0, left:-30 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
@@ -618,7 +678,7 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {rangeEntries.length === 0 && !loading && (
+      {rangeEntries.length === 0 && !loading && !fetchLoading && !fetchError && (
         <EmptyState icon={FileText}
           title="No entries for this period"
           description="Enter KPI data or adjust the date range" />

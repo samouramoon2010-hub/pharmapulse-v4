@@ -5,17 +5,21 @@ import React from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 
 export default function ConfirmModal({
-  open, onClose, onConfirm,
+  open, onClose, onCancel, onConfirm,
   title = 'Confirm Action',
   message = 'Are you sure?',
   confirmLabel = 'Confirm',
   cancelLabel  = 'Cancel',
   danger = false,
 }) {
+  // Support both onClose and onCancel prop names for backward compatibility.
+  // Callers that pass onCancel work correctly; callers that pass onClose work correctly.
+  // A missing close handler falls back to a no-op so the modal never crashes.
+  const handleClose = onClose ?? onCancel ?? (() => {})
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
       <div className="relative w-full max-w-sm animate-scale-in rounded-xl p-5"
            style={{
              background: 'var(--bg-elevated)',
@@ -39,15 +43,15 @@ export default function ConfirmModal({
               <p className="text-xs mt-0.5" style={{ color:'var(--text-muted)' }}>{message}</p>
             </div>
           </div>
-          <button onClick={onClose} className="btn btn-ghost btn-icon -mt-0.5 -mr-0.5 opacity-50 hover:opacity-100">
+          <button onClick={handleClose} className="btn btn-ghost btn-icon -mt-0.5 -mr-0.5 opacity-50 hover:opacity-100">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
         <div className="flex gap-2.5 mt-4">
-          <button onClick={onClose} className="btn btn-secondary flex-1 justify-center text-xs">
+          <button onClick={handleClose} className="btn btn-secondary flex-1 justify-center text-xs">
             {cancelLabel}
           </button>
-          <button onClick={() => { onConfirm(); onClose() }}
+          <button onClick={() => { onConfirm(); handleClose() }}
             className={`flex-1 justify-center text-xs btn ${danger ? 'btn-danger' : 'btn-primary'}`}
             style={{ display:'flex', alignItems:'center' }}>
             {confirmLabel}

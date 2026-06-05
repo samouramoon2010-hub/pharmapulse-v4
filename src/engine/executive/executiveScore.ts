@@ -121,10 +121,12 @@ export function computeExecutiveScore(branch: BranchInput): ExecutiveScore {
   })
 
   // Weighted overall (same formula as kpiAnalyticsEngine)
+  // FIX: include target so computeOverallAchievement passes the !stat.target guard.
+  // Without target, every KPI was excluded → overall = 0 always.
   const kpiStatsMap = kpiBreakdown.reduce((acc, k) => {
-    acc[k.kpiKey] = { achievementPct: k.achievementPct }
+    acc[k.kpiKey] = { achievementPct: k.achievementPct, target: k.target }
     return acc
-  }, {} as Record<string, { achievementPct: number }>)
+  }, {} as Record<string, { achievementPct: number; target: number }>)
 
   const overall = computeOverallAchievement(kpiStatsMap as any)
 

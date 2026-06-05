@@ -5,7 +5,7 @@
 //           live registry via sanitizeKpiEntryFields().
 // ============================================================
 import {
-  collection, doc, setDoc, getDoc, getDocs,
+  collection, doc, setDoc, getDoc, getDocs, deleteDoc,
   query, where, orderBy, onSnapshot, serverTimestamp,
 } from 'firebase/firestore'
 import { auth, db, COL } from './firebase'
@@ -41,6 +41,9 @@ export async function saveKpiEntry({
   ...kpiFields  // all remaining fields treated as candidate KPI values
 }) {
   // ── Step 1: resolve userId from Firebase Auth (source of truth) ──
+  // ALWAYS use auth.currentUser.uid when available — this is what Firestore
+  // isOwnData() rule compares against (request.auth.uid).
+  // The passed `userId` is only a fallback for non-browser contexts (e.g. batch import).
   const resolvedUserId = auth?.currentUser?.uid || userId
   const today          = new Date().toISOString().split('T')[0]
 
@@ -59,8 +62,7 @@ export async function saveKpiEntry({
   }
 
   const docId   = entryId(resolvedUserId, pharmacyId, date)
-  const existing = await getDoc(doc(db, COL.KPI_ENTRIES, docId))
-  const isNew    = !existing.exists()
+
 
   // ── Step 3: sanitize KPI value fields ────────────────────────
   // sanitizeKpiEntryFields():
@@ -86,9 +88,10 @@ export async function saveKpiEntry({
     notes:     notes?.trim() || '',
     updatedAt: serverTimestamp(),
     createdBy: actorId || resolvedUserId || null,
-    ...(isNew
-      ? { createdAt: serverTimestamp(), submittedBy: actorId || resolvedUserId || null }
-      : {}),
+    // createdAt and submittedBy are always included.
+    // setDoc with merge:true will NOT overwrite these if the document already exists.
+    createdAt:   serverTimestamp(),
+    submittedBy: actorId || resolvedUserId || null,
   })
 
   // ── Step 5: write to Firestore ────────────────────────────────
@@ -96,12 +99,12 @@ export async function saveKpiEntry({
 
   // ── Step 6: audit log ─────────────────────────────────────────
   await logAction({
-    action:     isNew ? AUDIT_ACTION.CREATE : AUDIT_ACTION.UPDATE,
+    action:     AUDIT_ACTION.CREATE,
     collection: COL.KPI_ENTRIES,
     docId,
     userId:     actorId || resolvedUserId,
     userRole:   actorRole,
-    before:     isNew ? null : existing.data(),
+    before:     null,
     after:      payload,
   })
 
@@ -131,11 +134,42 @@ export function subscribeKpiEntries({ userId, pharmacyId, from, to }, callback) 
   )
 }
 
-export function subscribeAllKpiEntries(callback) {
-  const q = query(collection(db, COL.KPI_ENTRIES), orderBy('date', 'desc'))
+// ── Rolling window real-time listener ─────────────────────────
+// Default window: 90 days — covers the deepest engine requirement
+// (executive trend engine: 60 days) with a 30-day safety margin.
+// No composite index required: range + orderBy on the same field
+// is served by the single-field date index.
+export function subscribeRecentKpiEntries(callback, days = 90) {
+  const from = new Date()
+  from.setDate(from.getDate() - days)
+  const fromDate = from.toISOString().split('T')[0]
+  const q = query(
+    collection(db, COL.KPI_ENTRIES),
+    where('date', '>=', fromDate),
+    orderBy('date', 'desc'),
+  )
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   )
+}
+
+// ── On-demand historical fetch (no real-time listener) ────────
+// Intended for Reports and any view that needs an explicit date
+// range, including ranges older than the rolling subscription window.
+// options.pharmacyId — restrict to a single branch
+// options.userId     — restrict to a single user
+// Returns a Promise<KpiEntry[]>; no persistent store side-effect.
+export async function fetchKpiEntriesRange(fromDate, toDate, options = {}) {
+  let q = query(
+    collection(db, COL.KPI_ENTRIES),
+    where('date', '>=', fromDate),
+    where('date', '<=', toDate),
+    orderBy('date', 'desc'),
+  )
+  if (options.pharmacyId) q = query(q, where('pharmacyId', '==', options.pharmacyId))
+  if (options.userId)     q = query(q, where('userId',     '==', options.userId))
+  const snap = await getDocs(q)
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
 }
 
 // ── Targets ────────────────────────────────────────────────────
@@ -183,8 +217,31 @@ export function subscribeTargets(pharmacyId, callback) {
   )
 }
 
+// @deprecated — unbounded listener.
+// Use subscribeRecentTargets for all new consumers.
+// Retained only until existing callers are migrated in a future sprint.
 export function subscribeAllTargets(callback) {
   const q = query(collection(db, COL.TARGETS), orderBy('month', 'desc'))
+  return onSnapshot(q, (snap) =>
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+  )
+}
+
+// ── Bounded target subscription ────────────────────────────────
+// Replaces subscribeAllTargets for operational views.
+// Default window: 6 months — covers TargetsPage (±2 months),
+// Dashboard, TeamPage, ExecutiveDashboard, and ReportsPage
+// (all consume t.month === currentMonth, well within 6 months).
+// No composite index required: range + orderBy on same field (month).
+export function subscribeRecentTargets(callback, months = 6) {
+  const from = new Date()
+  from.setMonth(from.getMonth() - months)
+  const fromMonth = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`
+  const q = query(
+    collection(db, COL.TARGETS),
+    where('month', '>=', fromMonth),
+    orderBy('month', 'desc'),
+  )
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   )

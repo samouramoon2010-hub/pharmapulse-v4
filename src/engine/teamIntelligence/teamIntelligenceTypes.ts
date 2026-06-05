@@ -11,6 +11,8 @@ import type {
   TrafficLightStatus, TrendDirection,
 } from '../kpiAnalyticsEngine'
 
+import type { PersonalTargetDoc } from '../../services/personalTargetService'
+
 export type { KpiKey, KpiEntry, MonthlyTarget, TrafficLightStatus, TrendDirection }
 
 // ══════════════════════════════════════════════════════════════
@@ -55,8 +57,16 @@ export interface PharmacistInput {
   /** Historical entries sorted asc (last 30 days) */
   historicalEntries?: KpiEntry[]
 
-  /** Branch monthly target */
+  /** Branch monthly target (fallback when no personal target is set) */
   target: MonthlyTarget | null
+
+  /**
+   * PT-2: Personal target allocated to this specific pharmacist.
+   * When present, the performance engine uses this instead of dividing
+   * the branch target. When absent, falls back to `target` (branch target).
+   * Only published targets should be passed here.
+   */
+  personalTarget?: PersonalTargetDoc | null
 
   /** Total days pharmacist was expected to submit this month */
   expectedSubmissionDays: number

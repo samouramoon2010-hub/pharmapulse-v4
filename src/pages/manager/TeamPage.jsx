@@ -13,9 +13,10 @@ import EmptyState           from '../../components/ui/EmptyState'
 import { SkeletonStatCard, SkeletonChart } from '../../components/ui/SkeletonCard'
 import {
   getTrafficLight, TRAFFIC_COLORS,
-  computeAchievementPct,
+  computeAchievementPct, getDayProgress,
 } from '../../engine'
 import { generateTeamIntelligence } from '../../engine/teamIntelligence'
+import { getUsersByPharmacy }        from '../../services/userService'
 
 const CARD = {
   background:'var(--bg-surface)', border:'1px solid var(--border-subtle)',
@@ -38,29 +39,63 @@ const STATUS_COLOR = {
 
 export default function TeamPage() {
   const { userProfile }    = useAuthStore()
-  const { entries, targets, subscribeAllEntries, subscribeAllTargets } = useKpiStore()
+  const {
+    entries, targets,
+    subscribeRecentEntries, subscribeRecentTargets,
+    subscribePharmacyEntries, subscribeMyTargets,
+  } = useKpiStore()
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
 
   const [members,  setMembers]  = useState([])
   const [loading,  setLoading]  = useState(true)
+  // userId → displayName lookup, populated when pharmacyId is known
+  const [userMap,   setUserMap]  = useState(new Map())
 
-  const role      = userProfile?.role
-  const isAdmin   = role === 'admin'
+  const role       = userProfile?.role
+  const isAdmin    = role === 'admin'
   const pharmacyId = userProfile?.pharmacyId
-  const month     = format(new Date(), 'yyyy-MM')
+  const month      = format(new Date(), 'yyyy-MM')
 
   useEffect(() => {
     const u1 = subPh()
-    const u2 = subscribeAllEntries()
-    const u3 = subscribeAllTargets()
-    const t  = setTimeout(() => setLoading(false), 600)
-    return () => { u1(); u2?.(); u3?.(); clearTimeout(t) }
-  }, [userProfile?.uid])
 
+    // SEC-03 fix: admins subscribe to all branches; managers are scoped
+    // to their own branch only. subscribeRecentEntries/subscribeRecentTargets
+    // must not be called for the manager role — doing so exposes every
+    // pharmacy's entries and targets to a manager of a single branch.
+    let u2 = () => {}, u3 = () => {}
+    if (isAdmin) {
+      u2 = subscribeRecentEntries()
+      u3 = subscribeRecentTargets()
+    } else if (pharmacyId) {
+      u2 = subscribePharmacyEntries(pharmacyId)
+      u3 = subscribeMyTargets(pharmacyId)
+    }
+
+    const t = setTimeout(() => setLoading(false), 600)
+    return () => { u1(); u2?.(); u3?.(); clearTimeout(t) }
+  }, [userProfile?.uid, isAdmin, pharmacyId])
+
+  // Resolve the current user's pharmacy from the store.
+  // Returns undefined (not a random branch) when pharmacyId is absent —
+  // the SEC-03 subscription fix already prevents data from loading in
+  // that case, so an undefined pharmacy is the correct safe state.
   const pharmacy = useMemo(() =>
-    pharmacies.find((p) => p.id === pharmacyId) || pharmacies[0],
+    pharmacies.find((p) => p.id === pharmacyId),
     [pharmacies, pharmacyId]
   )
+
+  // Resolve displayNames: load branch users when pharmacyId is known
+  useEffect(() => {
+    if (!pharmacyId) return
+    getUsersByPharmacy(pharmacyId)
+      .then((users) => {
+        const map = new Map()
+        users.forEach((u) => map.set(u.id, u.displayName || u.id))
+        setUserMap(map)
+      })
+      .catch(() => {}) // silent — fallback to UID slice already in place
+  }, [pharmacyId])
 
   // Build team intelligence from current data
   const teamIntelligence = useMemo(() => {
@@ -71,21 +106,33 @@ export default function TeamPage() {
     const monthTo   = `${month}-${String(monthLast).padStart(2,'0')}`
     const target    = targets.find((t) => t.pharmacyId === pharmacyId && t.month === month) || null
 
-    // Group entries by userId
+    // Group entries by userId.
+    // Defensive pharmacy scope: admin entries store contains all branches;
+    // manager entries store is already scoped by the subscription fix (SEC-03),
+    // but we filter here too so this block is safe regardless of future
+    // subscription changes.
     const userGroups = new Map()
-    entries.filter((e) => e.date >= monthFrom && e.date <= monthTo)
-      .forEach((e) => {
+    entries.filter((e) =>
+      e.date >= monthFrom && e.date <= monthTo &&
+      (isAdmin || e.pharmacyId === pharmacyId)
+    ).forEach((e) => {
         if (!userGroups.has(e.userId)) userGroups.set(e.userId, [])
         userGroups.get(e.userId).push(e)
       })
 
     if (!userGroups.size) return null
 
-    const pharmacists = Array.from(userGroups.entries()).map(([uid, mtd]) => ({
-      userId: uid, displayName: `User ${uid.slice(0,6)}`,
-      pharmacyId: pharmacyId || '',
-      mtdEntries: mtd, historicalEntries: mtd, target,
-    }))
+    const pharmacists = Array.from(userGroups.entries()).map(([uid, mtd]) => {
+      const actualSubmissionDays   = new Set(mtd.map((e) => e.date)).size
+      const expectedSubmissionDays = getDayProgress(now).currentDay
+      return {
+        userId: uid, displayName: userMap.get(uid) ?? `User ${uid.slice(0,6)}`,
+        pharmacyId: pharmacyId || '',
+        mtdEntries: mtd, historicalEntries: mtd, target,
+        actualSubmissionDays,
+        expectedSubmissionDays,
+      }
+    })
 
     try {
       return generateTeamIntelligence({
@@ -97,7 +144,7 @@ export default function TeamPage() {
       console.warn('[TeamPage] Engine error:', e)
       return null
     }
-  }, [loading, entries, targets, pharmacyId, month, pharmacies])
+  }, [loading, entries, targets, pharmacyId, month, pharmacies, userMap])
 
   if (loading) {
     return (

@@ -46,8 +46,9 @@ import {
   KPI_HEALTH_COLORS,
 } from '../../engine/liveAnalytics'
 import { subscribeKpiRegistry }                              from '../../services/kpiRegistryService'
+import { getUsersByPharmacy }                                from '../../services/userService'
 import { mergeRemoteRegistryWithDefaults }                   from '../../services/kpiRegistryLogic'
-import { getKpisForSurface, DEFAULT_KPI_UI_CONFIG }          from '../../engine/kpiRegistry'
+import { getKpisForSurface }                                  from '../../engine/kpiRegistry'
 import { DEFAULT_KPI_REGISTRY, getTargetFieldName }          from '../../engine/kpiRegistry'
 
 // ── Static fallback colors (for render safety before registry loads) ──
@@ -272,8 +273,9 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const { userProfile } = useAuthStore()
   const {
-    entries, subscribeMyEntries, subscribePharmacyEntries, subscribeAllEntries,
-    targets, subscribeMyTargets, subscribeAllTargets,
+    entries, subscribeMyEntries, subscribePharmacyEntries,
+    subscribeRecentEntries,
+    targets, subscribeMyTargets, subscribeRecentTargets,
   } = useKpiStore()
   const { pharmacies, subscribe: subscribePh } = usePharmacyStore()
   const { dashboardCards, setDashboardCards } = useSettingsStore()
@@ -300,8 +302,8 @@ export default function DashboardPage() {
     try {
       uns.push(subscribePh())
       if (isAdmin) {
-        uns.push(subscribeAllEntries())
-        uns.push(subscribeAllTargets())
+        uns.push(subscribeRecentEntries())
+        uns.push(subscribeRecentTargets())
       } else if (pharmacyId) {
         uns.push(subscribePharmacyEntries(pharmacyId))
         uns.push(subscribeMyTargets(pharmacyId))
@@ -331,6 +333,7 @@ export default function DashboardPage() {
 
   const todayEntries = useMemo(() => myEntries.filter((e) => e.date === today),  [myEntries, today])
   const monthEntries = useMemo(() => myEntries.filter((e) => e.date >= monthStart && e.date <= monthEnd), [myEntries])
+
 
   // ── Target lookup — admin aggregates across all branches ─────
   // Admin has no pharmacyId, so targets.find(t => t.pharmacyId === undefined) never matches.
@@ -362,6 +365,18 @@ export default function DashboardPage() {
 
   // ── Live Registry-driven KPI list ──────────────────────────
   const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  const [pharmacyUserMap, setPharmacyUserMap] = useState(null)
+  useEffect(() => {
+    if (!pharmacyId) return
+    getUsersByPharmacy(pharmacyId)
+      .then((users) => {
+        const map = new Map()
+        users.forEach((u) => map.set(u.id, u.displayName || u.id))
+        setPharmacyUserMap(map)
+      })
+      .catch(() => {})
+  }, [pharmacyId])
+
   useEffect(() => {
     return subscribeKpiRegistry(
       (reg) => setLiveRegistry(reg),
@@ -379,13 +394,6 @@ export default function DashboardPage() {
     () => registryKpis.map(cfg => cfg.aliasFor ?? cfg.key),
     [registryKpis]
   )
-
-  // Color lookup — safe fallback to defaultColor
-  const kpiColor = (engineKey) =>
-    FALLBACK_COLORS[engineKey] ??
-    registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.visibility?.dashboardEnabled
-      ? (registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.defaultColor ?? DEFAULT_KPI_COLOR)
-      : DEFAULT_KPI_COLOR
 
   // ── KPI Engine V1 — per-KPI stats ────────────────────────────
   const dp = useMemo(() => getDayProgress(), [])
@@ -532,12 +540,12 @@ export default function DashboardPage() {
         const distinctDays = new Set(userEntries.map(e => e.date)).size
         return {
           userId,
-          displayName: userId,   // Phase 4: resolve from users collection
+          displayName: pharmacyUserMap?.get(userId) ?? userId,   // resolved from users collection
           pharmacyId:  pharmacyId,
           mtdEntries:  userEntries,
           historicalEntries: userEntries,
           target:      currentTarget,
-          expectedSubmissionDays: dayProgress?.currentDay ?? 15,
+          expectedSubmissionDays: dp?.currentDay ?? 15,
           actualSubmissionDays:   distinctDays,
         }
       })
@@ -552,18 +560,19 @@ export default function DashboardPage() {
   }, [isManager, pharmacyId, myEntries, currentTarget, loading])
 
   // 14-day trend
+  // STB-04 fix: trendData is now registry-driven.
+  // KPI_KEYS is derived from the live registry (registryKpis → aliasFor ?? key),
+  // so custom KPIs appear automatically and removed KPIs disappear.
   const trendData = useMemo(() => Array.from({ length: 14 }, (_, i) => {
     const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
     const label = format(subDays(new Date(), 13 - i), 'dd/MM')
     const de    = myEntries.filter((e) => e.date === date)
-    return {
-      date: label,
-      wasfaty:      de.reduce((s, e) => s + (e.wasfaty      || 0), 0),
-      omni:         de.reduce((s, e) => s + (e.omni         || 0), 0),
-      wellness:     de.reduce((s, e) => s + (e.wellness     || 0), 0),
-      crossSelling: de.reduce((s, e) => s + (e.crossSelling || 0), 0),
-    }
-  }), [myEntries])
+    const point = { date: label }
+    KPI_KEYS.forEach((k) => {
+      point[k] = de.reduce((s, e) => s + (Number(e[k]) || 0), 0)
+    })
+    return point
+  }), [myEntries, KPI_KEYS])
 
   // Branch ranking (admin)
   const branchRanking = useMemo(() => {
@@ -614,7 +623,7 @@ export default function DashboardPage() {
       icon: Activity, color: kpiStats.wellness?.colors.color || '#f59e0b',
       sub: `${kpiStats.wellness?.achPct || 0}% achievement`,
     },
-    cross_selling: {
+    crossSelling: {
       label:'Cross Sell (Month)', value: kpiStats.crossSelling?.actual || 0,
       icon: Activity, color: kpiStats.crossSelling?.colors.color || '#8b5cf6',
       sub: `${kpiStats.crossSelling?.achPct || 0}% achievement`,
@@ -914,7 +923,7 @@ export default function DashboardPage() {
                   <div className="section-subtitle">Daily KPI volume</div>
                 </div>
                 <div style={{ display:'flex', gap:'8px' }}>
-                  {['wasfaty','omni','wellness'].map((k) => (
+                  {KPI_KEYS.slice(0, 3).map((k) => (
                     <div key={k} style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'9px', color:'var(--text-muted)' }}>
                       <div style={{ width:6, height:6, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR) }} />
                       {(kpiStats[k]?._label ?? k)}
@@ -925,7 +934,7 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={trendData} margin={{ top:5, right:5, bottom:0, left:-20 }}>
                   <defs>
-                    {['wasfaty','omni','wellness'].map((k) => (
+                    {KPI_KEYS.slice(0, 3).map((k) => (
                       <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%"  stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0.2} />
                         <stop offset="95%" stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0}   />
@@ -936,7 +945,7 @@ export default function DashboardPage() {
                   <XAxis dataKey="date" tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} interval={2} />
                   <YAxis tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTip />} />
-                  {['wasfaty','omni','wellness'].map((k) => (
+                  {KPI_KEYS.slice(0, 3).map((k) => (
                     <Area key={k} type="monotone" dataKey={k} name={(kpiStats[k]?._label ?? k)}
                       stroke={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} strokeWidth={1.5} fill={`url(#g_${k})`}
                       dot={false} activeDot={{ r:3, strokeWidth:0 }} />

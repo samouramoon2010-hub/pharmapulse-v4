@@ -62,6 +62,7 @@ import {
   computeAchievementPct,
   computeCurrentDailyRate,
 } from './kpiAnalyticsEngine'
+import type { PersonalTargetDoc } from '../services/personalTargetService'
 
 // ══════════════════════════════════════════════════════════════
 // SECTION 1 — HISTORICAL TYPE DEFINITIONS
@@ -522,6 +523,14 @@ export function generateMonthlySummary(
   target:          MonthlyTarget | null,
   lastForecastPct: number = 0,
   actualFinalAch:  number | null = null,
+  /**
+   * PT-2: Personal target for this pharmacist+month.
+   * When provided, each KPI target is read from personalTarget.targets
+   * instead of from the branch target document. Falls back to branch
+   * target when personalTarget is absent or a field is missing.
+   * Only published PersonalTargetDoc objects should be passed here.
+   */
+  personalTarget?: PersonalTargetDoc | null,
 ): MonthlySummary {
   const [yyyy, mm] = month.split('-').map(Number)
   const totalDays  = new Date(yyyy, mm, 0).getDate()
@@ -539,7 +548,11 @@ export function generateMonthlySummary(
       .map((e) => Number(e[key]) || 0)
 
     const total   = daily.reduce((s, v) => s + v, 0)
-    const tgt     = target ? getTargetForKpi(target, key) : 0
+    // PT-2: prefer personal target over branch target when available
+    const personalTgtValue = personalTarget?.targets?.[KPI_META[key]?.targetField ?? '']
+    const tgt = personalTgtValue != null
+      ? personalTgtValue
+      : (target ? getTargetForKpi(target, key) : 0)
     const achPct  = computeAchievementPct(total, tgt)
     const status  = getTrafficLight(achPct, 1)    // vs full month
 

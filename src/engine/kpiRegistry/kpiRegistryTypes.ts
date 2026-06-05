@@ -159,6 +159,28 @@ export interface KpiDefinition {
   /** Stable sort order for consistent display. Lower = first. */
   sortOrder:    number
   description?: string
+
+  // ── Executive analytical metadata (Phase 4C-X-0 foundation) ──
+  /**
+   * How this KPI is aggregated across entries in the executive context.
+   * Optional: defaults to 'SUM' for core KPIs, 'NOT_AGGREGATED' for custom.
+   * The dynamicExecutiveAdapter derives this from valueType when absent.
+   */
+  aggregationType?:  'SUM' | 'AVG' | 'RATIO' | 'NOT_AGGREGATED'
+
+  /**
+   * Performance polarity for executive scoring.
+   * Optional: defaults to KpiDirection-derived value.
+   * 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER'
+   */
+  polarity?: 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER'
+
+  /**
+   * Explicit portfolio weight override for executive composite score.
+   * Optional: defaults to KpiDefinition.weight.
+   * Core KPI portfolio weights must sum to 1.0.
+   */
+  portfolioWeight?: number
 }
 
 // ── Registry map ──────────────────────────────────────────────

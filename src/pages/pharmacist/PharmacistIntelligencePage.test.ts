@@ -8,7 +8,11 @@
 import { describe, it, expect } from 'vitest'
 
 async function pageSrc() {
-  return (await import('./PharmacistIntelligencePage.jsx?raw')).default
+  // Normalize CRLF→LF: several assertions below embed literal multi-line
+  // '\n' boundaries and fixed-offset .slice() windows, which would
+  // otherwise break on a Windows checkout (core.autocrlf=true) without
+  // any change to actual file content.
+  return (await import('./PharmacistIntelligencePage.jsx?raw')).default.replace(/\r\n/g, '\n')
 }
 async function hookSrc() {
   return (await import('./usePharmacistIntelligenceData.js?raw')).default

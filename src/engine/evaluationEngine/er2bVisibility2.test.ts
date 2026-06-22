@@ -85,7 +85,11 @@ describe('ER visibility — DataTable prop name (root cause)', () => {
 describe('ER visibility — subscription delivers all profile statuses', () => {
   it('subscribeEvaluationProfiles uses collection() directly (not query wrapper)', async () => {
     const src = await import('../../services/evaluationRegistryService.ts?raw')
-    const block = src.default
+    // Normalize CRLF→LF: the assertion below embeds a literal multi-line
+    // '\n' boundary, which would otherwise break on a Windows checkout
+    // (core.autocrlf=true) without any change to the actual source content.
+    const normalized = src.default.replace(/\r\n/g, '\n')
+    const block = normalized
       .split('export function subscribeEvaluationProfiles')[1]
       ?.split('export function subscribePublishedProfiles')[0] ?? ''
     const lines = block.split('\n').filter((l) => !l.trim().startsWith('//'))

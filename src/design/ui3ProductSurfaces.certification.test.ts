@@ -24,7 +24,11 @@ const branchLeaderboardSrc     = await import('../components/executive/BranchLea
 const branchDrilldownSrc       = await import('../components/executive/BranchDrilldown.jsx?raw').then((m) => m.default)
 const executiveDashboardSrc    = await import('../pages/executive/ExecutiveDashboard.jsx?raw').then((m) => m.default)
 const kpiCardSrc                = await import('../components/kpi/KpiCard.jsx?raw').then((m) => m.default)
-const dailyMissionPanelSrc      = await import('../components/dashboard/DailyMissionPanel.jsx?raw').then((m) => m.default)
+// Normalize CRLF→LF: source-text assertions below embed literal '\n'
+// boundaries (multi-line .toContain() checks). Windows checkouts with
+// core.autocrlf=true render this file with \r\n on disk, which would
+// otherwise break the literal match without changing actual content.
+const dailyMissionPanelSrc      = await import('../components/dashboard/DailyMissionPanel.jsx?raw').then((m) => m.default.replace(/\r\n/g, '\n'))
 const dashboardPageSrc          = await import('../pages/dashboard/DashboardPage.jsx?raw').then((m) => m.default)
 const emptyStateSrc             = await import('../components/ui/EmptyState.jsx?raw').then((m) => m.default)
 const actionEmptyStateSrc       = await import('../components/actions/ActionEmptyState.jsx?raw').then((m) => m.default)

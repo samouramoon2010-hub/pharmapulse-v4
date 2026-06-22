@@ -13,8 +13,11 @@
 
 import { describe, it, expect } from 'vitest'
 
-const panelSrc = await import('../../components/profileStudio/HierarchySummaryPanel.jsx?raw').then((m) => m.default)
-const detailPanelSrc = await import('../../components/profileStudio/ProfileDetailPanel.jsx?raw').then((m) => m.default)
+// Normalize CRLF→LF: fixed-offset .slice() windows below shift on a
+// Windows checkout (core.autocrlf=true) because \r adds an extra byte
+// before every \n, without any change to actual file content.
+const panelSrc = await import('../../components/profileStudio/HierarchySummaryPanel.jsx?raw').then((m) => m.default.replace(/\r\n/g, '\n'))
+const detailPanelSrc = await import('../../components/profileStudio/ProfileDetailPanel.jsx?raw').then((m) => m.default.replace(/\r\n/g, '\n'))
 
 // Code body only — excludes the leading file-header comment block, which
 // intentionally documents these same constraints in prose and would

@@ -36,7 +36,7 @@ export async function getCombinedDashboardSource(): Promise<string> {
   // blocks were extracted into TopAlertsPanel.jsx / ActivityFeedPanel.jsx
   // (same data, same styling) — included here so existing alert-pill /
   // activity-feed string-presence assertions continue to hold.
-  return (
+  const combined = (
     (focusCard as any).default +
     '\n' + (tile as any).default +
     '\n' + (helpers as any).default +
@@ -45,4 +45,8 @@ export async function getCombinedDashboardSource(): Promise<string> {
     '\n' + (healthHeatmap as any).default +
     '\n' + (dashboard as any).default
   )
+  // Normalize CRLF→LF: several regression tests assert on literal
+  // multi-line '\n' boundaries, which would otherwise break on a Windows
+  // checkout (core.autocrlf=true) without any change to actual content.
+  return combined.replace(/\r\n/g, '\n')
 }

@@ -34,6 +34,10 @@ import {
   getKpisForSurface,
   DEFAULT_KPI_UI_CONFIG,
 } from '../../engine/kpiRegistry'
+import {
+  getPilotTrackingKpis,
+} from '../../engine/kpiRegistry/kpiMetaResolver'
+import TrackingOnlyBadge, { PilotKpiSectionHeader } from '../../components/ui/TrackingOnlyBadge'
 
 // Compute today once — not inside render
 const TODAY = new Date().toISOString().split('T')[0]
@@ -41,20 +45,42 @@ const TODAY = new Date().toISOString().split('T')[0]
 // ── Registry → entry field config ─────────────────────────────
 // Maps a KpiDefinition to the field descriptor used by the form.
 // engineKey drives both form state keys and payload keys.
+// Only production_evaluation KPIs go in the main fields list.
+// Pilot KPIs are returned separately via buildPilotEntryFields.
 function buildEntryFields(registry) {
-  return getKpisForSurface(registry, 'dashboardEnabled').map((kpi) => {
-    const engineKey = kpi.aliasFor ?? kpi.key
-    return {
-      key:         engineKey,                            // form state key + payload key
-      registryKey: kpi.key,                              // registry identity
-      label:       kpi.labelAr || kpi.label || kpi.key, // Arabic label preferred
-      labelEn:     kpi.label || kpi.key,
-      hint:        kpi.description || kpi.unit || '',
-      color:       DEFAULT_KPI_UI_CONFIG.defaultColor,   // safe default; registry has no .color
-      placeholder: String(kpi.sortOrder <= 50 ? '0' : '0'),
-      unit:        kpi.unitAr || kpi.unit || '',
-    }
-  })
+  return getKpisForSurface(registry, 'dashboardEnabled')
+    .filter((kpi) => kpi.lifecycleStage === 'production_evaluation')
+    .map((kpi) => {
+      const engineKey = kpi.aliasFor ?? kpi.key
+      return {
+        key:         engineKey,
+        registryKey: kpi.key,
+        label:       kpi.labelAr || kpi.label || kpi.key,
+        labelEn:     kpi.label || kpi.key,
+        hint:        kpi.description || kpi.unit || '',
+        color:       DEFAULT_KPI_UI_CONFIG.defaultColor,
+        placeholder: String(kpi.sortOrder <= 50 ? '0' : '0'),
+        unit:        kpi.unitAr || kpi.unit || '',
+      }
+    })
+}
+
+function buildPilotEntryFields(registry) {
+  return getPilotTrackingKpis(registry)
+    .filter((kpi) => kpi.visibility.dashboardEnabled)
+    .map((kpi) => {
+      const engineKey = kpi.aliasFor ?? kpi.key
+      return {
+        key:         engineKey,
+        registryKey: kpi.key,
+        label:       kpi.labelAr || kpi.label || kpi.key,
+        labelEn:     kpi.label || kpi.key,
+        hint:        kpi.description || kpi.unit || '',
+        color:       DEFAULT_KPI_UI_CONFIG.defaultColor,
+        placeholder: '0',
+        unit:        kpi.unitAr || kpi.unit || '',
+      }
+    })
 }
 
 // ── Dynamic EMPTY_FORM builder ─────────────────────────────────
@@ -91,6 +117,7 @@ export default function KpiEntryPage() {
 
   // ── Derived KPI field list — reactive to registry ─────────────
   const entryFields = useMemo(() => buildEntryFields(liveRegistry), [liveRegistry])
+  const pilotEntryFields = useMemo(() => buildPilotEntryFields(liveRegistry), [liveRegistry])
 
   // ── Dynamic EMPTY_FORM — reactive to registry ─────────────────
   const emptyForm = useMemo(() => buildEmptyForm(entryFields), [entryFields])
@@ -174,19 +201,24 @@ export default function KpiEntryPage() {
     // saveEntry(payload, liveRegistry) threads the live Firestore registry
     // through to sanitizeKpiEntryFields, so custom KPIs (nps, sl, ndf…)
     // are persisted when they are active in the live registry.
+    // CRITICAL: always read auth.currentUser.uid AT SAVE TIME, not from
+    // the `uid` const which may have been computed before auth resolved.
+    // Firestore isOwnData() rule compares payload.userId == request.auth.uid.
+    // If these differ (userProfile.uid ≠ Auth UID), isOwnData() → false → DENIED.
+    const saveUid = auth?.currentUser?.uid
+    if (!saveUid) { toast.error('يرجى تسجيل الدخول مجدداً'); return }
     const payload = {
-      userId:    uid,
+      userId:    saveUid,    // MUST equal request.auth.uid for isOwnData()
       pharmacyId,
       date:      selectedDate,
       notes:     form.notes?.trim() || '',
-      actorId:   uid,
+      actorId:   saveUid,    // audit attribution
       actorRole: userProfile?.role,
     }
     for (const { key } of entryFields) {
       payload[key] = Number(form[key]) || 0
     }
 
-    console.log('[KpiEntryPage] payload before save:', payload)
 
     setSaving(true)
     try {
@@ -299,6 +331,31 @@ export default function KpiEntryPage() {
             {errors[key] && <p className="text-xs text-red-400 mt-1">{errors[key]}</p>}
           </div>
         ))}
+
+        {/* ── Pilot KPI Section ──────────────────────────────────── */}
+        {pilotEntryFields.length > 0 && (
+          <>
+            <PilotKpiSectionHeader />
+            <TrackingOnlyBadge notice size="sm" />
+            {pilotEntryFields.map(({ key, label, labelEn, hint, unit }) => (
+              <div key={key}>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-1.5">
+                  <span className="text-slate-400 text-xs font-mono">{labelEn}</span>
+                  <span className="text-slate-200">{label !== labelEn ? label : ''}</span>
+                  {unit && <span className="text-xs text-slate-600 mr-auto">{unit}</span>}
+                </label>
+                <input
+                  type="number" min="0" value={form[key] ?? ''}
+                  onChange={(e) => setField(key, e.target.value)}
+                  placeholder="0" dir="ltr"
+                  className="text-base opacity-80"
+                  style={{ borderColor: 'rgba(245,158,11,0.25)' }}
+                />
+                {errors[key] && <p className="text-xs text-red-400 mt-1">{errors[key]}</p>}
+              </div>
+            ))}
+          </>
+        )}
 
         {/* Notes always rendered */}
         <div>

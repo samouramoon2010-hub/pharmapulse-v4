@@ -26,6 +26,11 @@ import type {
   PharmacistPerformanceSummary,
 } from './teamIntelligenceTypes'
 
+// Protected Engines Migration Phase A — registry is optional and simply
+// passed through to the 3 engines that accept it. No current caller of
+// generateTeamIntelligence() passes a registry, so behavior is unchanged.
+import type { KpiRegistry } from '../kpiRegistry'
+
 // ── Team operational risk ─────────────────────────────────────
 function teamOperationalRisk(summaries: PharmacistPerformanceSummary[]): OperationalRisk {
   const highCount = summaries.filter((s) => s.operationalRisk === 'high').length
@@ -39,26 +44,28 @@ function teamOperationalRisk(summaries: PharmacistPerformanceSummary[]): Operati
 
 // ── Main generator ────────────────────────────────────────────
 export function generateTeamIntelligence(
-  input: TeamIntelligenceInput,
-  now:   Date = new Date(),
+  input:     TeamIntelligenceInput,
+  now:       Date = new Date(),
+  registry?: KpiRegistry,
 ): TeamIntelligenceResult {
   // 1. Per-pharmacist performance summaries
   const pharmacistSummaries = input.pharmacists.map((p) =>
-    computePharmacistPerformance(p, now)
+    computePharmacistPerformance(p, now, registry)
   )
 
   // 2. Team health (uses performance summaries)
-  const teamHealth = computeTeamHealth(input, pharmacistSummaries, now)
+  const teamHealth = computeTeamHealth(input, pharmacistSummaries, now, registry)
 
   // 3. Coaching plan (Phase 3: uses coachingEngine)
   const { recommendations: coachingRecommendations, focusSummary } =
-    buildTeamCoachingPlan(pharmacistSummaries)
+    buildTeamCoachingPlan(pharmacistSummaries, registry)
 
   // 4. Accountability insights (Phase 3: uses accountabilityEngine)
   const accountabilityInsights = computeAccountabilityInsights(
     input.pharmacists,
     input.month,
     now,
+    registry,
   )
 
   // 5. Team trend analysis (Phase 3: uses teamTrendEngine)

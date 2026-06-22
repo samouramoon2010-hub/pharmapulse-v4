@@ -37,6 +37,10 @@ export async function createPharmacy(data, actorId, actorRole) {
     throw new Error(`كود الفرع "${data.code}" مستخدم مسبقاً`)
   }
 
+  // RF-0B: classification — default to 'unclassified' if not supplied
+  const classificationId = data.branchClassification?.trim() || 'unclassified'
+  const now = new Date().toISOString()
+
   const payload = clean({
     code:         data.code.trim(),
     name:         data.name.trim(),
@@ -45,6 +49,11 @@ export async function createPharmacy(data, actorId, actorRole) {
     managerUid:   data.managerUid           || null,
     managerEmail: data.managerEmail?.trim() || null,
     active:       data.active !== false,
+    // RF-0B: additive classification fields
+    branchClassification:       classificationId,
+    branchClassificationSetAt:  now,
+    branchClassificationSource: 'admin',
+    schemaVersion:              1,
     createdAt:    serverTimestamp(),
     updatedAt:    serverTimestamp(),
     createdBy:    actorId || null,
@@ -76,6 +85,20 @@ export async function updatePharmacy(id, data, actorId, actorRole) {
     action: AUDIT_ACTION.UPDATE, collection: COL.PHARMACIES,
     docId: id, userId: actorId, userRole: actorRole, before, after: payload,
   })
+}
+
+// ── RF-0B: Update branch classification ───────────────────────
+// Calls repository.assignClassification() so:
+//   - pharmacy.branchClassification pointer is updated
+//   - classificationHistory entry is written (temporal record)
+//   - schemaVersion, branchClassificationSetAt, branchClassificationSource are updated
+//
+// Separate from updatePharmacy so the classification write always goes
+// through the RF-0 assignment path (keeps history intact).
+export async function updatePharmacyClassification(id, classificationId, actorId, actorRole) {
+  const { assignClassification } = await import('../classification/repository')
+  const month = new Date().toISOString().slice(0, 7)   // 'YYYY-MM'
+  await assignClassification(id, classificationId, month, actorId || '', actorRole || '')
 }
 
 // ── Toggle active ─────────────────────────────────────────────

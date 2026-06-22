@@ -9,9 +9,10 @@ import ErrorBoundary  from './components/ui/ErrorBoundary'
 import AppLayout      from './components/layout/AppLayout'
 import ProtectedRoute from './components/layout/ProtectedRoute'
 import LoadingScreen  from './components/ui/LoadingScreen'
+import ThemeProvider  from './theme/ThemeProvider'
 
 // Auth
-import LoginPage        from './pages/auth/LoginPage'
+import LoginPageV2      from './pages/auth/LoginPageV2'
 import UnauthorizedPage from './pages/auth/UnauthorizedPage'
 
 // Core
@@ -24,16 +25,39 @@ import UsersPage        from './pages/admin/UsersPage'
 import ImportCenterPage from './pages/admin/ImportCenterPage'
 import AuditLogsPage       from './pages/admin/AuditLogsPage'
 import KpiManagementPage  from './pages/admin/KpiManagementPage'
+// RBAC Phase 1 — Territory Admin Pages
+import PersonalTargetsPage from './pages/manager/PersonalTargetsPage'
+import EvaluationRegistryPage from './pages/admin/EvaluationRegistryPage'
+import EvaluationRunPage      from './pages/admin/EvaluationRunPage'
+import BranchClassificationsPage from './pages/admin/BranchClassificationsPage'
+import RankingsPage               from './pages/admin/RankingsPage'
+import DemoDataPage               from './pages/admin/DemoDataPage'
+import DynamicKpiShadowPage       from './pages/admin/DynamicKpiShadowPage'
+import RegionsPage   from './pages/admin/RegionsPage'
+import DistrictsPage from './pages/admin/DistrictsPage'
 
 // Shared
-import SettingsPage         from './pages/shared/SettingsPage'
+import SettingsPage         from './pages/settings/SettingsPage'
 import TargetsPage            from './pages/shared/TargetsPage'
 import ReportsPage            from './pages/shared/ReportsPage'
 import NotificationsPage      from './pages/shared/NotificationsPage'
 import PharmacistPerformancePage from './pages/pharmacist/PerformancePage'
 import TeamPage                  from './pages/manager/TeamPage'
+import BranchIntelligencePage    from './pages/branch/BranchIntelligencePage'
+import PharmacistIntelligencePage from './pages/pharmacist/PharmacistIntelligencePage'
+import MyPharmacistIntelligenceRedirect from './pages/pharmacist/MyPharmacistIntelligenceRedirect'
 import AboutPage    from './pages/shared/AboutPage'
 import ExecutiveDashboard from './pages/executive/ExecutiveDashboard'
+
+// Actions Layer — Phase 3C-3
+import MyActionsPage from './pages/actions/MyActionsPage'
+import TasksPage     from './pages/actions/TasksPage'
+
+// Profile Studio — Phase 2A
+import ProfileStudioPage from './pages/profileStudio/ProfileStudioPage'
+
+// Assistant — Visibility Hotfix
+import AssistantPage from './pages/assistant/AssistantPage'
 
 const WIP = ({ t }) => (
   <div className="flex flex-col items-center justify-center min-h-[400px]"
@@ -45,8 +69,37 @@ const WIP = ({ t }) => (
 )
 
 const ADMIN  = ['admin']
-const MGR_UP = ['admin','manager']
-const ALL    = ['admin','manager','pharmacist']
+// Phase 3A-1B: territory roles gain read-only access to UsersPage.
+// manager / branch_manager intentionally excluded — they have no user-management
+// responsibility in the current build. Page enforces isReadOnly for list-scope roles.
+const USERS_ROLES = ['admin', 'district_supervisor', 'regional_manager', 'general_manager']
+// Phase 1A: EXEC_ROLES now includes all managerial tiers so users with
+// hierarchy roles can reach Executive BI without a bounce loop.
+// Data scoping inside the page remains unchanged (Phase 2 will add
+// scope-resolver so each role sees only their allowed branches).
+const EXEC_ROLES = [
+  'admin',
+  'manager',
+  'branch_manager',
+  'district_supervisor',
+  'regional_manager',
+  'general_manager',
+]
+// Phase 1A: MGR_UP extended to all hierarchy roles above pharmacist.
+// Allows district_supervisor, regional_manager, and general_manager to
+// reach team, branch intelligence, targets, reports, and personal-targets
+// routes. Data scoping (assignedPharmacyIds) is Phase 2.
+const MGR_UP = [
+  'admin',
+  'manager',
+  'branch_manager',
+  'district_supervisor',
+  'regional_manager',
+  'general_manager',
+]
+const ALL    = ['admin','manager','branch_manager','district_supervisor','regional_manager','general_manager','pharmacist']
+// Profile Studio — Phase 2A: visible to admin/GM/DS/manager; hidden from pharmacist
+const PS_ROLES = ['admin', 'general_manager', 'district_supervisor', 'manager']
 const PR     = ({ roles = ALL, children }) => <ProtectedRoute allowedRoles={roles}>{children}</ProtectedRoute>
 
 function HomeRedirect() {
@@ -64,13 +117,19 @@ export default function App() {
     return () => { if (typeof u === 'function') u() }
   }, [])
 
-  if (loading) return <LoadingScreen message="جاري تحميل PharmaPulse..." />
-
+  // BrowserRouter is intentionally OUTSIDE the loading gate (login double-submit fix).
+  // Moving it inside caused the router to unmount/remount during auth loading,
+  // which orphaned the useNavigate() hook in LoginPage and silently dropped
+  // the post-login navigation on the first attempt.
   return (
+    <ThemeProvider>
     <BrowserRouter>
       <ErrorBoundary>
-        <Routes>
-          <Route path="/login"        element={<LoginPage />} />
+        {loading ? (
+          <LoadingScreen message="جاري تحميل PharmaPulse..." />
+        ) : (
+          <Routes>
+          <Route path="/login"        element={<LoginPageV2 />} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="/about"        element={<AboutPage />} />
           <Route path="/"             element={<HomeRedirect />} />
@@ -82,24 +141,60 @@ export default function App() {
             <Route path="/performance"   element={<PR><PharmacistPerformancePage /></PR>} />
             <Route path="/notifications" element={<PR><NotificationsPage /></PR>} />
             <Route path="/settings"      element={<PR><SettingsPage /></PR>} />
+            {/* My Intelligence — first-class pharmacist page. Resolves the
+                current user's uid/pharmacyId and redirects to their own
+                /pharmacist/:userId/intelligence. Replaces the former
+                dev-only redirect shortcut. */}
+            <Route path="/my-intelligence" element={<PR roles={['pharmacist']}><MyPharmacistIntelligenceRedirect /></PR>} />
+
+            {/* Actions Layer — Phase 3C-3 */}
+            <Route path="/actions/my"    element={<PR><MyActionsPage /></PR>} />
+            <Route path="/actions/tasks" element={<PR roles={MGR_UP}><TasksPage /></PR>} />
 
             {/* Manager + Admin */}
             <Route path="/team"     element={<PR roles={MGR_UP}><TeamPage /></PR>} />
+            {/* Branch Intelligence — Phase 5A (Sections 0-2 only; 3-6 in Phase 5B) */}
+            <Route path="/branch/:branchId/intelligence" element={<PR roles={MGR_UP}><BranchIntelligencePage /></PR>} />
+            {/* Pharmacist Intelligence — Phase 5C-3+. Route-level: all roles incl.
+                pharmacist (individual-performance page). Page-level guard
+                (PharmacistIntelligencePage) restricts pharmacists to their
+                own userId — see ownership check inside the page. */}
+            <Route path="/pharmacist/:userId/intelligence" element={<PR roles={ALL}><PharmacistIntelligencePage /></PR>} />
             <Route path="/targets"  element={<PR roles={MGR_UP}><TargetsPage /></PR>} />
+            <Route path="/personal-targets" element={<PR roles={MGR_UP}><PersonalTargetsPage /></PR>} />
             <Route path="/reports"  element={<PR roles={MGR_UP}><ReportsPage /></PR>} />
 
             {/* Admin only */}
-            <Route path="/executive"  element={<PR roles={ADMIN}><ExecutiveDashboard /></PR>} />
+            <Route path="/executive"  element={<PR roles={EXEC_ROLES}><ExecutiveDashboard /></PR>} />
             <Route path="/pharmacies" element={<PR roles={ADMIN}><PharmaciesPage /></PR>} />
-            <Route path="/users"      element={<PR roles={ADMIN}><UsersPage /></PR>} />
+            <Route path="/users"      element={<PR roles={USERS_ROLES}><UsersPage /></PR>} />
             <Route path="/import"     element={<PR roles={ADMIN}><ImportCenterPage /></PR>} />
             <Route path="/audit"      element={<PR roles={ADMIN}><AuditLogsPage /></PR>} />
-            <Route path="/admin/kpis" element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
+            <Route path="/admin/kpis"      element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
+            {/* RBAC Phase 1 — Territory Infrastructure (Admin only) */}
+            <Route path="/admin/evaluation-registry" element={<PR roles={ADMIN}><EvaluationRegistryPage /></PR>} />
+            <Route path="/admin/evaluation-run"      element={<PR roles={ADMIN}><EvaluationRunPage /></PR>} />
+            <Route path="/admin/regions"   element={<PR roles={ADMIN}><RegionsPage /></PR>} />
+            <Route path="/admin/districts" element={<PR roles={ADMIN}><DistrictsPage /></PR>} />
+            {/* RF-0 — Branch Classification Foundation */}
+            <Route path="/admin/classifications" element={<PR roles={ADMIN}><BranchClassificationsPage /></PR>} />
+            {/* RF-1B — Rankings Preview */}
+            <Route path="/admin/rankings" element={<PR roles={ADMIN}><RankingsPage /></PR>} />
+            {/* RF-0E — Demo Data Seeder */}
+            <Route path="/admin/demo-data" element={<PR roles={ADMIN}><DemoDataPage /></PR>} />
+            {/* Controlled Cutover Phase 1 — Dynamic KPI Shadow Visibility (admin-only diagnostics) */}
+            <Route path="/admin/dynamic-kpi-shadow" element={<PR roles={ADMIN}><DynamicKpiShadowPage /></PR>} />
+            {/* Profile Studio — Phase 2A */}
+            <Route path="/profile-studio" element={<PR roles={PS_ROLES}><ProfileStudioPage /></PR>} />
+            {/* Assistant — Visibility Hotfix. Same role set as Profile Studio. */}
+            <Route path="/assistant" element={<PR roles={PS_ROLES}><AssistantPage /></PR>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        )}
       </ErrorBoundary>
     </BrowserRouter>
+    </ThemeProvider>
   )
 }

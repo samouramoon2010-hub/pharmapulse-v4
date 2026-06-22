@@ -7,6 +7,7 @@
 import type { StagedKpiRecord, IngestionCommitResult } from './ingestionTypes'
 import type { GuardContext } from '../security/accessGuard'
 import { guardPharmacyAccess, guardNotFutureDate, assertGuard } from '../security/accessGuard'
+import { buildKpiValuesMap } from '../kpiRegistryLogic'
 
 // ══════════════════════════════════════════════════════════════
 // 1. PRE-COMMIT GUARDS
@@ -147,6 +148,18 @@ export function stagedToKpiEntry(
   record:   StagedKpiRecord,
   actorUid: string,
 ): Record<string, unknown> {
+  // Core KPI Dependency Removal — Stage C: the dynamic engine-key value map
+  // covers the 5 legacy fields plus any other active registry KPI present
+  // in this import. Falls back to the 5 named fields for staged records
+  // built before this field existed (e.g. older test fixtures).
+  const stagingKpiValues = record.kpiValues ?? {
+    wasfaty:      record.wasfaty,
+    omni:         record.omni,
+    wellness:     record.wellness,
+    basket:       record.basket,
+    crossSelling: record.crossSelling,
+  }
+
   return {
     userId:       record.submittedBy,
     pharmacyId:   record.pharmacyId,
@@ -156,6 +169,20 @@ export function stagedToKpiEntry(
     wellness:     record.wellness,
     basket:       record.basket,
     crossSelling: record.crossSelling,
+    // Core KPI Dependency Removal — Stage C: any active registry KPI beyond
+    // the 5 legacy fields above is spread here as a flat engine-key field —
+    // this is the field evaluation engines actually read (kpi.actualField
+    // resolves to the engine key by convention). Mirrors saveKpiEntry's
+    // dual-write exactly, so an imported entry and a manually-entered entry
+    // are indistinguishable to every downstream engine.
+    ...Object.fromEntries(
+      Object.entries(stagingKpiValues).filter(([key]) =>
+        !['wasfaty', 'omni', 'wellness', 'basket', 'crossSelling'].includes(key)
+      )
+    ),
+    // Milestone 2 — Dual-write: kpiValues map using registry business keys
+    // Mirrors saveKpiEntry dual-write so imported entries match manual entries.
+    kpiValues:    buildKpiValuesMap(stagingKpiValues),
     // Source tracking
     importedFrom: record.source,
     importBatchId: record.batchId,

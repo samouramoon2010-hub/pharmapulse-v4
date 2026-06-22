@@ -6,24 +6,23 @@ import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 import {
-  AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import {
-  Target, TrendingUp, Users, Building2, Activity,
-  Award, RefreshCw, Calendar, Zap, ChevronDown, Settings2,
+  Target, TrendingUp, TrendingDown, Users, Activity,
+  Award, RefreshCw, Calendar, AlertTriangle, Star, ClipboardList,
 } from 'lucide-react'
 import { useAuthStore }     from '../../store/authStore'
 import { useKpiStore }      from '../../store/kpiStore'
 import { usePharmacyStore } from '../../store/pharmacyStore'
-import { useSettingsStore, DASHBOARD_CARDS } from '../../store/settingsStore'
-import StatCard from '../../components/ui/StatCard'
+import { useScopeProfile }         from '../../hooks/useScopeProfile'
+import { filterAllowedPharmacies } from '../../services/scopeResolver'
 import {
-  SkeletonStatCard, SkeletonChart, SkeletonFeed, SkeletonInsightsStrip,
+  SkeletonStatCard, SkeletonChart,
 } from '../../components/ui/SkeletonCard'
-import EmptyState, {
-  EmptyTodayEntries, EmptyNoTargets, EmptyNoForecast,
-  EmptyNoBranch, EmptyMissionNotReady, ErrorState,
+import {
+  EmptyTodayEntries, EmptyNoForecast, ErrorState,
 } from '../../components/ui/EmptyState'
 // KPI Analytics Engine V1
 import {
@@ -43,19 +42,32 @@ import TeamIntelligenceCard from '../../components/ui/TeamIntelligenceCard'
 // Live Analytics Layer
 import {
   generateLiveAnalytics, buildLiveInput,
-  KPI_HEALTH_COLORS,
 } from '../../engine/liveAnalytics'
 import { subscribeKpiRegistry }                              from '../../services/kpiRegistryService'
+import { getUsersByPharmacy }                                from '../../services/userService'
+import { subscribePublishedPersonalTargetsByBranch }        from '../../services/personalTargetService'
 import { mergeRemoteRegistryWithDefaults }                   from '../../services/kpiRegistryLogic'
-import { getKpisForSurface, DEFAULT_KPI_UI_CONFIG }          from '../../engine/kpiRegistry'
+import { getKpisForSurface }                                  from '../../engine/kpiRegistry'
 import { DEFAULT_KPI_REGISTRY, getTargetFieldName }          from '../../engine/kpiRegistry'
+import { getPilotTrackingKpis }                              from '../../engine/kpiRegistry/kpiMetaResolver'
+// Controlled Cutover Phase 2 — Production Reader Pilot (Dashboard surface)
+import { buildPilotPolicy, readPilotActual, readPilotTarget } from '../../engine/kpiRegistry/dynamicReaderPilot'
+import TrackingOnlyBadge, { PilotKpiSectionHeader }          from '../../components/ui/TrackingOnlyBadge'
+import DailyMissionPanel from '../../components/dashboard/DailyMissionPanel'
+import DailyMissionHero from '../../components/dashboard/DailyMissionHero'
+import KpiDistributionDonut from '../../components/dashboard/KpiDistributionDonut'
+import TopAlertsPanel from '../../components/dashboard/TopAlertsPanel'
+import KpiHealthHeatmap from '../../components/dashboard/KpiHealthHeatmap'
+import ActivityFeedPanel from '../../components/dashboard/ActivityFeedPanel'
+import ExecutiveSummaryPanel from '../../components/executive/ExecutiveSummaryPanel'
+import {
+  KPI_STATUS_BADGE, enterpriseStatusColor,
+  getKpiColor,
+}                                                              from '../../components/kpi/kpiVisualHelpers'
+import KpiCard from '../../components/kpi/KpiCard'
+import { formatNumber } from '../../utils/helpers'
 
-// ── Static fallback colors (for render safety before registry loads) ──
-const FALLBACK_COLORS = {
-  wasfaty:'#6366f1', omni:'#ef4444', wellness:'#f59e0b',
-  basket:'#22c55e', crossSelling:'#8b5cf6',
-}
-const DEFAULT_KPI_COLOR = '#a1a1aa'
+// (color fallback uses getKpiColor from kpiVisualHelpers — Phase 4D-B migration)
 
 // ── Premium Chart Tooltip ─────────────────────────────────────
 const ChartTip = ({ active, payload, label }) => {
@@ -81,233 +93,49 @@ const ChartTip = ({ active, payload, label }) => {
   )
 }
 
-// ── Premium Status Pill ───────────────────────────────────────
-function TLBadge({ status }) {
-  const cfg = TRAFFIC_COLORS[status] || TRAFFIC_COLORS.good
-  return (
-    <span className="status-pill" style={{
-      color: cfg.color,
-      background: cfg.bg,
-      borderColor: cfg.border,
-    }}>
-      {cfg.labelAr}
-    </span>
-  )
-}
-
-// ── Forecast Mini ─────────────────────────────────────────────
-function ForecastCard({ kpiKey, label, forecast, target, stats }) {
-  // Engine V1: forecast = computeForecast() result
-  // forecast.forecastAchPct, forecast.forecastEOM, forecast.recoveryProbability
-  // forecast.optimistic, forecast.realistic, forecast.pessimistic
-  if (!forecast) return null
-
-  const status = getTrafficLight(forecast.forecastAchPct, 1)  // compare vs full target
-  const cfg    = TRAFFIC_COLORS[status]
-
-  return (
-    <div className="kpi-card p-4" style={{ borderColor: cfg.border }}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold" style={{ color:'var(--text-secondary)' }}>{label}</span>
-        <TLBadge status={status} />
-      </div>
-      {/* Forecast achievement % */}
-      <div className="text-xl font-bold tabular-nums" style={{ color: cfg.color }}>
-        {forecast.forecastAchPct}%
-      </div>
-      {/* Projected EOM value */}
-      <div className="text-xs mt-1" style={{ color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
-        EOM: {forecast.forecastEOM.toLocaleString()} / {(target || 0).toLocaleString()}
-      </div>
-      {/* Recovery probability from Engine V1 */}
-      <div className="text-xs mt-0.5" style={{ color: cfg.color, opacity:0.75 }}>
-        Recovery: {Math.round(forecast.recoveryProbability * 100)}%
-      </div>
-      <div className="progress-track mt-2">
-        <div className="progress-fill"
-             style={{ width:`${Math.min(forecast.forecastAchPct, 100)}%`, background: cfg.color }} />
-      </div>
-    </div>
-  )
-}
-
-// ── Daily Mission Card ────────────────────────────────────────
-function DailyMissionCard({ mission }) {
-  if (!mission) return null
-  // Engine V1: status from getTrafficLight on the focus KPI
-  const focusStatus = mission.focusKpi
-    ? getTrafficLight(mission.achievementPct, getDayProgress().ratio)
-    : 'warning'
-  const cfg = TRAFFIC_COLORS[focusStatus] || TRAFFIC_COLORS.warning
-
-  // Engine V1 field names:
-  //   mission.achievementPct  (was: mission.achievement)
-  //   mission.focusKpi        (was: mission.weakestKpi)
-  //   mission.kpiLabel.en/ar  (same)
-  //   mission.targetGap       (same)
-  //   mission.requiredToday   (new — from Engine V1 pace)
-  //   mission.currentRate     (new — from Engine V1 pace)
-  //   mission.difficulty      (new — EASY/MODERATE/CHALLENGING/STRETCH)
-  //   mission.action          (same)
-  //   mission.motivation      (was: mission.message)
-
-  const difficultyColor = {
-    EASY:        '#22c55e',
-    MODERATE:    '#00d2ad',
-    CHALLENGING: '#f59e0b',
-    STRETCH:     '#ef4444',
-  }[mission.difficulty] || '#00d2ad'
-
-  return (
-    <div className="card card-p"
-         style={{ borderColor: cfg.border, background:`linear-gradient(135deg, ${cfg.bg}, var(--bg-card))` }}>
-      <div className="flex items-center gap-2 mb-3">
-        <Zap className="w-5 h-5" style={{ color: cfg.color }} />
-        <h3 className="section-title text-sm">Daily Mission</h3>
-        <TLBadge status={focusStatus} />
-        {/* Engine V1 — difficulty badge */}
-        <span style={{
-          marginRight:'auto', fontSize:'9px', fontWeight:600, letterSpacing:'0.06em',
-          textTransform:'uppercase', color: difficultyColor,
-          padding:'1px 6px', borderRadius:'99px',
-          background:`${difficultyColor}14`, border:`1px solid ${difficultyColor}25`,
-        }}>
-          {mission.difficulty}
-        </span>
-      </div>
-
-      <div className="space-y-3">
-        {/* Focus KPI — Engine V1 field: achievementPct */}
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs" style={{ color:'var(--text-muted)' }}>Focus KPI</div>
-            <div className="text-sm font-bold" style={{ color:'var(--text-primary)' }}>
-              {mission.kpiLabel?.en || mission.focusKpi}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-xl font-bold tabular-nums" style={{ color: cfg.color }}>
-              {mission.achievementPct ?? 0}%
-            </div>
-            <div className="text-xs" style={{ color:'var(--text-muted)' }}>achievement</div>
-          </div>
-        </div>
-
-        {/* Gap + Required pace — Engine V1 new fields */}
-        <div style={{
-          display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px',
-        }}>
-          <div className="rounded-lg px-3 py-2"
-               style={{ background:'var(--bg-hover)', border:'1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize:'9px', color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'2px' }}>Gap</div>
-            <div style={{ fontSize:'13px', fontWeight:600, color: cfg.color, fontVariantNumeric:'tabular-nums' }}>
-              {(mission.targetGap || 0).toLocaleString()}
-            </div>
-          </div>
-          <div className="rounded-lg px-3 py-2"
-               style={{ background:'var(--bg-hover)', border:'1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize:'9px', color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'2px' }}>Required/day</div>
-            <div style={{ fontSize:'13px', fontWeight:600, color:'var(--text-primary)', fontVariantNumeric:'tabular-nums' }}>
-              {(mission.requiredToday || 0).toLocaleString()}
-            </div>
-          </div>
-        </div>
-
-        {/* Action */}
-        <div className="text-xs leading-relaxed" style={{ color:'var(--text-secondary)' }}>
-          💡 {mission.action}
-        </div>
-
-        {/* Motivation — Engine V1 field: motivation (was: message) */}
-        <div className="text-xs italic" style={{ color:'var(--text-muted)' }}>
-          "{mission.motivation || ''}"
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Card Customizer ───────────────────────────────────────────
-function CardCustomizer({ selectedCards, onToggle, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm animate-scale-in rounded-2xl p-5"
-           style={{ background:'var(--modal-bg)', border:'1px solid var(--border-hover)' }}>
-        <h3 className="section-title mb-1">Customize Dashboard</h3>
-        <p className="text-xs mb-4" style={{ color:'var(--text-muted)' }}>
-          Select at least 2 cards to display
-        </p>
-        <div className="space-y-2 max-h-72 overflow-y-auto">
-          {Object.entries(DASHBOARD_CARDS).map(([key, meta]) => {
-            const active = selectedCards.includes(key)
-            return (
-              <button key={key} onClick={() => onToggle(key)}
-                className="flex items-center justify-between w-full px-3 py-2.5 rounded-xl transition-all text-right"
-                style={{
-                  background: active ? 'var(--bg-active)' : 'var(--bg-hover)',
-                  border: `1px solid ${active ? 'var(--border-brand)' : 'var(--border)'}`,
-                }}>
-                <span className="text-sm" style={{ color:'var(--text-primary)' }}>{meta.labelAr}</span>
-                <span className="text-xs" style={{ color: active ? 'var(--brand-300)' : 'var(--text-muted)' }}>
-                  {meta.label}
-                </span>
-                <div className={`w-5 h-5 rounded flex items-center justify-center transition-all ${
-                  active ? 'bg-brand-500' : 'bg-transparent border border-slate-600'
-                }`}>
-                  {active && <div className="w-3 h-0.5 bg-white rounded" />}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-        <button onClick={onClose} className="btn btn-primary w-full mt-4">Done</button>
-      </div>
-    </div>
-  )
-}
-
 // ── Main Dashboard ────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { userProfile } = useAuthStore()
   const {
-    entries, subscribeMyEntries, subscribePharmacyEntries, subscribeAllEntries,
-    targets, subscribeMyTargets, subscribeAllTargets,
+    entries, subscribePharmacyEntries,
+    subscribeRecentEntries,
+    targets, subscribeMyTargets, subscribeRecentTargets,
   } = useKpiStore()
   const { pharmacies, subscribe: subscribePh } = usePharmacyStore()
-  const { dashboardCards, setDashboardCards } = useSettingsStore()
 
   const [loading,     setLoading]     = useState(true)
   const [fetchError,  setFetchError]  = useState(false)
   const [tick,        setTick]        = useState(0)
-  const [showCustom,  setShowCustom]  = useState(false)
-  const [localCards,  setLocalCards]  = useState(dashboardCards)
 
-  const role      = userProfile?.role
-  const isAdmin   = role === 'admin'
-  const isManager = ['manager','admin'].includes(role)
+  const role       = userProfile?.role
   // uid resolution: userProfile.uid (explicit field) OR userProfile.id (Firestore doc id = Auth uid).
   // _fetchProfile returns { id: snap.id, ...snap.data() } — the doc may not have a 'uid' field
   // in the data(), but snap.id is always the Firebase Auth UID. Use both for safety.
   const uid        = userProfile?.uid ?? userProfile?.id
   const pharmacyId = userProfile?.pharmacyId
-  const noBranch   = !isAdmin && !pharmacyId
+
+  // ── Phase 2G-1: Scope Resolver ───────────────────────────────
+  const { scope, loading: scopeLoading, error: scopeError } = useScopeProfile()
+  const allowedPharmacies = useMemo(() => {
+    if (!scope) return []
+    return filterAllowedPharmacies(scope, pharmacies)
+  }, [scope, pharmacies])
 
   useEffect(() => {
+    if (!scope) return
     setFetchError(false)
     const uns = []
     try {
       uns.push(subscribePh())
-      if (isAdmin) {
-        uns.push(subscribeAllEntries())
-        uns.push(subscribeAllTargets())
-      } else if (pharmacyId) {
-        uns.push(subscribePharmacyEntries(pharmacyId))
-        uns.push(subscribeMyTargets(pharmacyId))
-      } else if (uid && pharmacyId) {
-        uns.push(subscribeMyEntries(uid, pharmacyId))
+      if (scope.type === 'all' || scope.type === 'list') {
+        uns.push(subscribeRecentEntries())
+        uns.push(subscribeRecentTargets())
+      } else if (scope.type === 'single') {
+        uns.push(subscribePharmacyEntries(scope.id))
+        uns.push(subscribeMyTargets(scope.id))
       }
+      // scope.type === 'none': no subscriptions
     } catch (e) {
       console.error('[Dashboard] Subscription error:', e)
       setFetchError(true)
@@ -315,7 +143,7 @@ export default function DashboardPage() {
     }
     const t = setTimeout(() => setLoading(false), 500)
     return () => { uns.forEach((u) => u?.()); clearTimeout(t) }
-  }, [uid, pharmacyId, role, tick])
+  }, [scope, tick])
 
   const today      = format(new Date(), 'yyyy-MM-dd')
   const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd')
@@ -324,13 +152,25 @@ export default function DashboardPage() {
   // daysPassed, totalDays, dayRatio now come from Engine V1 dp above
 
   const myEntries = useMemo(() => {
-    if (isAdmin)   return entries
-    if (isManager && pharmacyId) return entries.filter((e) => e.pharmacyId === pharmacyId)
-    return entries.filter((e) => e.userId === uid)
-  }, [entries, role, uid, pharmacyId])
+    if (!scope) return []
+    if (scope.type === 'all') return entries
+    const allowedIds = new Set(allowedPharmacies.map((p) => p.id))
+    return entries.filter((e) => allowedIds.has(e.pharmacyId))
+  }, [entries, scope, allowedPharmacies])
 
-  const todayEntries = useMemo(() => myEntries.filter((e) => e.date === today),  [myEntries, today])
-  const monthEntries = useMemo(() => myEntries.filter((e) => e.date >= monthStart && e.date <= monthEnd), [myEntries])
+  // ── Date guards ───────────────────────────────────────────────
+  // monthCeiling = min(today, monthEnd).
+  // Real pharmacists never submit future-dated entries, so this guard is
+  // a no-op in production. For demo data (which pre-seeds entries for dates
+  // that have not yet passed), it prevents future entries from inflating:
+  //   - kpiStats.actual (→ overallAch, Branch Health)
+  //   - forecastMap currentDailyRate (→ Forecast EOM)
+  // Using today <= monthEnd avoids a redundant comparison; we just clamp.
+  const monthCeiling = today <= monthEnd ? today : monthEnd
+
+  const todayEntries  = useMemo(() => myEntries.filter((e) => e.date === today),           [myEntries, today])
+  const monthEntries  = useMemo(() => myEntries.filter((e) => e.date >= monthStart && e.date <= monthCeiling), [myEntries, monthStart, monthCeiling])
+
 
   // ── Target lookup — admin aggregates across all branches ─────
   // Admin has no pharmacyId, so targets.find(t => t.pharmacyId === undefined) never matches.
@@ -339,13 +179,10 @@ export default function DashboardPage() {
   const currentTarget = useMemo(() => {
     if (!targets.length) return undefined
 
-    if (isAdmin) {
-      // Build aggregated synthetic target by summing all pharmacy targets for this month.
-      // This matches how ReportsPage computes totalTarget in kpiSummary.
+    // all scope (admin / GM): aggregate all pharmacy targets for this month
+    if (scope?.type === 'all') {
       const monthTargets = targets.filter((t) => t.month === thisMonth)
       if (!monthTargets.length) return undefined
-
-      // Start with identity fields, then sum every *Target field
       const aggregated = { pharmacyId: 'all', month: thisMonth }
       for (const t of monthTargets) {
         for (const [k, v] of Object.entries(t)) {
@@ -356,12 +193,64 @@ export default function DashboardPage() {
       return aggregated
     }
 
-    // Manager / pharmacist: find their specific pharmacy target
-    return targets.find((t) => t.pharmacyId === pharmacyId && t.month === thisMonth)
-  }, [targets, pharmacyId, thisMonth, isAdmin])
+    // list scope (district_supervisor / regional_manager): aggregate assigned branches
+    if (scope?.type === 'list') {
+      const ids = new Set(scope.ids ?? [])
+      const monthTargets = targets.filter((t) => t.month === thisMonth && ids.has(t.pharmacyId))
+      if (!monthTargets.length) return undefined
+      const aggregated = { pharmacyId: 'list', month: thisMonth }
+      for (const t of monthTargets) {
+        for (const [k, v] of Object.entries(t)) {
+          if (!k.endsWith('Target')) continue
+          aggregated[k] = (aggregated[k] || 0) + (Number(v) || 0)
+        }
+      }
+      return aggregated
+    }
+
+    // single scope (manager / branch_manager / pharmacist): own pharmacy target
+    if (scope?.type === 'single') {
+      return targets.find((t) => t.pharmacyId === scope.id && t.month === thisMonth)
+    }
+
+    return undefined
+  }, [targets, scope, thisMonth])
 
   // ── Live Registry-driven KPI list ──────────────────────────
   const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  const [pharmacyUserMap, setPharmacyUserMap] = useState(null)
+  // userId → PersonalTargetDoc for published personal targets this month.
+  // Mirrors TeamPage.jsx Sprint B3 pattern so dashboard team intelligence
+  // uses correct per-member targets before B1 pace calculations.
+  const [personalTargetMap, setPersonalTargetMap] = useState(new Map())
+
+  useEffect(() => {
+    if (!pharmacyId) return
+    getUsersByPharmacy(pharmacyId)
+      .then((users) => {
+        const map = new Map()
+        users.forEach((u) => map.set(u.id, u.displayName || 'Unknown User'))
+        setPharmacyUserMap(map)
+      })
+      .catch(() => {})
+  }, [pharmacyId])
+
+  // Subscribe to published personal targets for team intelligence.
+  // Only for managers/admins with a known pharmacyId.
+  const currentMonthForPT = format(new Date(), 'yyyy-MM')
+  useEffect(() => {
+    if (!pharmacyId) { setPersonalTargetMap(new Map()); return }
+    const unsub = subscribePublishedPersonalTargetsByBranch(
+      pharmacyId, currentMonthForPT,
+      (docs) => {
+        const map = new Map()
+        docs.forEach((d) => map.set(d.userId, d))
+        setPersonalTargetMap(map)
+      }
+    )
+    return () => unsub()
+  }, [pharmacyId, currentMonthForPT])
+
   useEffect(() => {
     return subscribeKpiRegistry(
       (reg) => setLiveRegistry(reg),
@@ -369,43 +258,59 @@ export default function DashboardPage() {
     )
   }, [])
 
-  // KPI configs for dashboard — active + dashboardEnabled
+  // KPI configs for dashboard — production_evaluation KPIs only.
+  // Filter separates production KPIs from pilot KPIs (pilot section rendered separately).
+  // SAFETY: if lifecycleStage is undefined (pre-Milestone-3 Firestore docs), treat as
+  //         production_evaluation — do not silently drop KPIs with missing field.
   const registryKpis = useMemo(() => {
     return getKpisForSurface(liveRegistry, 'dashboardEnabled')
+      .filter((kpi) => (kpi.lifecycleStage ?? 'production_evaluation') === 'production_evaluation')
   }, [liveRegistry])
+
+  // Pilot KPIs for dashboard — tracked but not evaluated
+  const pilotKpis = useMemo(() => getPilotTrackingKpis(liveRegistry), [liveRegistry])
 
   // Engine keys only — for reading from kpi_entries
   const KPI_KEYS = useMemo(
     () => registryKpis.map(cfg => cfg.aliasFor ?? cfg.key),
     [registryKpis]
   )
-
-  // Color lookup — safe fallback to defaultColor
-  const kpiColor = (engineKey) =>
-    FALLBACK_COLORS[engineKey] ??
-    registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.visibility?.dashboardEnabled
-      ? (registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)?.defaultColor ?? DEFAULT_KPI_COLOR)
-      : DEFAULT_KPI_COLOR
-
   // ── KPI Engine V1 — per-KPI stats ────────────────────────────
-  const dp = useMemo(() => getDayProgress(), [])
+  // dp must NOT be memoized with [] — a stale currentDay causes
+  // forecastEOM = (actual / 1) * totalDays which inflates all KPIs
+  // to the 200% ACHIEVEMENT_CAP. getDayProgress() is pure and <1ms.
+  const dp = getDayProgress()
   // alias kept for chart/widget code below
   const daysPassed = dp.currentDay
   const totalDays  = dp.totalDays
   const dayRatio   = dp.ratio
+
+  // Controlled Cutover Phase 2 — pilot policy decides, per pilot KPI
+  // (Smart List/sl, NDF, Wellness Card, OmniHealth, Sales), whether the
+  // Dynamic Reader is safe to use as the source. Built from a single real
+  // entry+target sample already loaded above — never fabricated. When no
+  // sample exists yet, every pilot KPI safely defaults to the Legacy Reader.
+  const pilotPolicy = useMemo(
+    () => buildPilotPolicy(monthEntries[0] ?? null, currentTarget, liveRegistry),
+    [monthEntries, currentTarget, liveRegistry],
+  )
 
   const kpiStats = useMemo(() => {
     const map = {}
     KPI_KEYS.forEach((engineKey) => {
       // Find registry config for this engine key (handles aliases)
       const cfg = registryKpis.find(c => (c.aliasFor ?? c.key) === engineKey)
-      const actual = monthEntries.reduce((s, e) => s + (Number(e[engineKey]) || 0), 0)
+      const actual = monthEntries.reduce(
+        (s, e) => s + readPilotActual(e, engineKey, liveRegistry, pilotPolicy),
+        0,
+      )
       // Use targetFieldName from registry for dynamic target fields, fall back to engine
       const targetField = cfg ? getTargetFieldName(cfg.key) : null
       const target = currentTarget
-        ? (targetField && (currentTarget[targetField] != null)
-            ? (Number(currentTarget[targetField]) || 0)
-            : getTargetForKpi(currentTarget, engineKey))
+        ? readPilotTarget(currentTarget, engineKey, liveRegistry, pilotPolicy, () =>
+            targetField && (currentTarget[targetField] != null)
+              ? (Number(currentTarget[targetField]) || 0)
+              : getTargetForKpi(currentTarget, engineKey))
         : 0
       const stats = computeKpiStats(actual, target, dp, engineKey)
       map[engineKey] = {
@@ -414,11 +319,11 @@ export default function DashboardPage() {
         colors: TRAFFIC_COLORS[stats.status],
         // attach registry metadata for rendering
         _label: cfg?.shortLabel ?? engineKey,
-        _color: cfg?.defaultColor ?? FALLBACK_COLORS[engineKey] ?? DEFAULT_KPI_COLOR,
+        _color: cfg?.defaultColor ?? getKpiColor(engineKey),
       }
     })
     return map
-  }, [monthEntries, currentTarget, dp, KPI_KEYS, registryKpis])
+  }, [monthEntries, currentTarget, dp, KPI_KEYS, registryKpis, liveRegistry, pilotPolicy])
 
   // Today totals (unchanged — used by bar chart)
   const todayTotals = useMemo(() =>
@@ -439,6 +344,24 @@ export default function DashboardPage() {
         return s ? `  ${k}: actual=${s.actual} target=${s.target} ach=${s.achievementPct}% capped=${Math.min(s.achievementPct, 200)}%` : `  ${k}: missing`
       }).join('\n')
       console.debug('[DASHBOARD_ACH] overall=' + ach + '%\n' + lines)
+      // [AUDIT LOG] Date guard state
+      if (import.meta.env.DEV) {
+        console.log('[AUDIT] date_guards', {
+          today,
+          monthStart,
+          monthEnd,
+          monthCeiling,
+          monthEntriesCount: monthEntries.length,
+          myEntriesCount: myEntries.length,
+        })
+        const ws = kpiStats['wasfaty']
+        console.log('[AUDIT] wasfaty_kpiStats', {
+          wasfatyActual: ws?.actual,
+          wasfatyTarget: ws?.target,
+          achievementPct: ws?.achievementPct,
+          // forecastAchPct logged after forecastMap is initialised (see below)
+        })
+      }
     }
     return ach
   },
@@ -474,20 +397,78 @@ export default function DashboardPage() {
     KPI_KEYS.forEach((k) => {
       const actual     = kpiStats[k]?.actual || 0
       const target     = kpiStats[k]?.target || 0
-      // Build sorted daily values for history-aware recovery probability
-      const sorted = [...myEntries]
+      // Build sorted daily values for history-aware recovery probability.
+      // Must use monthEntries (not myEntries) — myEntries has no date filter
+      // and spans all historical months, inflating historicalMax/Avg.
+      const sorted = [...monthEntries]
         .sort((a, b) => a.date.localeCompare(b.date))
       const dailyVals = sorted.map((e) => Number(e[k]) || 0)
       map[k] = computeForecast(actual, target, dp, dailyVals)
     })
     return map
-  }, [kpiStats, dp, myEntries])
+  // dp is no longer in the dep array — it is computed fresh every render,
+  // so the closure always sees the current getDayProgress() result.
+  }, [kpiStats, monthEntries])
+
+  // [AUDIT LOG] forecastAchPct — placed here so forecastMap is in scope
+  if (import.meta.env.DEV && forecastMap) {
+    console.log('[AUDIT] wasfaty_forecastAchPct', forecastMap?.wasfaty?.forecastAchPct)
+  }
 
   // ── Engine V1 — daily mission ─────────────────────────────────
   const mission = useMemo(() => {
     // Build paceMap for mission difficulty classification
     return buildDailyMission(kpiStats, paceMap)
   }, [kpiStats, paceMap])
+
+  // ── Daily Mission Hero (UI3.1-C) — reshapes the already-computed
+  // kpiStats/paceMap into the item shape DailyMissionPanel.jsx (an
+  // existing, previously-unwired component from a prior bundle)
+  // already expects. No new calculation — pure data reshaping. ───
+  const missionItems = useMemo(() => {
+    return KPI_KEYS
+      .filter((k) => kpiStats[k]?.actual != null)
+      .map((k) => ({
+        name: kpiStats[k]?._label ?? k,
+        value: kpiStats[k]?.actual ?? null,
+        target: kpiStats[k]?.target ?? 0,
+        achievement: kpiStats[k]?.achievementPct ?? null,
+        gap: kpiStats[k]?.remainingToTarget ?? null,
+        requiredDailyPace: paceMap?.[k]?.requiredDailyPace ?? null,
+      }))
+  }, [kpiStats, paceMap])
+
+  // ── Portfolio-level projected finish (UI3.2-B/D) — same formula
+  // already used by the command header's "Forecast" card
+  // (reuses computeOverallAchievement, no new calculation logic).
+  // Hoisted here so the hero and analytics row can share it. ──────
+  const projectedFinishPct = useMemo(() => {
+    if (!forecastMap || !KPI_KEYS.some((k) => forecastMap[k])) return 0
+    const forecastStatsMap = Object.fromEntries(
+      KPI_KEYS
+        .filter((k) => (kpiStats[k]?.target ?? 0) > 0)
+        .map((k) => [k, {
+          achievementPct: forecastMap[k]?.forecastAchPct ?? 0,
+          target: kpiStats[k]?.target ?? 0,
+        }])
+    )
+    return computeOverallAchievement(forecastStatsMap)
+  }, [forecastMap, kpiStats])
+
+  // ── KPI distribution buckets (UI3.2-D) — groups the already-
+  // computed kpiStats[k].status into On Track / Behind Pace /
+  // At Risk / No Data counts. Pure grouping, no new scoring. ──────
+  const kpiDistributionCounts = useMemo(() => {
+    const counts = { onTrack: 0, behindPace: 0, atRisk: 0, noData: 0 }
+    for (const k of KPI_KEYS) {
+      const s = kpiStats[k]
+      if (s?.actual == null) { counts.noData += 1; continue }
+      if (s.status === 'excellent' || s.status === 'good') counts.onTrack += 1
+      else if (s.status === 'warning') counts.behindPace += 1
+      else counts.atRisk += 1
+    }
+    return counts
+  }, [kpiStats])
 
   // Ref to store previous alerts for cooldown checking
   const prevAlertsRef = React.useRef([])
@@ -514,16 +495,29 @@ export default function DashboardPage() {
     }
   }, [uid, pharmacyId, role, myEntries, currentTarget, loading, pharmacies])
 
-  // ── Team Intelligence (manager/admin, no extra Firestore reads) ──
+  // ── Team Intelligence (single/list scope, no extra Firestore reads) ──
   const teamIntelligence = useMemo(() => {
-    // Only compute for manager/admin who have multi-user data
-    if (loading || !isManager || !pharmacyId) return null
+    if (loading) return null
+    // single scope: team intelligence for own branch
+    // list scope: team intelligence for first assigned branch
+    // all / none: not applicable on dashboard (Exec BI handles multi-branch view)
+    let teamPharmacyId = null
+    if (scope?.type === 'single') {
+      teamPharmacyId = scope.id
+    } else if (scope?.type === 'list') {
+      teamPharmacyId = allowedPharmacies[0]?.id ?? null
+    }
+    if (!teamPharmacyId) return null
+
     try {
       const currentMonth = format(new Date(), 'yyyy-MM')
 
+      // Filter to the team pharmacy — for list scope, myEntries spans all branches
+      const branchEntries = myEntries.filter((e) => e.pharmacyId === teamPharmacyId)
+
       // Group entries by userId — data already loaded, zero extra reads
       const pharmacistMap = {}
-      myEntries.forEach(e => {
+      branchEntries.forEach(e => {
         if (!pharmacistMap[e.userId]) pharmacistMap[e.userId] = []
         pharmacistMap[e.userId].push(e)
       })
@@ -532,120 +526,92 @@ export default function DashboardPage() {
         const distinctDays = new Set(userEntries.map(e => e.date)).size
         return {
           userId,
-          displayName: userId,   // Phase 4: resolve from users collection
-          pharmacyId:  pharmacyId,
+          displayName: pharmacyUserMap?.get(userId) ?? userId,
+          pharmacyId:  teamPharmacyId,
           mtdEntries:  userEntries,
           historicalEntries: userEntries,
           target:      currentTarget,
-          expectedSubmissionDays: dayProgress?.currentDay ?? 15,
+          // PT-2: pass published personal target — mirrors TeamPage Sprint B3.
+          personalTarget: personalTargetMap.get(userId) ?? null,
+          expectedSubmissionDays: dp?.currentDay ?? 15,
           actualSubmissionDays:   distinctDays,
         }
       })
 
       if (!pharmacistInputs.length) return null
 
-      return generateTeamIntelligence({ pharmacyId, month: currentMonth, pharmacists: pharmacistInputs })
+      return generateTeamIntelligence({ pharmacyId: teamPharmacyId, month: currentMonth, pharmacists: pharmacistInputs })
     } catch (e) {
       console.warn('[Dashboard] Team intelligence error:', e)
       return null
     }
-  }, [isManager, pharmacyId, myEntries, currentTarget, loading])
+  // pharmacyUserMap: names resolve async — must be a dep so intelligence
+  //   recomputes with real names instead of raw userIds.
+  // personalTargetMap: per-member targets resolve async — required for
+  //   correct performance scores and B1 pace calculations.
+  }, [scope, allowedPharmacies, myEntries, currentTarget, loading,
+      pharmacyUserMap, personalTargetMap])
 
   // 14-day trend
+  // STB-04 fix: trendData is now registry-driven.
+  // KPI_KEYS is derived from the live registry (registryKpis → aliasFor ?? key),
+  // so custom KPIs appear automatically and removed KPIs disappear.
   const trendData = useMemo(() => Array.from({ length: 14 }, (_, i) => {
     const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
     const label = format(subDays(new Date(), 13 - i), 'dd/MM')
     const de    = myEntries.filter((e) => e.date === date)
-    return {
-      date: label,
-      wasfaty:      de.reduce((s, e) => s + (e.wasfaty      || 0), 0),
-      omni:         de.reduce((s, e) => s + (e.omni         || 0), 0),
-      wellness:     de.reduce((s, e) => s + (e.wellness     || 0), 0),
-      crossSelling: de.reduce((s, e) => s + (e.crossSelling || 0), 0),
-    }
-  }), [myEntries])
+    const point = { date: label }
+    KPI_KEYS.forEach((k) => {
+      point[k] = de.reduce((s, e) => s + (Number(e[k]) || 0), 0)
+    })
+    return point
+  }), [myEntries, KPI_KEYS])
 
-  // Branch ranking (admin)
+  // Branch ranking (all / list scope — hidden for single)
   const branchRanking = useMemo(() => {
-    if (!isAdmin) return []
-    return pharmacies.map((p) => {
+    if (!scope || scope.type === 'single' || scope.type === 'none') return []
+    return allowedPharmacies.map((p) => {
       const be    = todayEntries.filter((e) => e.pharmacyId === p.id)
       const total = be.reduce((s, e) => KPI_KEYS.reduce((ss, k) => ss + (e[k]||0), s), 0)
       return { ...p, total }
     }).sort((a, z) => z.total - a.total).slice(0, 8)
-  }, [pharmacies, todayEntries, isAdmin])
-
-  // Card toggle logic
-  const toggleCard = (key) => {
-    setLocalCards((prev) => {
-      if (prev.includes(key)) {
-        if (prev.length <= 2) return prev // min 2
-        return prev.filter((c) => c !== key)
-      }
-      return [...prev, key]
-    })
-  }
-  const saveCustomization = () => { setDashboardCards(localCards); setShowCustom(false) }
+  }, [scope, allowedPharmacies, todayEntries, KPI_KEYS])
 
   // Stat card builder
-  const CARD_DATA = {
-    overall_achievement: {
-      label:'Overall Achievement', value: overallAch, suffix:'%',
-      icon: Target, color: overallColors.color,
-      sub: overallColors.labelAr,
-    },
-    today_kpi: {
-      label:'Entries Today', value: todayEntries.length,
-      icon: Activity, color:'#6366f1',
-      sub: todayEntries.length === 0 ? 'Awaiting submissions' : `${todayEntries.length} recorded`,
-    },
-    wasfaty: {
-      label:'Wasfaty (Month)', value: kpiStats.wasfaty?.actual || 0,
-      icon: Activity, color: kpiStats.wasfaty?.colors.color || '#6366f1',
-      sub: `${kpiStats.wasfaty?.achPct || 0}% achievement`,
-    },
-    omni: {
-      label:'OmniHealth (Month)', value: kpiStats.omni?.actual || 0,
-      icon: Activity, color: kpiStats.omni?.colors.color || '#ef4444',
-      sub: `${kpiStats.omni?.achPct || 0}% achievement`,
-    },
-    wellness: {
-      label:'Wellness (Month)', value: kpiStats.wellness?.actual || 0,
-      icon: Activity, color: kpiStats.wellness?.colors.color || '#f59e0b',
-      sub: `${kpiStats.wellness?.achPct || 0}% achievement`,
-    },
-    cross_selling: {
-      label:'Cross Sell (Month)', value: kpiStats.crossSelling?.actual || 0,
-      icon: Activity, color: kpiStats.crossSelling?.colors.color || '#8b5cf6',
-      sub: `${kpiStats.crossSelling?.achPct || 0}% achievement`,
-    },
-    branch_rank: {
-      label:'Branches Active', value: pharmacies.filter((p) => p.active !== false).length,
-      icon: Building2, color:'#22c55e',
-    },
-    month_progress: {
-      label:'Month Progress', value: Math.round(dayRatio * 100), suffix:'%',
-      icon: Calendar, color:'#f59e0b',
-      sub: `Day ${daysPassed} of ${totalDays}`,
-    },
-    forecast: {
-      // Engine V1: forecastMap[kpi].forecastAchPct (was: getRunRateForecast().projectedAchPct)
-      label:'Wasfaty Forecast',
-      value: forecastMap.wasfaty?.forecastAchPct ?? 0,
-      suffix:'%', icon: TrendingUp, color: TRAFFIC_COLORS[
-        getTrafficLight(forecastMap.wasfaty?.forecastAchPct ?? 0, 1)
-      ]?.color || '#1a9a7e',
-      sub: forecastMap.wasfaty?.forecastAchPct > 0
-        ? `Recovery: ${Math.round((forecastMap.wasfaty.recoveryProbability || 0) * 100)}%`
-        : currentTarget ? 'Enter data to forecast' : 'No target set',
-    },
+  // ── Enterprise Status Color System ────────────────────────────
+  // 5-tier system, replacing "Neon Green Fatigue" where every KPI >=100%
+  // (144%, 178%, 200%) used the same bright #22c55e at full opacity.
+  //
+  //   Critical          → red     (#ef4444) — severe underperformance
+  //   Behind Pace       → amber   (#f59e0b/#f97316) — needs intervention
+  //   On Pace           → cyan    (#00d2ad) — healthy trajectory
+  //   Exceeding Pace    → green   (#22c55e) — above pace, NOT YET at 100% target
+  //   Target Achieved   → muted grey-green (#6b9c84) — done, de-emphasized
+  //
+  // (KPI_STATUS_BADGE, kpiBadge, enterpriseStatusColor, kpiVsExpected now
+  // imported from ../../components/kpi/kpiVisualHelpers — Phase 5A extraction.
+  // Call sites below pass explicit kpiStats[k]/paceMap[k]/expectedPct params.)
+
+  // ── Scope loading guard ──────────────────────────────────────
+  if (scopeLoading) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+        Loading dashboard…
+      </div>
+    )
   }
 
-  // ── No-branch guard ────────────────────────────────────────
-  if (!loading && noBranch) {
+  // ── Scope access guard ───────────────────────────────────────
+  if (scopeError || scope?.type === 'none') {
     return (
       <div style={{ maxWidth:'480px', margin:'80px auto 0', padding:'0 16px' }}>
-        <EmptyNoBranch />
+        <div style={{
+          padding: '24px', borderRadius: '12px',
+          background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)',
+          color: '#f87171', fontSize: '14px', textAlign: 'center',
+        }}>
+          Access denied. You do not have permission to view this dashboard.
+        </div>
       </div>
     )
   }
@@ -665,58 +631,464 @@ export default function DashboardPage() {
   return (
     <div style={{ maxWidth:'1600px', margin:'0 auto' }}>
 
-      {/* ── Page header ─────────────────────────────────────── */}
-      <div className="page-header">
-        <div>
-          <div className="page-title">Dashboard</div>
-          <div className="page-subtitle" style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-            <span>{format(new Date(), 'MMMM d, yyyy')}</span>
-            <span style={{ color:'var(--border-default)' }}>·</span>
-            <span>Day {daysPassed}/{totalDays}</span>
-            <span style={{ color:'var(--border-default)' }}>·</span>
-            <span className="status-dot" style={{ color: overallColors.color }}>
-              {overallColors.label}
-            </span>
-          </div>
+      {/* ── Daily Mission Hero — UI3.2-B ───────────────────────
+          Strong premium hero per the locked reference image: headline,
+          action statement, required-today, critical drifts, projected
+          finish, month progress. All values pre-computed above
+          (mission/dayRatio/criticalCount/projectedFinishPct) — no new
+          calculations live in DailyMissionHero itself.
+      ─────────────────────────────────────────────────────── */}
+      {!loading && mission && (
+        <div style={{ marginBottom: '16px' }}>
+          <DailyMissionHero
+            mission={mission}
+            dayRatio={dayRatio}
+            criticalCount={liveAnalytics?.kpiHealth?.filter((h) => h.state === 'critical').length ?? 0}
+            projectedFinishPct={projectedFinishPct}
+          />
         </div>
-        <div style={{ display:'flex', gap:'6px' }}>
-          <button onClick={() => setShowCustom(true)}
-            style={{ height:'30px', padding:'0 10px', borderRadius:'7px', fontSize:'11px', fontWeight:500, background:'var(--bg-elevated)', border:'1px solid var(--border-default)', color:'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:'5px' }}
-            onMouseEnter={(e)=>{e.currentTarget.style.background='var(--bg-overlay)';e.currentTarget.style.color='var(--text-primary)'}}
-            onMouseLeave={(e)=>{e.currentTarget.style.background='var(--bg-elevated)';e.currentTarget.style.color='var(--text-secondary)'}}>
-            <Settings2 style={{width:12,height:12}}/> Customize
-          </button>
-          <button onClick={() => { setLoading(true); setTick((t) => t + 1) }}
-            style={{ height:'30px', padding:'0 10px', borderRadius:'7px', fontSize:'11px', fontWeight:500, background:'transparent', border:'1px solid transparent', color:'var(--text-muted)', cursor:'pointer', display:'flex', alignItems:'center', gap:'4px' }}
-            onMouseEnter={(e)=>{e.currentTarget.style.background='var(--bg-hover)';e.currentTarget.style.color='var(--text-secondary)'}}
-            onMouseLeave={(e)=>{e.currentTarget.style.background='transparent';e.currentTarget.style.color='var(--text-muted)'}}>
-            <RefreshCw style={{width:12,height:12}}/> Refresh
-          </button>
-        </div>
-      </div>
+      )}
 
-      {/* ── Customisable top stat cards ──────────────────────── */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px', marginBottom:'20px' }}
-           className="sm:grid-cols-4">
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => <SkeletonStatCard key={i} />)
-          : dashboardCards.slice(0, 4).map((cardKey, i) => {
-              const d = CARD_DATA[cardKey]
-              if (!d) return null
-              return <StatCard key={cardKey} {...d} delay={i*60} loading={loading} animate={!loading} />
-            })
+      {/* ── Executive Hero Section ─────────────────────────────
+          Phase 1A: Command Center header.
+          Data: pharmacy name/code, overallAch, forecastMap, teamIntelligence, riskLevel.
+          No new calculations — pure presentation layer over existing memoized values.
+      ─────────────────────────────────────────────────────── */}
+      {!loading && (() => {
+        const currentPharmacy = pharmacies.find((p) => p.id === pharmacyId)
+        const pharmName  = currentPharmacy?.name  ??
+          (scope?.type === 'all' ? 'All Branches' : scope?.type === 'list' ? 'My Branches' : 'Branch')
+        const pharmCode  = currentPharmacy?.code  ?? ''
+        const monthLabel = format(new Date(), 'MMMM yyyy')
+
+        // Forecast: weighted overall forecast using same KPI weights as branch health.
+        // Building a pseudo-KpiStats map where achievementPct = forecastAchPct.
+        // This reuses computeOverallAchievement — no new calculation logic.
+        const forecastStatsMap = Object.fromEntries(
+          KPI_KEYS
+            .filter(k => (kpiStats[k]?.target ?? 0) > 0)
+            .map(k => [k, {
+              achievementPct: forecastMap[k]?.forecastAchPct ?? 0,
+              target: kpiStats[k]?.target ?? 0,
+            }])
+        )
+        const fcVal   = forecastMap && KPI_KEYS.some(k => forecastMap[k])
+          ? computeOverallAchievement(forecastStatsMap)
+          : 0
+        const fcColors = TRAFFIC_COLORS[getTrafficLight(fcVal, 1)]
+
+        // Team status
+        // Admin: pharmacyId is undefined → teamIntelligence is null by design.
+        //   Admin uses Executive BI for team intelligence, not the branch hero.
+        // Manager: teamIntelligence is populated when entries have loaded.
+        const teamStatus  = teamIntelligence?.teamHealth?.overallTeamStatus ?? null
+        const teamScore   = teamIntelligence?.teamHealth?.teamPerformanceScore ?? null
+        const memberCount = teamIntelligence?.teamHealth?.memberCount ?? 0
+        // Derive a display-friendly team state for the hero card
+        const teamHeroState = (scope?.type === 'all') ? 'admin'
+          : !teamIntelligence ? 'loading'
+          : 'ready'
+        const TEAM_STATUS_CFG = {
+          healthy:              { label: 'Healthy',       color: '#1a7a4a' },
+          stable:               { label: 'Stable',        color: '#00d2ad' },
+          needs_attention:      { label: 'Needs Attention', color: '#f59e0b' },
+          critical_operation:   { label: 'Critical',      color: '#ef4444' },
         }
-      </div>
+        const teamCfg = TEAM_STATUS_CFG[teamStatus] ?? { label: 'No Data', color: 'var(--text-muted)' }
+
+        // Improved Team Status wording — computed here so no IIFE needed inside JSX
+        const teamSummaries    = teamIntelligence?.pharmacistSummaries ?? []
+        const teamAtRiskCount  = teamSummaries.filter(s => s.operationalRisk === 'high' || s.coachingPriority === 'immediate').length
+        const teamOnTrackCount = teamSummaries.filter(s => s.operationalRisk === 'none' || s.operationalRisk === 'low').length
+        const teamStatusWord   = teamAtRiskCount > 0
+          ? (teamAtRiskCount >= teamSummaries.length * 0.5 ? 'Critical' : 'Attention Needed')
+          : (teamScore !== null && teamScore >= 85 ? 'Excellent' : teamCfg.label)
+        const teamStatusSub    = teamAtRiskCount > 0
+          ? `${teamAtRiskCount} of ${memberCount} at risk`
+          : `${teamOnTrackCount}/${memberCount} on track`
+        const teamStatusColor  = teamAtRiskCount > 0 ? '#f59e0b' : teamCfg.color
+
+        // Risk / rank label
+        const RISK_CFG = {
+          ON_TRACK:    { label: 'On Track',  color: '#1a7a4a' },
+          LOW_RISK:    { label: 'Low Risk',  color: '#00d2ad' },
+          MEDIUM_RISK: { label: 'Monitor',   color: '#f59e0b' },
+          HIGH_RISK:   { label: 'At Risk',   color: '#ef4444' },
+        }
+        const rlCfg = RISK_CFG[riskLevel] ?? RISK_CFG.ON_TRACK
+
+        // ── Today's Focus: three actionable pillars ──────────────────
+        // Deterministic precedence: a member can only appear in ONE slot.
+        // atRiskMemberIds takes priority over topPerformerIds to prevent
+        // the same person appearing as both risk and opportunity.
+
+        // Pillar 1 — Focus KPI: lowest-achievement KPI with remaining target
+        const focusKpiKey   = weakestKpi
+        const focusKpiStats = kpiStats[focusKpiKey]
+        const focusPillar   = focusKpiStats?.target > 0 ? {
+          Icon: TrendingDown, color: '#f59e0b',
+          label: focusKpiStats._label ?? focusKpiKey,
+          note:  `${focusKpiStats.achievementPct}% — needs ${formatNumber(focusKpiStats.remainingToTarget||0)} more`,
+        } : null
+
+        // Pillar 2 — Biggest Risk: member with highest-priority coaching need.
+        // Exclude anyone who also appears in topPerformerIds (conflict guard).
+        const topPerfSet    = new Set(teamIntelligence?.topPerformerIds ?? [])
+        const riskCandidates = teamIntelligence?.atRiskMemberIds?.filter(uid => !topPerfSet.has(uid)) ?? []
+        const riskUid       = riskCandidates[0] ?? null
+        const riskPillar    = riskUid ? {
+          Icon: AlertTriangle, color: '#ef4444',
+          label: pharmacyUserMap?.get(riskUid) ?? 'Unknown User',
+          note:  'needs immediate support',
+        } : null
+
+        // Pillar 3 — Best Opportunity: top performer who is NOT in atRiskMemberIds.
+        const atRiskSet     = new Set(teamIntelligence?.atRiskMemberIds ?? [])
+        const oppCandidates = teamIntelligence?.topPerformerIds?.filter(uid => !atRiskSet.has(uid)) ?? []
+        const oppUid        = oppCandidates[0] ?? null
+        const oppPillar     = oppUid ? {
+          Icon: Star, color: '#1a7a4a',
+          label: pharmacyUserMap?.get(oppUid) ?? 'Unknown User',
+          note:  'top performer — leverage',
+        } : null
+
+        const priorities = [focusPillar, riskPillar, oppPillar].filter(Boolean)
+
+        return (
+          <div style={{
+            marginBottom: '24px',
+            borderRadius: '12px',
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-subtle)',
+            overflow: 'hidden',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)',
+          }}>
+            {/* ── Row 1: Identity bar ── */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 20px 14px',
+              borderBottom: '1px solid var(--border-subtle)',
+              background: 'linear-gradient(135deg, rgba(26,122,74,0.06) 0%, transparent 60%)',
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+                {/* Green command stripe */}
+                <div style={{
+                  width: '4px', height: '36px', borderRadius: '2px',
+                  background: 'linear-gradient(180deg, #1a7a4a 0%, #0f5c36 100%)',
+                  flexShrink: 0,
+                }} />
+                <div>
+                  <div style={{
+                    fontSize: '18px', fontWeight: 700, lineHeight: 1.2,
+                    color: 'var(--text-primary)', letterSpacing: '-0.01em',
+                  }}>
+                    {pharmName}
+                    {pharmCode && (
+                      <span style={{
+                        fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)',
+                        marginLeft: '8px', letterSpacing: '0.02em',
+                      }}>
+                        {pharmCode}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: '11px', color: 'var(--text-muted)',
+                    marginTop: '2px', display:'flex', alignItems:'center', gap:'6px',
+                  }}>
+                    <span>{monthLabel}</span>
+                    <span style={{ color:'var(--border-default)' }}>·</span>
+                    <span>Day {daysPassed} of {totalDays}</span>
+                    <span style={{ color:'var(--border-default)' }}>·</span>
+                    <span style={{
+                      fontSize:'10px', fontWeight:600, padding:'1px 7px',
+                      borderRadius:'99px', letterSpacing:'0.04em',
+                      background: `${overallColors.color}18`,
+                      border: `1px solid ${overallColors.color}40`,
+                      color: overallColors.color,
+                    }}>
+                      {overallColors.label}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {/* Right cluster: Month Progress + Customize/Refresh (merged from old page-header) */}
+              <div style={{ display:'flex', alignItems:'center', gap:'16px' }}>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:'11px', color:'var(--text-muted)', marginBottom:'4px' }}>
+                    Month Progress
+                  </div>
+                  <div style={{
+                    width: '120px', height: '4px',
+                    background: 'var(--border-subtle)', borderRadius:'99px', overflow:'hidden',
+                  }}>
+                    <div style={{
+                      height:'100%', borderRadius:'99px',
+                      width: `${Math.round(dayRatio * 100)}%`,
+                      background: 'linear-gradient(90deg, #1a7a4a, #22c55e)',
+                      transition: 'width 0.8s ease',
+                    }} />
+                  </div>
+                  <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'3px' }}>
+                    {Math.round(dayRatio * 100)}% elapsed
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:'6px' }}>
+                  <button onClick={() => { setLoading(true); setTick((t) => t + 1) }}
+                    style={{ height:'28px', padding:'0 9px', borderRadius:'6px', fontSize:'11px', fontWeight:500, background:'transparent', border:'1px solid transparent', color:'var(--text-muted)', cursor:'pointer', display:'flex', alignItems:'center', gap:'4px' }}
+                    onMouseEnter={(e)=>{e.currentTarget.style.background='var(--bg-hover)';e.currentTarget.style.color='var(--text-secondary)'}}
+                    onMouseLeave={(e)=>{e.currentTarget.style.background='transparent';e.currentTarget.style.color='var(--text-muted)'}}>
+                    <RefreshCw style={{width:12,height:12}}/> Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Row 2: Executive KPI cards ── */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: '1px',
+              background: 'var(--border-subtle)',
+            }}>
+              {/* Card 1: Branch Health + Target Gap */}
+              {(() => {
+                const expectedPct = Math.round(dayRatio * 100)
+                const gapPts      = overallAch - expectedPct
+                const bhColor     = enterpriseStatusColor(overallAch, expectedPct)
+                const isAchievedBH = overallAch >= 100
+                const gapLabel    = isAchievedBH
+                  ? 'Target achieved'
+                  : gapPts >= 0
+                    ? `+${gapPts}pts ahead of pace`
+                    : `${gapPts}pts behind pace`
+                const gapColor    = isAchievedBH ? KPI_STATUS_BADGE.ACHIEVED.color
+                  : gapPts >= 0 ? '#22c55e' : '#f59e0b'
+                return (
+                  <div style={{ background:'var(--bg-elevated)', padding:'16px 18px',
+                                opacity: isAchievedBH ? 0.78 : 1, transition:'opacity 0.3s' }}>
+                    <div style={{ fontSize:'10px', fontWeight:500, color:'var(--text-muted)',
+                      textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'8px',
+                      display:'flex', alignItems:'center', gap:'5px' }}>
+                      <Target style={{ width:10, height:10 }} /> Branch Health
+                    </div>
+                    <div style={{
+                      fontSize: '28px', fontWeight: 700, lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: bhColor,
+                    }}>
+                      {overallAch}<span style={{ fontSize:'14px', fontWeight:500, marginLeft:'2px' }}>%</span>
+                    </div>
+                    <div style={{ fontSize:'11px', color: gapColor, marginTop:'6px', fontWeight:500 }}>
+                      {gapLabel}
+                    </div>
+                    <div style={{
+                      marginTop:'8px', height:'2px', borderRadius:'99px',
+                      background: 'var(--border-subtle)', overflow:'hidden',
+                    }}>
+                      <div style={{
+                        height:'100%', borderRadius:'99px',
+                        width:`${Math.min(overallAch,100)}%`,
+                        background: bhColor,
+                        transition:'width 0.8s ease',
+                      }} />
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Card 2: Forecast — enterprise color tier, muted when forecast >=100% */}
+              {(() => {
+                const expectedPct = Math.round(dayRatio * 100)
+                const fcColor     = enterpriseStatusColor(fcVal, expectedPct)
+                const isAchievedFC = fcVal >= 100
+                return (
+                  <div style={{ background:'var(--bg-elevated)', padding:'16px 18px',
+                                opacity: isAchievedFC ? 0.78 : 1, transition:'opacity 0.3s' }}>
+                    <div style={{ fontSize:'10px', fontWeight:500, color:'var(--text-muted)',
+                      textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'8px',
+                      display:'flex', alignItems:'center', gap:'5px' }}>
+                      <TrendingUp style={{ width:10, height:10 }} /> Forecast EOM
+                    </div>
+                    <div style={{
+                      fontSize: '28px', fontWeight: 700, lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: fcColor,
+                    }}>
+                      {fcVal}<span style={{ fontSize:'14px', fontWeight:500, marginLeft:'2px' }}>%</span>
+                    </div>
+                    <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'6px' }}>
+                      {isAchievedFC ? 'On track to exceed target' : 'Run-rate projection'}
+                    </div>
+                    <div style={{
+                      marginTop:'8px', height:'2px', borderRadius:'99px',
+                      background: 'var(--border-subtle)', overflow:'hidden',
+                    }}>
+                      <div style={{
+                        height:'100%', borderRadius:'99px',
+                        width:`${Math.min(fcVal,100)}%`,
+                        background: fcColor,
+                        transition:'width 0.8s ease',
+                      }} />
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Card 3: Team Status */}
+              <div style={{ background:'var(--bg-elevated)', padding:'16px 18px' }}>
+                <div style={{ fontSize:'10px', fontWeight:500, color:'var(--text-muted)',
+                  textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'8px',
+                  display:'flex', alignItems:'center', gap:'5px' }}>
+                  <Users style={{ width:10, height:10 }} /> Team Status
+                </div>
+                {teamHeroState === 'ready' ? (
+                  <>
+                    <div style={{
+                      fontSize: '20px', fontWeight: 700, lineHeight: 1.1,
+                      color: teamStatusColor, marginTop:'2px',
+                    }}>
+                      {teamStatusWord}
+                    </div>
+                    <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'6px' }}>
+                      {teamStatusSub}
+                    </div>
+                  </>
+                ) : teamHeroState === 'admin' ? (
+                  <div style={{ fontSize:'13px', color:'var(--text-muted)', marginTop:'4px' }}>
+                    See Exec BI
+                  </div>
+                ) : (
+                  <div style={{ fontSize:'13px', color:'var(--text-muted)', marginTop:'4px', display:'flex', alignItems:'center', gap:'5px' }}>
+                    <span style={{ opacity:0.6 }}>···</span> Loading
+                  </div>
+                )}
+
+              </div>
+
+              {/* Card 4: Risk Level */}
+              <div style={{ background:'var(--bg-elevated)', padding:'16px 18px' }}>
+                <div style={{ fontSize:'10px', fontWeight:500, color:'var(--text-muted)',
+                  textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'8px',
+                  display:'flex', alignItems:'center', gap:'5px' }}>
+                  <Activity style={{ width:10, height:10 }} /> Portfolio Risk
+                </div>
+                <div style={{
+                  fontSize: '22px', fontWeight: 700, lineHeight: 1,
+                  color: rlCfg.color, marginBottom:'6px',
+                }}>
+                  {rlCfg.label}
+                </div>
+                <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>
+                  {overallAch >= 90 ? 'Above target' : overallAch >= 70 ? 'On pace' : 'Below pace'}
+                </div>
+                <div style={{
+                  marginTop:'10px', display:'flex', alignItems:'center', gap:'4px',
+                }}>
+                  {['ON_TRACK','LOW_RISK','MEDIUM_RISK','HIGH_RISK'].map((lvl) => (
+                    <div key={lvl} style={{
+                      flex:1, height:'3px', borderRadius:'99px',
+                      background: riskLevel === lvl ? RISK_CFG[lvl].color : 'var(--border-subtle)',
+                      transition:'background 0.3s',
+                    }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Row 3: Today's priorities ── */}
+            {priorities.length > 0 && (
+              <div style={{
+                padding: '10px 20px',
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex', alignItems: 'center', gap:'8px', flexWrap:'wrap',
+                background: 'rgba(26,122,74,0.02)',
+              }}>
+                <span style={{
+                  fontSize:'10px', fontWeight:600, color:'var(--text-muted)',
+                  textTransform:'uppercase', letterSpacing:'0.08em', flexShrink:0,
+                }}>
+                  Today's Focus
+                </span>
+                <span style={{ color:'var(--border-default)', flexShrink:0 }}>·</span>
+                {priorities.map((p, i) => (
+                  <span key={i} style={{
+                    display:'inline-flex', alignItems:'center', gap:'5px',
+                    fontSize:'11px', fontWeight:500,
+                    padding:'3px 10px', borderRadius:'99px',
+                    background:`${p.color}12`,
+                    border:`1px solid ${p.color}30`,
+                    color:'var(--text-secondary)',
+                  }}>
+                    <p.Icon style={{ width:11, height:11, color:p.color, flexShrink:0 }} />
+                    <span style={{ fontWeight:600, color:'var(--text-primary)' }}>{p.label}</span>
+                    <span style={{ color:'var(--text-muted)', fontWeight:400 }}>{p.note}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* ── Row 4: Remaining This Month ── */}
+            {(() => {
+              // Top 3 KPIs by remaining units, where target > 0 and remaining > 0
+              const remaining = KPI_KEYS
+                .map(k => ({
+                  key: k,
+                  label: kpiStats[k]?._label ?? k,
+                  remaining: kpiStats[k]?.remainingToTarget ?? 0,
+                  requiredPerDay: paceMap[k]?.requiredDailyPace ?? 0,
+                  paceStatus: paceMap[k]?.paceStatus,
+                  color: kpiStats[k]?._color ?? 'var(--text-muted)',
+                  achPct: kpiStats[k]?.achievementPct ?? 0,
+                }))
+                .filter(r => r.remaining > 0)
+                .sort((a, b) => b.remaining - a.remaining)
+                .slice(0, 3)
+              if (!remaining.length) return null
+              return (
+                <div style={{
+                  padding: '10px 20px',
+                  borderTop: '1px solid var(--border-subtle)',
+                  display: 'flex', alignItems: 'center', gap:'10px', flexWrap:'wrap',
+                  background: 'rgba(0,0,0,0.02)',
+                }}>
+                  <span style={{
+                    fontSize:'9px', fontWeight:600, color:'var(--text-muted)',
+                    textTransform:'uppercase', letterSpacing:'0.08em', flexShrink:0,
+                  }}>Remaining This Month</span>
+                  <span style={{ color:'var(--border-default)', flexShrink:0 }}>·</span>
+                  {remaining.map(r => (
+                    <span key={r.key} style={{
+                      display:'inline-flex', alignItems:'center', gap:'4px',
+                      fontSize:'11px', fontWeight:500,
+                      padding:'2px 9px', borderRadius:'99px',
+                      background:`${r.color}12`, border:`1px solid ${r.color}30`,
+                    }}>
+                      <span style={{ color: r.color, fontWeight:600 }}>{r.label}</span>
+                      <span style={{ color:'var(--text-muted)', fontWeight:400 }}>
+                        {formatNumber(r.remaining)} left
+                        {r.requiredPerDay > 0 && (
+                          <> · {formatNumber(r.requiredPerDay, { maximumFractionDigits: 1 })}/day</>
+                        )}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )
+            })()}
+          </div>
+        )
+      })()}
 
       {/* ── No-entries banner (non-admin with no data) ────── */}
-      {!loading && !isAdmin && monthEntries.length === 0 && !noBranch && (
+      {!loading && (scope?.type === 'single' || scope?.type === 'list') && monthEntries.length === 0 && (
         <div style={{
           display:'flex', alignItems:'center', gap:'10px', padding:'9px 14px',
           borderRadius:'8px', marginBottom:'16px',
           background:'rgba(0,210,173,0.05)', border:'1px solid rgba(0,210,173,0.15)',
           fontSize:'12px', color:'var(--brand-400)',
         }} className="animate-fade-in">
-          <span style={{ fontSize:'14px' }}>📋</span>
+          <ClipboardList style={{ width:14, height:14, flexShrink:0 }} />
           <div>
             <span style={{ fontWeight:500 }}>No entries this month yet.</span>
             {' '}
@@ -737,172 +1109,81 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'6px', marginBottom:'20px' }}
-           className="sm:grid-cols-5">
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'10px', marginBottom:'20px' }}>
         {loading
           ? Array.from({length:5}).map((_,i) => <SkeletonStatCard key={i} />)
-          : KPI_KEYS.map((k, i) => {
-              const s   = kpiStats[k]
-              const cfg = s?.colors || TRAFFIC_COLORS.critical
-              const pace = paceMap[k]
+          : KPI_KEYS.map((k) => {
+              const cfg = registryKpis.find((c) => (c.aliasFor ?? c.key) === k)
+              const s = kpiStats[k]
               return (
-                <div key={k} className="kpi-tile animate-slide-up" style={{ animationDelay:`${i*40}ms` }}>
-                  {/* Label + status */}
-                  <div className="kpi-tile-label">
-                    <div style={{ width:5, height:5, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), flexShrink:0 }} />
-                    {(kpiStats[k]?._label ?? k)}
-                    <span className="status-dot" style={{ color:cfg.color, marginRight:'auto', fontSize:'9px' }}>
-                      {cfg.labelAr}
-                    </span>
-                  </div>
-                  {/* Achievement % — dominant */}
-                  <div className="kpi-tile-value value-reveal" style={{
-                    color: s?.target > 0 ? cfg.color : 'var(--text-muted)',
-                    fontStyle: s?.target > 0 ? 'normal' : 'italic',
-                    fontSize: s?.target > 0 ? undefined : '0.9rem',
-                  }}>
-                    {s?.target > 0 ? `${s?.achievementPct || 0}%` : 'No target'}
-                  </div>
-                  {/* Actual / target */}
-                  <div className="kpi-tile-meta">
-                    {s?.target > 0
-                      ? <>{(s?.actual||0).toLocaleString()} / {(s?.target||0).toLocaleString()}</>
-                      : <span style={{ color:'var(--border-strong)' }}>Set targets to track</span>
-                    }
-                  </div>
-                  {/* Progress */}
-                  <div style={{ marginTop:'6px', height:'3px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
-                    <div style={{ height:'100%', borderRadius:'99px', background:cfg.color, width:`${Math.min(s?.achievementPct||0,100)}%`, transition:'width 0.6s ease' }} />
-                  </div>
-                  {/* Pace status */}
-                  {pace && (
-                    <div style={{ fontSize:'9px', color:'var(--text-muted)', marginTop:'4px', fontVariantNumeric:'tabular-nums' }}>
-                      {pace.currentDailyRate}/d · need {pace.requiredDailyPace}/d
-                    </div>
-                  )}
-                </div>
+                <KpiCard
+                  key={k}
+                  kpi={{ name: s?._label ?? k, color: s?._color, unit: cfg?.unit, type: cfg?.valueType }}
+                  entry={{ value: s?.actual ?? null, target: s?.target ?? 0, achievement: s?.achievementPct ?? null }}
+                  daysRemaining={totalDays - daysPassed}
+                />
               )
             })
         }
       </div>
 
-      {/* ── Operational Insights Strip ──────────────────────── */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'6px', marginBottom:'20px' }}
-           className="sm:grid-cols-4 lg:grid-cols-6 stagger">
-        {loading ? <SkeletonInsightsStrip count={6} /> : [
-          { label:'Run Rate',      value:`${Math.round(dayRatio*100)}%`,     sub:`Day ${daysPassed}/${totalDays}`,    color:'var(--text-secondary)' },
-          { label:'Today Entries', value:todayEntries.length,                sub:'submissions',                       color:'var(--brand-400)' },
-          { label:'Focus KPI',     value:`${kpiStats[weakestKpi]?.achievementPct||0}%`, sub:kpiStats[weakestKpi]?._label||weakestKpi||'—', color:TRAFFIC_COLORS[kpiStats[weakestKpi]?.status||'critical']?.color },
-          { label:'Best KPI',      value:`${kpiStats[strongestKpi]?.achievementPct||0}%`,sub:kpiStats[strongestKpi]?._label||strongestKpi||'—',color:TRAFFIC_COLORS[kpiStats[strongestKpi]?.status||'good']?.color },
-          { label:'Required/day',  value:(paceMap[weakestKpi]?.requiredDailyPace||0).toLocaleString(), sub:kpiStats[weakestKpi]?._label||weakestKpi,  color:'var(--text-secondary)' },
-          { label:'Risk Level',    value:{ ON_TRACK:'✓ OK', LOW_RISK:'Low', MEDIUM_RISK:'Medium', HIGH_RISK:'⚠ High' }[riskLevel]||riskLevel,
-            sub:'portfolio risk', color:{ ON_TRACK:'var(--kpi-good)', LOW_RISK:'var(--kpi-good)', MEDIUM_RISK:'var(--kpi-warning)', HIGH_RISK:'var(--kpi-critical)' }[riskLevel] },
-        ].map((item, i) => (
-          <div key={i} className="kpi-tile animate-slide-up" style={{ animationDelay:`${i*25}ms` }}>
-            <div className="kpi-tile-label">{item.label}</div>
-            <div className="value-reveal" style={{ fontSize:'1.1rem', fontWeight:600, letterSpacing:'-0.03em', color:item.color, fontVariantNumeric:'tabular-nums', fontFamily:"'Inter',sans-serif", lineHeight:1 }}>
-              {typeof item.value === 'number' ? item.value.toLocaleString() : item.value}
-            </div>
-            <div className="kpi-tile-meta">{item.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Main workspace — chart + feed/mission ───────────── */}
-      {/* ── Live Priority Alerts ────────────────────────────── */}
-      {liveAnalytics && liveAnalytics.alerts.filter(a => !a.dismissed && a.priority !== 'info').length > 0 && (
-        <div style={{ display:'flex', flexDirection:'column', gap:'4px' }} className="animate-fade-in">
-          {liveAnalytics.alerts
-            .filter(a => !a.dismissed && a.priority !== 'info')
-            .slice(0, 3)
-            .map(alert => {
-              const isC = alert.priority === 'critical'
+      {/* ── Pilot KPI Section ────────────────────────────────────
+          Pilot KPIs are tracked but never affect evaluation, ranking,
+          health score, portfolio score, or strongest/weakest logic.
+          The Tracking Only badge is always visible. ──────────── */}
+      {!loading && pilotKpis.length > 0 && (
+        <div style={{ marginBottom: '20px' }}>
+          <PilotKpiSectionHeader />
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'6px' }}
+               className="sm:grid-cols-5">
+            {pilotKpis.map((kpi, i) => {
+              const engineKey = kpi.aliasFor ?? kpi.key
+              const actualVal = monthEntries.reduce(
+                (s, e) => s + (Number(e.kpiValues?.[kpi.key] ?? e[engineKey]) || 0), 0
+              )
+              const tgtField = `${kpi.key}Target`
+              const targetVal = currentTarget ? (Number(currentTarget[tgtField]) || 0) : 0
+              const achPct = targetVal > 0 ? Math.round((actualVal / targetVal) * 100) : 0
               return (
-                <div key={alert.id} style={{
-                  display:'flex', alignItems:'center', gap:'10px',
-                  padding:'8px 12px', borderRadius:'8px',
-                  background: isC ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)',
-                  border:`1px solid ${isC ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}`,
-                  fontSize:'12px',
-                }}>
-                  <span style={{ fontSize:'13px', flexShrink:0 }}>{isC ? '🔴' : '🟡'}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <span style={{ fontWeight:500, color:'var(--text-primary)' }}>{alert.title}</span>
-                    {' '}<span style={{ color:'var(--text-muted)' }}>{alert.message}</span>
+                <div key={kpi.key} className="kpi-tile animate-slide-up"
+                     style={{ animationDelay:`${i*40}ms`,
+                              border: '1px solid rgba(245,158,11,0.18)',
+                              background: 'rgba(245,158,11,0.03)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'4px', marginBottom:'4px' }}>
+                    <div className="kpi-tile-label" style={{ color:'var(--text-muted)' }}>
+                      {kpi.label || kpi.labelAr}
+                    </div>
+                    <TrackingOnlyBadge size="sm" />
                   </div>
-                  {alert.actionRoute && (
-                    <button onClick={() => navigate(alert.actionRoute)}
-                      style={{ fontSize:'11px', fontWeight:500, color: isC ? '#f87171' : '#fbbf24',
-                               background:'none', border:'none', cursor:'pointer', flexShrink:0,
-                               textDecoration:'underline', textDecorationColor:'currentColor' }}>
-                      {alert.action} →
-                    </button>
-                  )}
+                  <div style={{ fontSize:'1.4rem', fontWeight:700, color:'var(--text-primary)',
+                                fontVariantNumeric:'tabular-nums', fontFamily:"'Inter',sans-serif",
+                                lineHeight:1, letterSpacing:'-0.03em' }}>
+                    {formatNumber(actualVal)}
+                  </div>
+                  <div className="kpi-tile-meta">
+                    {targetVal > 0 ? `${achPct}% of ${formatNumber(targetVal)}` : 'No target set'}
+                  </div>
                 </div>
               )
-            })
-          }
+            })}
+          </div>
         </div>
       )}
 
-      {/* ── KPI Health Badges ────────────────────────────────── */}
-      {liveAnalytics && (
-        <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }} className="animate-fade-in">
-          <span style={{ fontSize:'9px', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif",
-                         letterSpacing:'0.06em', textTransform:'uppercase',
-                         alignSelf:'center', marginLeft:'4px', marginRight:'2px' }}>
-            Health
-          </span>
-          {liveAnalytics.kpiHealth.map(h => {
-            const cfg = KPI_HEALTH_COLORS[h.state]
-            return (
-              <div key={h.kpiKey} style={{
-                display:'inline-flex', alignItems:'center', gap:'4px',
-                padding:'2px 8px', borderRadius:'99px',
-                background: cfg.bg, border:`1px solid ${cfg.border}`,
-                fontSize:'10px', fontWeight:500, fontFamily:"'Inter',sans-serif",
-                cursor:'default',
-              }}
-              title={`${h.label}: ${h.achievementPct}% achievement · ${h.state}`}>
-                <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:cfg.color, flexShrink:0 }} />
-                <span style={{ color: cfg.color }}>{h.label}</span>
-                {h.target > 0 && (
-                  <span style={{ color: cfg.color, fontVariantNumeric:'tabular-nums', fontSize:'9px', opacity:0.8 }}>
-                    {h.achievementPct}%
-                  </span>
-                )}
-                {h.pulse !== 'flat' && (
-                  <span style={{ color: h.pulse === 'up' ? '#22c55e' : '#f87171', fontSize:'8px' }}>
-                    {h.pulse === 'up' ? '▲' : '▼'}
-                  </span>
-                )}
-              </div>
-            )
-          })}
-          {/* Operational status */}
-          {liveAnalytics.operationalStatus.status !== 'NOMINAL' && (
-            <div style={{
-              marginRight:'auto', display:'inline-flex', alignItems:'center', gap:'4px',
-              padding:'2px 8px', borderRadius:'99px', fontSize:'10px', fontWeight:500,
-              fontFamily:"'Inter',sans-serif",
-              background: { MONITORING:'rgba(245,158,11,0.06)', INTERVENTION:'rgba(239,68,68,0.06)', CRITICAL:'rgba(239,68,68,0.1)' }[liveAnalytics.operationalStatus.status] || 'var(--bg-hover)',
-              border:`1px solid ${{'MONITORING':'rgba(245,158,11,0.2)', INTERVENTION:'rgba(239,68,68,0.2)', CRITICAL:'rgba(239,68,68,0.3)'}[liveAnalytics.operationalStatus.status] || 'var(--border-subtle)'}`,
-              color: { MONITORING:'#fbbf24', INTERVENTION:'#f87171', CRITICAL:'#ef4444' }[liveAnalytics.operationalStatus.status] || 'var(--text-muted)',
-            }}>
-              <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:'currentColor', flexShrink:0 }} />
-              {liveAnalytics.operationalStatus.status.replace('_',' ')}
-            </div>
-          )}
-        </div>
-      )}
 
+      {/* ── Analytics Row — UI3.2-D ───────────────────────────
+          Left: relocated 14-Day Trend (same AreaChart, same data —
+          no chart logic changes). Middle: KPI Distribution donut
+          (kpiDistributionCounts, a pure reshape of kpiStats above).
+          Right: Smart Alerts (liveAnalytics.alerts, same engine call,
+          same data the old inline "Live Priority Alerts" used). */}
       <div className="section-divider">
         <span className="section-divider-label">Analytics</span>
         <div className="section-divider-line" />
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'16px', marginBottom:'20px' }}
-           className="xl:grid-cols-[1fr_300px]">
+      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}
+           className="xl:grid-cols-[1.4fr_1fr_1fr]">
 
         {/* Trend chart */}
         <div>
@@ -910,13 +1191,13 @@ export default function DashboardPage() {
             <div className="card card-p space-y-3">
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <div>
-                  <div className="section-title" style={{ fontSize:'12px' }}>14-Day Trend</div>
+                  <div className="section-title" style={{ fontSize:'12px' }}>MTD Performance Trend</div>
                   <div className="section-subtitle">Daily KPI volume</div>
                 </div>
                 <div style={{ display:'flex', gap:'8px' }}>
-                  {['wasfaty','omni','wellness'].map((k) => (
+                  {KPI_KEYS.slice(0, 3).map((k) => (
                     <div key={k} style={{ display:'flex', alignItems:'center', gap:'3px', fontSize:'9px', color:'var(--text-muted)' }}>
-                      <div style={{ width:6, height:6, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR) }} />
+                      <div style={{ width:6, height:6, borderRadius:'50%', background:(kpiStats[k]?._color ?? getKpiColor(k)) }} />
                       {(kpiStats[k]?._label ?? k)}
                     </div>
                   ))}
@@ -925,10 +1206,10 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={trendData} margin={{ top:5, right:5, bottom:0, left:-20 }}>
                   <defs>
-                    {['wasfaty','omni','wellness'].map((k) => (
+                    {KPI_KEYS.slice(0, 3).map((k) => (
                       <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0.2} />
-                        <stop offset="95%" stopColor={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} stopOpacity={0}   />
+                        <stop offset="5%"  stopColor={(kpiStats[k]?._color ?? getKpiColor(k))} stopOpacity={0.2} />
+                        <stop offset="95%" stopColor={(kpiStats[k]?._color ?? getKpiColor(k))} stopOpacity={0}   />
                       </linearGradient>
                     ))}
                   </defs>
@@ -936,9 +1217,9 @@ export default function DashboardPage() {
                   <XAxis dataKey="date" tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} interval={2} />
                   <YAxis tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
                   <Tooltip content={<ChartTip />} />
-                  {['wasfaty','omni','wellness'].map((k) => (
+                  {KPI_KEYS.slice(0, 3).map((k) => (
                     <Area key={k} type="monotone" dataKey={k} name={(kpiStats[k]?._label ?? k)}
-                      stroke={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} strokeWidth={1.5} fill={`url(#g_${k})`}
+                      stroke={(kpiStats[k]?._color ?? getKpiColor(k))} strokeWidth={1.5} fill={`url(#g_${k})`}
                       dot={false} activeDot={{ r:3, strokeWidth:0 }} />
                   ))}
                 </AreaChart>
@@ -947,202 +1228,114 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Operational feed: Mission + Run rate forecasts */}
-        <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
-
-          {/* Daily Mission */}
-          {loading
-            ? <SkeletonFeed rows={3} title="Daily Mission" />
-            : mission ? (() => {
-            const focusStatus = getTrafficLight(mission.achievementPct, dayRatio)
-            const cfg         = TRAFFIC_COLORS[focusStatus] || TRAFFIC_COLORS.warning
-            const diffColor   = { EASY:'#22c55e', MODERATE:'#00d2ad', CHALLENGING:'#f59e0b', STRETCH:'#ef4444' }[mission.difficulty] || '#00d2ad'
-            return (
-              <div className="op-feed">
-                <div className="op-feed-header">
-                  <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-                    <Zap style={{ width:12, height:12, color:cfg.color }} />
-                    <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'0.04em', textTransform:'uppercase', fontFamily:"'Inter',sans-serif" }}>
-                      Daily Mission
-                    </span>
-                  </div>
-                  <span style={{ fontSize:'9px', fontWeight:600, padding:'1px 6px', borderRadius:'99px', background:`${diffColor}14`, border:`1px solid ${diffColor}22`, color:diffColor, fontFamily:"'Inter',sans-serif" }}>
-                    {mission.difficulty}
-                  </span>
-                </div>
-
-                {/* Focus KPI row */}
-                <div className="op-feed-item" style={{ flexDirection:'column', gap:'6px', borderBottom:'none' }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                    <div>
-                      <div style={{ fontSize:'10px', color:'var(--text-muted)' }}>Focus KPI</div>
-                      <div style={{ fontSize:'13px', fontWeight:600, color:'var(--text-primary)', marginTop:'1px' }}>
-                        {mission.kpiLabel?.en || mission.focusKpi}
-                      </div>
-                    </div>
-                    <div style={{ textAlign:'right' }}>
-                      <div style={{ fontSize:'1.1rem', fontWeight:700, color:cfg.color, fontVariantNumeric:'tabular-nums' }}>
-                        {mission.achievementPct}%
-                      </div>
-                      <div style={{ fontSize:'9px', color:'var(--text-muted)' }}>achievement</div>
-                    </div>
-                  </div>
-
-                  {/* Gap + Required/day */}
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}>
-                    {[
-                      { label:'Gap', value:(mission.targetGap||0).toLocaleString() },
-                      { label:'Need/day', value:(mission.requiredToday||0).toLocaleString() },
-                    ].map((item) => (
-                      <div key={item.label} style={{ background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)', borderRadius:'6px', padding:'5px 8px' }}>
-                        <div style={{ fontSize:'8px', color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'2px' }}>{item.label}</div>
-                        <div style={{ fontSize:'12px', fontWeight:600, color:cfg.color, fontVariantNumeric:'tabular-nums' }}>{item.value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Action */}
-                  <div style={{ fontSize:'11px', color:'var(--text-secondary)', lineHeight:1.4, paddingTop:'4px', borderTop:'1px solid var(--border-subtle)' }}>
-                    💡 {mission.action}
-                  </div>
-                </div>
-              </div>
-            )
-          })()
-          : <EmptyMissionNotReady />
-          }
-
-          {/* ── Live Operational Feed ─────────────────────────── */}
-          {!loading && liveAnalytics && liveAnalytics.activityFeed.length > 0 && (
-            <div className="op-feed" style={{ marginBottom:'8px' }}>
-              <div className="op-feed-header">
-                <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
-                  <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--brand-500)',
-                                 display:'inline-block' }} />
-                  <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)',
-                                 letterSpacing:'0.04em', textTransform:'uppercase',
-                                 fontFamily:"'Inter',sans-serif" }}>
-                    Live Feed
-                  </span>
-                </div>
-                <span style={{ fontSize:'9px', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif" }}>
-                  {liveAnalytics.activityFeed.length} events
-                </span>
-              </div>
-              {liveAnalytics.activityFeed.slice(0, 5).map(feedItem => (
-                <div key={feedItem.id} className="op-feed-item">
-                  <span style={{ fontSize:'11px', flexShrink:0 }}>{feedItem.icon}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:'11px', fontWeight:500, color:'var(--text-primary)',
-                                  overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {feedItem.title}
-                    </div>
-                    <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'1px' }}>
-                      {feedItem.relativeTime}
-                    </div>
-                  </div>
-                  <span style={{
-                    fontSize:'9px', fontWeight:500, padding:'1px 6px', borderRadius:'99px',
-                    fontFamily:"'Inter',sans-serif",
-                    background: feedItem.severity === 'success' ? 'rgba(34,197,94,0.08)'
-                      : feedItem.severity === 'warning' ? 'rgba(245,158,11,0.08)'
-                      : feedItem.severity === 'critical' ? 'rgba(239,68,68,0.08)'
-                      : 'var(--bg-overlay)',
-                    color: feedItem.severity === 'success' ? '#4ade80'
-                      : feedItem.severity === 'warning' ? '#fbbf24'
-                      : feedItem.severity === 'critical' ? '#f87171'
-                      : 'var(--text-muted)',
-                    border: `1px solid ${feedItem.severity === 'success' ? 'rgba(34,197,94,0.15)'
-                      : feedItem.severity === 'warning' ? 'rgba(245,158,11,0.15)'
-                      : feedItem.severity === 'critical' ? 'rgba(239,68,68,0.15)'
-                      : 'var(--border-subtle)'}`,
-                  }}>
-                    {feedItem.severity}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Forecast feed */}
-          {currentTarget ? (
-            <div className="op-feed">
-              <div className="op-feed-header">
-                <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'0.04em', textTransform:'uppercase', fontFamily:"'Inter',sans-serif" }}>
-                  Run Rate Forecast
-                </span>
-                <span className="status-dot" style={{
-                  fontSize:'9px', fontFamily:"'Inter',sans-serif",
-                  color:{ ON_TRACK:'var(--kpi-good)', LOW_RISK:'var(--kpi-good)', MEDIUM_RISK:'var(--kpi-warning)', HIGH_RISK:'var(--kpi-critical)' }[riskLevel] || 'var(--text-muted)',
-                }}>
-                  {{ ON_TRACK:'On Track', LOW_RISK:'Low Risk', MEDIUM_RISK:'Monitor', HIGH_RISK:'At Risk' }[riskLevel] || riskLevel}
-                </span>
-              </div>
-              {KPI_KEYS.map((k) => {
-                const fc  = forecastMap[k]
-                const cfg = fc ? TRAFFIC_COLORS[getTrafficLight(fc.forecastAchPct, 1)] : null
-                return (
-                  <div key={k} className="op-feed-item">
-                    <div className="op-feed-dot" style={{ background: (kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR) }} />
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                        <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{(kpiStats[k]?._label ?? k)}</span>
-                        <span style={{ fontSize:'11px', fontWeight:600, color:cfg?.color||'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
-                          {fc?.forecastAchPct ?? 0}%
-                        </span>
-                      </div>
-                      {fc && (
-                        <div style={{ marginTop:'3px', height:'2px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
-                          <div style={{ height:'100%', borderRadius:'99px', background:cfg?.color||(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), width:`${Math.min(fc.forecastAchPct,100)}%`, transition:'width 0.5s ease' }} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <EmptyNoForecast />
-          )}
+        {/* KPI Distribution */}
+        <div className="card card-p">
+          <div className="section-title" style={{ fontSize:'12px', marginBottom:'10px' }}>KPI Distribution</div>
+          <KpiDistributionDonut counts={kpiDistributionCounts} />
         </div>
+
+        {/* Smart Alerts */}
+        <TopAlertsPanel alerts={liveAnalytics?.alerts ?? []} onNavigate={navigate} maxVisible={5} />
+      </div>
+
+      {/* ── Executive Intelligence Row — UI3.2-E ──────────────
+          Left: KPI Health heatmap (liveAnalytics.kpiHealth — the
+          scoped equivalent of the multi-branch Heatmap.jsx, reserved
+          for Executive/Branch Intelligence pages). Middle: Executive
+          Summary, fed by this page's own already-computed overallAch/
+          strongest/weakest KPI — no new scoring, mirrors the same
+          derivation ExecutiveDashboard.jsx uses for its report-backed
+          panel. Right: Today's Activities (liveAnalytics.activityFeed)
+          + the existing DailyMissionPanel (biggest-risk/opportunity
+          view), distinct purpose from the new Hero above. */}
+      <div className="section-divider">
+        <span className="section-divider-label">Executive Intelligence</span>
+        <div className="section-divider-line" />
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}
+           className="xl:grid-cols-3">
+        <KpiHealthHeatmap kpiHealth={liveAnalytics?.kpiHealth ?? []} />
+
+        <ExecutiveSummaryPanel
+          overallScore={overallAch}
+          bestKpi={kpiStats[strongestKpi]?._label ?? strongestKpi}
+          focusKpi={kpiStats[weakestKpi]?._label ?? weakestKpi}
+          primaryRisk={weakestKpi ? `${kpiStats[weakestKpi]?._label ?? weakestKpi} is behind pace at ${kpiStats[weakestKpi]?.achievementPct ?? 0}%` : undefined}
+          topOpportunity={strongestKpi ? `${kpiStats[strongestKpi]?._label ?? strongestKpi} is leading at ${kpiStats[strongestKpi]?.achievementPct ?? 0}%` : undefined}
+          narrative={mission?.action}
+        />
+
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+          <ActivityFeedPanel items={liveAnalytics?.activityFeed ?? []} maxVisible={5} />
+          {missionItems.length > 0 && <DailyMissionPanel items={missionItems} />}
+        </div>
+      </div>
+
+      {/* ── Run Rate Forecast — compact supplementary ─────────
+          Kept (not deleted): existing forecastMap readout per KPI,
+          relocated below the locked 7 rows rather than removed. */}
+      <div style={{ marginBottom:'20px' }}>
+        {currentTarget ? (
+          <div className="op-feed">
+            <div className="op-feed-header">
+              <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'0.04em', textTransform:'uppercase', fontFamily:"'Inter',sans-serif" }}>
+                Run Rate Forecast
+              </span>
+              <span className="status-dot" style={{
+                fontSize:'9px', fontFamily:"'Inter',sans-serif",
+                color:{ ON_TRACK:'var(--kpi-good)', LOW_RISK:'var(--kpi-good)', MEDIUM_RISK:'var(--kpi-warning)', HIGH_RISK:'var(--kpi-critical)' }[riskLevel] || 'var(--text-muted)',
+              }}>
+                {{ ON_TRACK:'On Track', LOW_RISK:'Low Risk', MEDIUM_RISK:'Monitor', HIGH_RISK:'At Risk' }[riskLevel] || riskLevel}
+              </span>
+            </div>
+            {KPI_KEYS.map((k) => {
+              const fc  = forecastMap[k]
+              const cfg = fc ? TRAFFIC_COLORS[getTrafficLight(fc.forecastAchPct, 1)] : null
+              return (
+                <div key={k} className="op-feed-item">
+                  <div className="op-feed-dot" style={{ background: (kpiStats[k]?._color ?? getKpiColor(k)) }} />
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                      <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{(kpiStats[k]?._label ?? k)}</span>
+                      <span style={{ fontSize:'11px', fontWeight:600, color:cfg?.color||'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
+                        {fc?.forecastAchPct ?? 0}%
+                      </span>
+                    </div>
+                    {fc && (
+                      <div style={{ marginTop:'3px', height:'2px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
+                        <div style={{ height:'100%', borderRadius:'99px', background:cfg?.color||(kpiStats[k]?._color ?? getKpiColor(k)), width:`${Math.min(fc.forecastAchPct,100)}%`, transition:'width 0.5s ease' }} />
+                      </div>
+                    )}
+                    {fc && (
+                      <div style={{ fontSize:'8px', color:'var(--text-muted)', marginTop:'2px',
+                                    letterSpacing:'0.04em', textTransform:'uppercase',
+                                    fontFamily:"'Inter',sans-serif", textAlign:'right' }}>
+                        Projected EOM
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <EmptyNoForecast />
+        )}
       </div>
 
       {/* ── Branch ranking (admin) or Month vs Target ───────── */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}
            className="lg:grid-cols-2">
 
-        {/* Today bar chart */}
-        {!loading && (
-          <div className="card card-p space-y-3">
-            <div className="section-title" style={{ fontSize:'12px' }}>Today's KPIs</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={KPI_KEYS.map((k) => ({
-                name: (kpiStats[k]?._label ?? k),
-                value: todayEntries.reduce((s, e) => s + (e[k]||0), 0),
-                color: (kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR),
-              }))} margin={{ top:5, right:5, bottom:0, left:-25 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                <XAxis dataKey="name" tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill:'var(--text-muted)', fontSize:9 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTip />} />
-                <Bar dataKey="value" radius={[4,4,0,0]}>
-                  {KPI_KEYS.map((k, i) => (
-                    <Cell key={i} fill={(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR)} fillOpacity={0.85} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Team Intelligence Card (manager/admin) */}
-        {!loading && teamIntelligence && isManager && (
+        {/* Team Intelligence Card (single / list scope) */}
+        {!loading && teamIntelligence && (scope?.type === 'single' || scope?.type === 'list') && (
           <TeamIntelligenceCard teamResult={teamIntelligence} loading={loading} />
         )}
 
-        {/* Branch ranking (admin) | Month vs Target (others) */}
+        {/* Branch ranking (all / list scope) | Month vs Target (single scope) */}
         {!loading && (
-          isAdmin ? (
+          scope?.type !== 'single' ? (
             <div className="card card-p">
               <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'12px' }}>
                 <Award style={{ width:13, height:13, color:'var(--brand-400)' }} strokeWidth={1.75} />
@@ -1162,7 +1355,7 @@ export default function DashboardPage() {
                           <div className="metric-row-fill" style={{ width:`${Math.round((b.total/maxTotal)*100)}%`, background:'var(--brand-500)' }} />
                         </div>
                         <span className="metric-row-pct" style={{ color:'var(--brand-400)' }}>
-                          {b.total.toLocaleString()}
+                          {formatNumber(b.total)}
                         </span>
                       </div>
                     )
@@ -1177,7 +1370,7 @@ export default function DashboardPage() {
                 const cfg = s?.colors || TRAFFIC_COLORS.critical
                 return (
                   <div key={k} className="metric-row">
-                    <div style={{ width:5, height:5, borderRadius:'50%', background:(kpiStats[k]?._color ?? FALLBACK_COLORS[k] ?? DEFAULT_KPI_COLOR), flexShrink:0 }} />
+                    <div style={{ width:5, height:5, borderRadius:'50%', background:(kpiStats[k]?._color ?? getKpiColor(k)), flexShrink:0 }} />
                     <span className="metric-row-label">{(kpiStats[k]?._label ?? k)}</span>
                     <div className="metric-row-bar">
                       <div className="metric-row-fill" style={{ width:`${Math.min(s?.achPct||0,100)}%`, background:cfg.color }} />
@@ -1192,14 +1385,6 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Card customizer modal */}
-      {showCustom && (
-        <CardCustomizer
-          selectedCards={localCards}
-          onToggle={toggleCard}
-          onClose={saveCustomization}
-        />
-      )}
     </div>
   )
 }

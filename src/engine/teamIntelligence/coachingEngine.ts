@@ -5,11 +5,17 @@
 // Pure function — no Firebase, no React.
 // ============================================================
 
-import { KPI_META, KPI_KEYS } from '../kpiAnalyticsEngine'
+import { getKpiMetaForKey } from '../kpiAnalyticsEngine'
 import type {
   PharmacistPerformanceSummary,
   CoachingRecommendation
 } from './teamIntelligenceTypes'
+
+// Core KPI Dependency Removal — Stage F: registry is optional and simply
+// threaded through to getKpiMetaForKey so the weakest-KPI label resolves
+// correctly for non-Core registry KPIs too. Omitted at every current call
+// site, so behavior is unchanged today.
+import type { KpiRegistry } from '../kpiRegistry'
 
 let _id = 0
 function recId(): string { return `rec-${Date.now()}-${++_id}` }
@@ -25,7 +31,8 @@ const COACHING_THRESHOLDS = {
 
 // ── Build coaching suggestion for a specific pharmacist ──────
 export function buildCoachingRecommendations(
-  summary: PharmacistPerformanceSummary,
+  summary:   PharmacistPerformanceSummary,
+  registry?: KpiRegistry,
 ): CoachingRecommendation[] {
   const recs: CoachingRecommendation[] = []
 
@@ -66,11 +73,12 @@ export function buildCoachingRecommendations(
     weakestSnapshot.achievementPct < COACHING_THRESHOLDS.lowKpiAchievement
   ) {
     const isImmediate = weakestSnapshot.achievementPct < 50
+    const weakestKpiLabel = getKpiMetaForKey(summary.weakestKpi, registry).en
     recs.push({
       id:             recId(),
       priority:       isImmediate ? 'immediate' : 'near_term',
-      title:          `${KPI_META[summary.weakestKpi].en} coaching for ${summary.displayName}`,
-      detail:         `${KPI_META[summary.weakestKpi].en} is at ${weakestSnapshot.achievementPct}%. Focus on practical techniques during the next shift — identify what barriers exist.`,
+      title:          `${weakestKpiLabel} coaching for ${summary.displayName}`,
+      detail:         `${weakestKpiLabel} is at ${weakestSnapshot.achievementPct}%. Focus on practical techniques during the next shift — identify what barriers exist.`,
       kpiKey:         summary.weakestKpi,
       rationale:      `Lowest KPI dragging overall performance. Targeted focus will have the highest return.`,
       targetUserId:   summary.userId,
@@ -131,9 +139,10 @@ export function buildCoachingRecommendations(
 // ── Team-level coaching plan ──────────────────────────────────
 export function buildTeamCoachingPlan(
   summaries: PharmacistPerformanceSummary[],
+  registry?: KpiRegistry,
 ): { recommendations: CoachingRecommendation[]; focusSummary: string } {
   const allRecs = summaries
-    .flatMap((s) => buildCoachingRecommendations(s))
+    .flatMap((s) => buildCoachingRecommendations(s, registry))
 
   // Sort: immediate → near_term → routine → recognition
   const ORDER: Record<string, number> = {

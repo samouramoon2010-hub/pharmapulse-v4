@@ -44,6 +44,19 @@ export interface RawIngestionRow {
   rawBasket?:       string
   rawCrossSelling?: string
 
+  // ── Core KPI Dependency Removal — Stage C ──
+  // Dynamic KPI columns, keyed by engine key, for any active KPI Registry
+  // entry beyond the 5 legacy fields above. Populated by parseExcelRowsToRaw
+  // when a column header resolves to an active registry KPI — no hardcoded
+  // switch on KPI name required to support a newly registered KPI.
+  rawKpiValues?: Record<string, string>
+
+  // Column headers that looked like an attempted KPI reading (numeric value)
+  // but did not resolve to any active KPI Registry key. Surfaced as
+  // UNKNOWN_KPI_KEY warnings during validation instead of disappearing
+  // silently into rawExtras.
+  unknownKpiColumns?: string[]
+
   // Any additional raw columns
   rawExtras?: Record<string, string>
 }
@@ -76,6 +89,13 @@ export interface StagedKpiRecord {
   basket:       number
   crossSelling: number
 
+  // ── Core KPI Dependency Removal — Stage C ──
+  // Dynamic engine-key → value map covering the 5 legacy fields above PLUS
+  // any other active KPI Registry entry present in this import. Mirrors the
+  // shape buildKpiValuesMap() already produces for the manual-entry write
+  // path, so import and manual entry share one dynamic storage model.
+  kpiValues: Record<string, number>
+
   // Timestamps
   stagedAt:     string          // ISO
   validatedAt?: string
@@ -107,6 +127,7 @@ export type ValidationWarningCode =
   | 'HIGH_VALUE_KPI'        // KPI unusually high vs historical
   | 'OVERWRITE_EXISTING'    // would overwrite an existing entry
   | 'MISSING_OPTIONAL_FIELD'
+  | 'UNKNOWN_KPI_KEY'       // column looked like a KPI reading but matched no active registry key
 
 export interface ValidationError {
   code:     ValidationErrorCode

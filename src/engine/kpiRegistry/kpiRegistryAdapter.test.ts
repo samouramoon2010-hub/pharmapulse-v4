@@ -249,7 +249,7 @@ describe('getEngineCompatibleKpiKeys — engine key list', () => {
 describe('getRegistryCompatibleKpiKeys — registry key list', () => {
   it('returns all 10 active production KPI keys', () => {
     const keys = getRegistryCompatibleKpiKeys()
-    expect(keys).toHaveLength(10)
+    expect(keys).toHaveLength(11)
   })
 
   it('contains omnihealth, not omni', () => {

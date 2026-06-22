@@ -247,7 +247,7 @@ describe('governance — duplicate key rejected', () => {
 
 describe('existing registry — backward compatibility after management ops', () => {
   it('getActiveKpis still returns 10 KPIs from default registry', () => {
-    expect(getActiveKpis(DEFAULT_KPI_REGISTRY)).toHaveLength(10)
+    expect(getActiveKpis(DEFAULT_KPI_REGISTRY)).toHaveLength(11)
   })
 
   it('all engine operations remain valid after a non-core KPI is archived', () => {
@@ -269,10 +269,10 @@ describe('existing registry — backward compatibility after management ops', ()
   it('target input configs unchanged after non-core edit', () => {
     const reg = archiveKpi(DEFAULT_KPI_REGISTRY, 'ndf')
     const configs = getTargetInputConfigs(reg)
-    // Core KPI configs are unchanged
-    expect(configs).toHaveLength(5)
+    // Core KPI configs are unchanged; pilot KPI (insuranceConversion) included due to targetInputEnabled
+    expect(configs).toHaveLength(6)
     expect(configs.map((c) => c.key)).toEqual([
-      'wasfaty', 'omnihealth', 'wellnessCard', 'basket', 'crossSelling',
+      'wasfaty', 'omnihealth', 'wellnessCard', 'basket', 'crossSelling', 'insuranceConversion',
     ])
   })
 

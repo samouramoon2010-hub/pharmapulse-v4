@@ -10,7 +10,7 @@ import { generateActivityFeed }                    from './activityFeedEngine'
 import { generateLiveAlerts, countSuppressedAlerts } from './liveAlertEngine'
 import { computeLiveMomentum }                     from './liveMomentumEngine'
 import { assessOperationalStatus }                 from './operationalStatusEngine'
-import { KPI_KEYS, KPI_META }                     from '../kpiAnalyticsEngine'
+import { getKpiWeightForKey }                      from '../kpiAnalyticsEngine'
 import { format }                                  from 'date-fns'
 
 import type { LiveAnalyticsInput }                 from './liveAnalyticsTypes'
@@ -22,6 +22,12 @@ import type {
   LiveAlert,
   MasterOperationalState,
 } from './liveAnalyticsTypes'
+
+// Protected Engines Migration Phase D — Live Analytics orchestrator.
+// registry is optional and simply passed through to the 4 sub-engines
+// that accept it. No current caller of generateLiveAnalytics() passes a
+// registry, so behavior is unchanged.
+import type { KpiRegistry } from '../kpiRegistry'
 
 let _signalCounter = 0
 
@@ -105,33 +111,50 @@ function buildPrioritySignals(
 export function generateLiveAnalytics(
   input:         LiveAnalyticsInput,
   recentAlerts?: LiveAlert[],          // Phase 2: pass for cooldown checking
+  registry?:     KpiRegistry,
 ): LiveAnalyticsResult {
   const prevAlerts = recentAlerts ?? []
 
   // 1. Compute all signals
-  const kpiHealth    = computeKpiHealth(input)
-  const activityFeed = generateActivityFeed(input)
-  const alerts       = generateLiveAlerts(input, kpiHealth, prevAlerts)
-  const momentum     = computeLiveMomentum(input)
+  // Core KPI Dependency Removal — Stage F: kpiHealth widens to every active
+  // production_evaluation KPI for display when a registry is supplied. The
+  // aggregates below (overallHealth, counts, priority signals,
+  // operationalAssessment) are weight-gated — only KPIs with registry
+  // weight > 0 feed them — so they stay byte-identical with the live
+  // DEFAULT_KPI_REGISTRY today (every non-Core KPI there has weight 0).
+  const kpiHealth    = computeKpiHealth(input, registry)
+  const weightedHealth = registry
+    ? kpiHealth.filter((h) => getKpiWeightForKey(h.kpiKey, registry) > 0)
+    : kpiHealth
+  const activityFeed = generateActivityFeed(input, registry)
+  // generateLiveAlerts derives KPI_CRITICAL/FORECAST_MISS/MILESTONE_NEAR/
+  // TARGET_HIT alerts directly from whatever health array it's given —
+  // feeding it the full widened kpiHealth would let a weight-0 KPI (e.g.
+  // 'sales', which has a target in the live registry's branch fixtures)
+  // generate new alerts and shift alertScore/operationalAssessment. Pass
+  // the weight-gated subset to keep that aggregate zero-drift, same as
+  // overallHealth above.
+  const alerts       = generateLiveAlerts(input, weightedHealth, prevAlerts, registry)
+  const momentum     = computeLiveMomentum(input, registry)
 
   // 2. Operational assessment (Phase 2 master state)
   const operationalAssessment = assessOperationalStatus(
-    kpiHealth, alerts, momentum,
+    weightedHealth, alerts, momentum,
   )
 
   // 3. Aggregate
-  const overallHealth        = computeOverallHealth(kpiHealth)
-  const criticalKpiCount     = kpiHealth.filter((h) => h.state === 'critical').length
+  const overallHealth        = computeOverallHealth(weightedHealth)
+  const criticalKpiCount     = weightedHealth.filter((h) => h.state === 'critical').length
   const activeAlertCount     = alerts.filter((a) => !a.dismissed).length
   const hasSubmittedToday    = input.todayEntries.length > 0
-  const suppressedAlertCount = countSuppressedAlerts(input, kpiHealth, alerts, prevAlerts)
+  const suppressedAlertCount = countSuppressedAlerts(input, weightedHealth, alerts, prevAlerts, registry)
 
-  const prioritySignals = buildPrioritySignals(input, kpiHealth, momentum)
+  const prioritySignals = buildPrioritySignals(input, weightedHealth, momentum)
 
   // Legacy op status (mapped for backward compat)
   const legacyOpStatus = toOperationalStatus(operationalAssessment.state)
-  const riskCount  = kpiHealth.filter((h) => h.state === 'risk').length
-  const watchCount = kpiHealth.filter((h) => h.state === 'watch' || h.state === 'unstable').length
+  const riskCount  = weightedHealth.filter((h) => h.state === 'risk').length
+  const watchCount = weightedHealth.filter((h) => h.state === 'watch' || h.state === 'unstable').length
 
   const operationalStatus: BranchOperationalStatus = {
     pharmacyId:      input.pharmacyId,

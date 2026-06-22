@@ -3,23 +3,30 @@
 // ============================================================
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { applyLanguage, normaliseLang } from '../i18n/index'
 
 export const THEMES = {
-  DARK:      'dark',
-  LIGHT:     'light',
-  CORPORATE: 'corporate',
-  MIDNIGHT:  'midnight',
-  NAHDI:     'nahdi',
-  OCEAN:     'ocean',
+  DARK:        'dark',
+  LIGHT:       'light',
+  CORPORATE:   'corporate',
+  MIDNIGHT:    'midnight',
+  NAHDI:       'nahdi',
+  OCEAN:       'ocean',
+  PHARMA:      'pharma',
+  PHARMA_LIGHT:'pharma-light',
+  FUTURISTIC:  'pharmapulse-futuristic',
 }
 
 export const THEME_META = {
-  dark:      { label: 'Dark',      labelAr: 'داكن',           preview: '#040d18' },
-  light:     { label: 'Light',     labelAr: 'فاتح',           preview: '#f8fafc' },
-  corporate: { label: 'Corporate', labelAr: 'كوربوريت',       preview: '#0a0f1e' },
-  midnight:  { label: 'Midnight',  labelAr: 'منتصف الليل',   preview: '#050210' },
-  nahdi:     { label: 'Nahdi',     labelAr: 'نهدي',           preview: '#003a2e' },
-  ocean:     { label: 'Ocean',     labelAr: 'أوشن',           preview: '#01172a' },
+  pharma:               { label: 'Pharma',       labelAr: 'فارما',             preview: '#1A2235' },
+  'pharma-light':       { label: 'Pharma Light', labelAr: 'فارما فاتح',       preview: '#F7F8FA' },
+  'pharmapulse-futuristic': { label: 'Futuristic', labelAr: 'مستقبلي',        preview: '#071426' },
+  dark:                 { label: 'Dark',          labelAr: 'داكن',             preview: '#040d18' },
+  light:                { label: 'Light',         labelAr: 'فاتح',             preview: '#f8fafc' },
+  corporate:            { label: 'Corporate',     labelAr: 'كوربوريت',         preview: '#0a0f1e' },
+  midnight:             { label: 'Midnight',      labelAr: 'منتصف الليل',     preview: '#050210' },
+  nahdi:                { label: 'Nahdi',         labelAr: 'نهدي',             preview: '#003a2e' },
+  ocean:                { label: 'Ocean',         labelAr: 'أوشن',             preview: '#01172a' },
 }
 
 export const SIDEBAR_MODE = {
@@ -34,7 +41,7 @@ export const DASHBOARD_CARDS = {
   wasfaty:             { label: 'Wasfaty',              labelAr: 'وصفتي' },
   omni:                { label: 'OmniHealth',           labelAr: 'أومني هيلث' },
   wellness:            { label: 'Wellness',             labelAr: 'ويلنس' },
-  cross_selling:       { label: 'Cross Selling',        labelAr: 'البيع المتقاطع' },
+  crossSelling:        { label: 'Cross Selling',        labelAr: 'البيع المتقاطع' },
   branch_rank:         { label: 'Branch Rank',          labelAr: 'ترتيب الفرع' },
   month_progress:      { label: 'Month Progress',       labelAr: 'تقدم الشهر' },
   forecast:            { label: 'Forecast',             labelAr: 'التوقع' },
@@ -45,16 +52,23 @@ const DEFAULT_CARDS = ['overall_achievement', 'today_kpi', 'wasfaty', 'omni', 'w
 export const useSettingsStore = create(
   persist(
     (set, get) => ({
-      theme:          THEMES.DARK,
+      theme:          THEMES.PHARMA,
       sidebarMode:    SIDEBAR_MODE.EXPANDED,
       compactMode:    false,
       reducedMotion:  false,
       fontSize:       'normal',
       dashboardCards: DEFAULT_CARDS,
+      language:       'ar',   // 'ar' | 'en' — default Arabic
 
       setTheme: (theme) => {
         set({ theme })
         applyTheme(theme)
+      },
+
+      setLanguage: (lang) => {
+        const safe = normaliseLang(lang)
+        set({ language: safe })
+        applyLanguage(safe)
       },
 
       toggleSidebar: () => {
@@ -75,7 +89,10 @@ export const useSettingsStore = create(
     {
       name: 'pharma-settings-v4',
       onRehydrateStorage: () => (state) => {
-        if (state) applyTheme(state.theme)
+        if (state) {
+          applyTheme(state.theme)
+          applyLanguage(normaliseLang(state.language))
+        }
       },
     }
   )
@@ -87,6 +104,65 @@ export function applyTheme(theme) {
   root.setAttribute('data-theme', theme || 'dark')
 
   const T = {
+    // ── PharmaPulse 2.0 — Primary theme (Deep Teal / Warm Slate) ──
+    pharma: {
+      '--bg-canvas':      '#0F1623',
+      '--bg-surface':     '#1A2235',
+      '--bg-elevated':    '#232E44',
+      '--bg-overlay':     '#2A3550',
+      '--bg-hover':       'rgba(255,255,255,0.04)',
+      '--bg-active':      'rgba(13,107,116,0.12)',
+      '--bg-base':        '#0F1623',
+      '--bg-card':        '#1A2235',
+      '--border-subtle':  '#2A3550',
+      '--border-default': 'rgba(255,255,255,0.09)',
+      '--border-strong':  'rgba(255,255,255,0.15)',
+      '--border-brand':   'rgba(13,107,116,0.35)',
+      '--border':         '#2A3550',
+      '--border-hover':   'rgba(255,255,255,0.09)',
+      '--text-primary':   '#F1F5F9',
+      '--text-secondary': '#94A3B8',
+      '--text-muted':     '#64748B',
+      '--text-brand':     '#0D9BAA',
+      '--brand-300':      '#5EEAD4',
+      '--brand-400':      '#2DD4BF',
+      '--brand-500':      '#0D6B74',
+      '--brand-600':      '#0A5560',
+      '--sidebar-bg':     '#1E2A3A',
+      '--topbar-bg':      'rgba(15,22,35,0.92)',
+      '--input-bg':       'rgba(26,34,53,0.8)',
+      '--modal-bg':       'rgba(15,22,35,0.99)',
+    },
+    // ── PharmaPulse 2.0 — Light mode ──────────────────────────────
+    'pharma-light': {
+      '--bg-canvas':      '#F7F8FA',
+      '--bg-surface':     '#FFFFFF',
+      '--bg-elevated':    '#F0F2F5',
+      '--bg-overlay':     '#E8EBF0',
+      '--bg-hover':       'rgba(0,0,0,0.04)',
+      '--bg-active':      'rgba(13,107,116,0.08)',
+      '--bg-base':        '#F7F8FA',
+      '--bg-card':        '#FFFFFF',
+      '--border-subtle':  '#E2E6EC',
+      '--border-default': 'rgba(0,0,0,0.10)',
+      '--border-strong':  'rgba(0,0,0,0.16)',
+      '--border-brand':   'rgba(13,107,116,0.30)',
+      '--border':         '#E2E6EC',
+      '--border-hover':   'rgba(0,0,0,0.10)',
+      '--text-primary':   '#1E2A3A',
+      '--text-secondary': '#475569',
+      '--text-muted':     '#94A3B8',
+      '--text-brand':     '#0D6B74',
+      '--brand-300':      '#0D9BAA',
+      '--brand-400':      '#0D8090',
+      '--brand-500':      '#0D6B74',
+      '--brand-600':      '#0A5560',
+      '--sidebar-bg':     '#1E2A3A',
+      '--topbar-bg':      'rgba(247,248,250,0.94)',
+      '--input-bg':       'rgba(255,255,255,0.9)',
+      '--modal-bg':       'rgba(255,255,255,0.99)',
+    },
+    // ── Legacy dark (preserved for existing users) ──────────────
     dark: {
       '--bg-canvas':      '#09090b',
       '--bg-surface':     '#141417',
@@ -254,6 +330,39 @@ export function applyTheme(theme) {
       '--topbar-bg':      'rgba(1,16,28,0.92)',
       '--input-bg':       'rgba(3,24,48,0.8)',
       '--modal-bg':       'rgba(1,16,28,0.99)',
+    },
+    // ── PharmaPulse Futuristic — Deep navy + cyan/emerald accents ──
+    // Inspired by premium SaaS intelligence dashboards.
+    // Uses cyan (#06B6D4) and emerald (#00F5A0) as accent pair.
+    // Background is deep navy-black; borders glow in cyan.
+    // Does NOT replace 'pharma' — additive optional theme.
+    'pharmapulse-futuristic': {
+      '--bg-canvas':      '#020617',
+      '--bg-surface':     '#071426',
+      '--bg-elevated':    '#0B1F33',
+      '--bg-overlay':     '#102A44',
+      '--bg-hover':       'rgba(6,182,212,0.06)',
+      '--bg-active':      'rgba(6,182,212,0.14)',
+      '--bg-base':        '#020617',
+      '--bg-card':        '#071426',
+      '--border-subtle':  'rgba(56,189,248,0.22)',
+      '--border-default': 'rgba(56,189,248,0.32)',
+      '--border-strong':  'rgba(6,182,212,0.55)',
+      '--border-brand':   '#06B6D4',
+      '--border':         'rgba(56,189,248,0.22)',
+      '--border-hover':   'rgba(6,182,212,0.45)',
+      '--text-primary':   '#F8FAFC',
+      '--text-secondary': '#CBD5E1',
+      '--text-muted':     '#64748B',
+      '--text-brand':     '#06B6D4',
+      '--brand-300':      '#00F5A0',
+      '--brand-400':      '#22D3EE',
+      '--brand-500':      '#06B6D4',
+      '--brand-600':      '#0EA5E9',
+      '--sidebar-bg':     'rgba(2,6,23,0.98)',
+      '--topbar-bg':      'rgba(2,6,23,0.92)',
+      '--input-bg':       'rgba(7,20,38,0.85)',
+      '--modal-bg':       'rgba(2,6,23,0.99)',
     },
   }
 

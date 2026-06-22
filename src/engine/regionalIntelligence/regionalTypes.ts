@@ -15,6 +15,8 @@ import type {
   TrendDirection,
 } from '../kpiAnalyticsEngine'
 
+import type { KpiRegistry } from '../kpiRegistry'
+
 // ── Re-export upstream types used across the regional layer ──
 export type {
   KpiKey, KpiEntry, MonthlyTarget,
@@ -527,6 +529,16 @@ export interface RegionalIntelligenceInput {
    * already embedded in each BranchRollupSummary.
    */
   period?: RegionalPeriod
+
+  /**
+   * Live KpiRegistry for dynamic/custom production KPI support.
+   * Optional at this pure-function layer for backward compatibility with
+   * its large existing test suite. Core KPI Dependency Removal — No
+   * Silent Core Fallback Closure: every ACTIVE PRODUCTION caller resolves
+   * and passes the live registry at the orchestrator/hook boundary (see
+   * requireLiveRegistry() in engine/kpiRegistry/registryGuard.ts).
+   */
+  registry?: KpiRegistry
 }
 
 // ── Portfolio-level summary ───────────────────────────────────

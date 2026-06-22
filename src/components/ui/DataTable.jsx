@@ -169,12 +169,13 @@ export default function DataTable({
 
   const TD_STYLE = {
     padding:'0 12px',
-    height:'40px',
+    height:'var(--density-row-height, 36px)',
     fontSize:'12.5px',
     color:'var(--text-secondary)',
     borderBottom:'1px solid var(--border-subtle)',
     textAlign:'right',
     verticalAlign:'middle',
+    fontVariantNumeric:'tabular-nums',
   }
 
   if (loading) {

@@ -12,7 +12,24 @@
 // ============================================================
 
 import { format, subDays, differenceInDays } from 'date-fns'
-import { KPI_META, KPI_KEYS, sumKpi, computeAchievementPct } from '../kpiAnalyticsEngine'
+import { KPI_META, KPI_KEYS, sumKpi, computeAchievementPct, getProductionEngineKeys } from '../kpiAnalyticsEngine'
+
+// Protected Engines Migration Phase A — Team Intelligence Engine
+// (Accountability). registry optional; omitted at every current call
+// site, so behavior is unchanged today.
+//
+// NOTE: hasConsistentUnderperformance() below is intentionally NOT
+// migrated — it resolves the target field via the ad-hoc convention
+// `${k}Target`, which for 'crossSelling' produces 'crossSellingTarget'
+// (not the canonical 'crossSellTarget' used everywhere else in this
+// codebase, including KPI_META and the registry). Routing that lookup
+// through the registry-aware reader would read a *different* field than
+// this function has always read, which would be a real behavior change,
+// not just an internal implementation swap. Left untouched until that
+// pre-existing naming quirk is reviewed on its own.
+import { buildPilotPolicy, readPilotActual, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
+
 import type { PharmacistInput, AccountabilityInsight } from './teamIntelligenceTypes'
 
 // ── Working days in a month (simplified: exclude Fridays) ────
@@ -95,18 +112,25 @@ function hasConsistentUnderperformance(
 
 // ── Detect improvement streak ────────────────────────────────
 function improvementStreak(
-  entries:  PharmacistInput['mtdEntries'],
-  target:   PharmacistInput['target'],
+  entries:   PharmacistInput['mtdEntries'],
+  target:    PharmacistInput['target'],
+  registry?: KpiRegistry,
+  policy?:   PilotPolicy,
 ): number {
   if (entries.length < 2) return 0
 
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date))
 
   // Check consecutive days of improving total KPI
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
   let streak = 0
   for (let i = sorted.length - 1; i >= 1; i--) {
-    const todayTotal = KPI_KEYS.reduce((s, k) => s + (Number(sorted[i][k]) || 0), 0)
-    const prevTotal  = KPI_KEYS.reduce((s, k) => s + (Number(sorted[i-1][k]) || 0), 0)
+    const readActual = (entry: PharmacistInput['mtdEntries'][number], k: typeof KPI_KEYS[number]) =>
+      registry && policy
+        ? readPilotActual(entry as Record<string, unknown>, k, registry, policy)
+        : Number(entry[k]) || 0
+    const todayTotal = keys.reduce((s, k) => s + readActual(sorted[i], k), 0)
+    const prevTotal  = keys.reduce((s, k) => s + readActual(sorted[i - 1], k), 0)
     if (todayTotal >= prevTotal) streak++
     else break
   }
@@ -115,12 +139,20 @@ function improvementStreak(
 
 // ── Main function ─────────────────────────────────────────────
 export function computeAccountabilityInsights(
-  inputs: PharmacistInput[],
-  month:  string,
-  now?:   Date,
+  inputs:    PharmacistInput[],
+  month:     string,
+  now?:      Date,
+  registry?: KpiRegistry,
 ): AccountabilityInsight[] {
   const ref         = now ?? new Date()
   const possibleDays = workingDaysInMonth(month)
+
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (first input with at least one entry and a target).
+  const sampleHolder = inputs.find(i => i.mtdEntries.length > 0 && i.target)
+  const policy = registry
+    ? buildPilotPolicy(sampleHolder?.mtdEntries[0] ?? null, sampleHolder?.target ?? null, registry, 'branchIntelligence')
+    : undefined
 
   return inputs.map((input): AccountabilityInsight => {
     const uid         = input.userId ?? (input as any).profile?.uid
@@ -139,7 +171,7 @@ export function computeAccountabilityInsights(
     const isUnderperforming = hasConsistentUnderperformance(entries, input.target)
 
     // Recovery analysis
-    const impStreak     = improvementStreak(entries, input.target)
+    const impStreak     = improvementStreak(entries, input.target, registry, policy)
     const isImproving   = impStreak >= 2
     const prevScore     = (input as any).previousScore
     const improvingVsPrev = typeof prevScore === 'number' && prevScore >= 0

@@ -15,9 +15,12 @@ import { useAuthStore }     from '../../store/authStore'
 import { useKpiStore }      from '../../store/kpiStore'
 import { usePharmacyStore } from '../../store/pharmacyStore'
 import { useToastStore }    from '../../components/ui/Toast'
+import { useScopeProfile } from '../../hooks/useScopeProfile'
+import { filterAllowedPharmacies, isPharmacyAllowed } from '../../services/scopeResolver'
 import ConfirmModal         from '../../components/ui/ConfirmModal'
 import EmptyState           from '../../components/ui/EmptyState'
 import { SkeletonTable }    from '../../components/ui/SkeletonCard'
+import { formatNumber }     from '../../utils/helpers'
 import {
   getTrafficLight, TRAFFIC_COLORS,
   computeAchievementPct, sumKpi, getDayProgress,
@@ -33,18 +36,13 @@ import { mergeRemoteRegistryWithDefaults } from '../../services/kpiRegistryLogic
 import { DEFAULT_KPI_REGISTRY } from '../../engine/kpiRegistry'
 import {
   saveTarget, deleteTarget,
-  subscribeAllTargets, subscribeTargets,
+  subscribeRecentTargets, subscribeTargets,
 } from '../../services/kpiService'
 
 // ── KPI color map — safe fallback for dynamic KPIs ────────────
-const KPI_COLORS = {
-  wasfaty:      '#6366f1',
-  omnihealth:   '#ef4444',
-  wellnessCard: '#f59e0b',
-  basket:       '#22c55e',
-  crossSelling: '#8b5cf6',
-}
-const DEFAULT_KPI_COLOR = '#a1a1aa'
+// Phase 1B: colors read from registry resolver — no local hardcoded map.
+import { getKpiColor, getPilotTrackingKpis } from '../../engine/kpiRegistry/kpiMetaResolver'
+import TrackingOnlyBadge, { PilotKpiSectionHeader } from '../../components/ui/TrackingOnlyBadge'
 // targetInputConfigs and kpiFields are live useMemo hooks inside TargetsPage()
 // and passed as props to TargetCard, TargetFormModal, BulkModal
 // using the live Firestore-backed registry (see useRegistryData hook below).
@@ -97,7 +95,7 @@ function AchPill({ actual, target, dp }) {
 }
 
 // ── Target Card ───────────────────────────────────────────────
-function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiFields }) {
+function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiFields, hideDelete }) {
   const [open, setOpen] = useState(false)
 
   const kpiActuals = useMemo(() =>
@@ -173,7 +171,8 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiField
             { icon: Copy,         title:'Copy to next month', fn: () => onCopy(target), hBg:'var(--bg-overlay)', hCol:'var(--text-primary)' },
             { icon: Pencil,       title:'Edit',   fn: () => onEdit(target), hBg:'var(--bg-overlay)', hCol:'var(--text-primary)' },
             { icon: Trash2,       title:'Delete', fn: () => onDelete(target), hBg:'rgba(239,68,68,0.08)', hCol:'#f87171' },
-          ].map(({ icon: Icon, title, fn, hBg, hCol, style: s = {} }) => (
+          ].filter(a => !(a.title === 'Delete' && hideDelete))
+           .map(({ icon: Icon, title, fn, hBg, hCol, style: s = {} }) => (
             <button key={title} title={title} onClick={fn}
               style={{ width:26, height:26, borderRadius:'6px', border:'none', background:'transparent',
                        cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
@@ -201,7 +200,7 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiField
                 <span style={{ fontSize:'9px', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif", letterSpacing:'0.04em' }}>{label}</span>
               </div>
               <div style={{ fontSize:'12px', fontWeight:600, color:'var(--text-primary)', fontVariantNumeric:'tabular-nums' }}>
-                {tgt > 0 ? tgt.toLocaleString() : <span style={{ color:'var(--border-default)' }}>—</span>}
+                {tgt > 0 ? formatNumber(tgt) : <span style={{ color:'var(--border-default)' }}>—</span>}
               </div>
               {hasEntries && tgt > 0 && (
                 <div style={{ marginTop:'2px' }}>
@@ -238,7 +237,7 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiField
                   {tgt > 0 ? `${pct}%` : '—'}
                 </div>
                 <div style={{ width:'48px', textAlign:'left', fontSize:'10px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
-                  {tgt > 0 ? `${actual.toLocaleString()}` : ''}
+                  {tgt > 0 ? `${formatNumber(actual)}` : ''}
                 </div>
               </div>
             )
@@ -373,7 +372,7 @@ function TargetFormModal({ open, onClose, editTarget, pharmacies, entries, onSav
                                     fontWeight:500, color:'var(--text-muted)', marginBottom:'4px', fontFamily:"'Inter',sans-serif" }}>
                       <div style={{ width:6, height:6, borderRadius:'50%', background:color, flexShrink:0 }} />
                       {label}
-                      {actual > 0 && <span style={{ marginRight:'auto', fontSize:'9px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>MTD: {actual.toLocaleString()}</span>}
+                      {actual > 0 && <span style={{ marginRight:'auto', fontSize:'9px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>MTD: {formatNumber(actual)}</span>}
                     </label>
                     <input type="number" min="0" dir="ltr"
                       value={form[key] || ''}
@@ -568,10 +567,11 @@ export default function TargetsPage() {
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const {
     entries,
-    subscribeAllEntries,
+    subscribeRecentEntries,
     subscribePharmacyEntries,
   } = useKpiStore()
   const toast = useToastStore()
+  const { scope, loading: scopeLoading, error: scopeError } = useScopeProfile()
 
   const [targets,    setTargets]    = useState([])
   const [loading,    setLoading]    = useState(true)
@@ -597,36 +597,65 @@ export default function TargetsPage() {
     [liveRegistry],
   )
   const kpiFields = useMemo(
-    () => targetInputConfigs.map(cfg => ({
-      key:   cfg.targetFieldName,
-      kpi:   cfg.engineKey,
-      label: cfg.shortLabel,
-      color: cfg.defaultColor ?? DEFAULT_KPI_COLOR,
-    })),
+    () => targetInputConfigs
+      .filter((cfg) => !cfg.lifecycleStage || cfg.lifecycleStage === 'production_evaluation')
+      .map(cfg => ({
+        key:   cfg.targetFieldName,
+        kpi:   cfg.engineKey,
+        label: cfg.shortLabel,
+        color: cfg.defaultColor ?? getKpiColor(cfg.aliasFor ?? cfg.key),
+      })),
     [targetInputConfigs],
   )
 
-  const role       = userProfile?.role
-  const isAdmin    = role === 'admin'
-  const pharmacyId = userProfile?.pharmacyId
-  const dp         = getDayProgress()
+  // Pilot KPI target fields — tracked but excluded from evaluation
+  const pilotKpiFields = useMemo(
+    () => getPilotTrackingKpis(liveRegistry)
+      .filter((kpi) => kpi.visibility.targetInputEnabled || kpi.visibility.dashboardEnabled)
+      .map((kpi) => ({
+        key:   `${kpi.key}Target`,   // target field name
+        kpi:   kpi.aliasFor ?? kpi.key,
+        label: kpi.shortLabel || kpi.label,
+        labelAr: kpi.labelAr,
+        color: '#b45309',
+        registryKey: kpi.key,
+      })),
+    [liveRegistry],
+  )
+
+  const role      = userProfile?.role
+  const isAdmin   = role === 'admin'
+  const canDelete = isAdmin
+  const allowedPharmacies = scope ? filterAllowedPharmacies(scope, pharmacies) : []
+  const dp        = getDayProgress()
 
   useEffect(() => {
-    const u1 = subPh()
-    let u2 = () => {}
-    let u3 = () => {}
-
-    if (isAdmin) {
-      u2 = subscribeAllTargets(list => { setTargets(list); setLoading(false) })
-      u3 = subscribeAllEntries()
-    } else if (pharmacyId) {
-      u2 = subscribeTargets(pharmacyId, list => { setTargets(list); setLoading(false) })
-      u3 = subscribePharmacyEntries(pharmacyId)
+    if (!scope) return
+    const unsubs = [subPh()]
+    if (scope.type === 'all') {
+      unsubs.push(subscribeRecentTargets((list) => { setTargets(list); setLoading(false) }))
+      unsubs.push(subscribeRecentEntries())
+    } else if (scope.type === 'single') {
+      unsubs.push(subscribeTargets(scope.id, list => { setTargets(list); setLoading(false) }))
+      unsubs.push(subscribePharmacyEntries(scope.id))
+    } else if (scope.type === 'list') {
+      const ids = scope.ids ?? []
+      if (!ids.length) { setLoading(false) }
+      else {
+        const mergedMap = new Map()
+        ids.forEach(pid => {
+          unsubs.push(subscribeTargets(pid, (list) => {
+            mergedMap.set(pid, list)
+            setTargets(Array.from(mergedMap.values()).flat())
+            setLoading(false)
+          }))
+        })
+      }
     } else {
       setLoading(false)
     }
-    return () => { u1?.(); u2?.(); u3?.() }
-  }, [userProfile?.uid])
+    return () => unsubs.forEach(u => u?.())
+  }, [scope, userProfile?.uid])
 
   // Augment targets with pharmacy name
   const allTargets = useMemo(() =>
@@ -662,6 +691,10 @@ export default function TargetsPage() {
 
   // ── Actions ──────────────────────────────────────────────────
   const handleSave = async (form) => {
+    if (!isPharmacyAllowed(scope, form.pharmacyId)) {
+      toast.error('This branch is outside your assigned territory')
+      return
+    }
     setSaving(true)
     try {
       await saveTarget({
@@ -698,6 +731,7 @@ export default function TargetsPage() {
   }
 
   const handleDelete = async (target) => {
+    if (!isPharmacyAllowed(scope, target.pharmacyId)) return
     try {
       await deleteTarget(target.pharmacyId, target.month, userProfile?.uid, userProfile?.role)
       toast.success('Target deleted')
@@ -725,6 +759,13 @@ export default function TargetsPage() {
       })
       setShowForm(true)
     }, 0)
+  }
+
+  if (scopeLoading) {
+    return (<div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading targets…</div>)
+  }
+  if (scopeError || scope?.type === 'none') {
+    return (<div style={{ padding: '24px' }}><div style={{ padding: '16px', borderRadius: '8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.28)', color: '#ef4444', fontSize: '13px' }}>Access denied. You do not have permission to view targets.</div></div>)
   }
 
   return (
@@ -815,8 +856,55 @@ export default function TargetsPage() {
               onEdit={tgt => { setEditTarget(tgt); setShowForm(true) }}
               onDelete={tgt => setConfirm({ target: tgt })}
               onCopy={handleCopy}
+              hideDelete={!canDelete}
             />
           ))}
+
+          {/* ── Pilot KPI Target Section ──────────────────────
+              Shows pilot KPI targets inline. These targets are
+              saved and visible but never affect evaluation or ranking. */}
+          {pilotKpiFields.length > 0 && viewTargets.length > 0 && (
+            <div style={{
+              marginTop: '8px',
+              border: '1px solid rgba(245,158,11,0.18)',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              background: 'rgba(245,158,11,0.03)',
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px' }}>
+                <span style={{ fontSize:'12px', fontWeight:600, color:'var(--text-secondary)' }}>
+                  Pilot KPI Targets
+                </span>
+                <TrackingOnlyBadge size="sm" />
+              </div>
+              {pilotKpiFields.map(({ key, kpi, label, labelAr, color }) => {
+                // Show pilot target value from first viewTarget (simplified)
+                const t = viewTargets[0]
+                const tgtVal = t ? (Number(t[key]) || 0) : 0
+                const entries = t ? getEntries(t.pharmacyId) : []
+                const actualVal = entries.reduce(
+                  (s, e) => s + (Number(e.kpiValues?.[key.replace('Target','')] ?? e[kpi]) || 0), 0
+                )
+                const ach = tgtVal > 0 ? Math.round((actualVal / tgtVal) * 100) : 0
+                return (
+                  <div key={key} style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+                    <span style={{ fontSize:'11px', color:'var(--text-muted)', width:'100px', flexShrink:0 }}>
+                      {labelAr || label}
+                    </span>
+                    <div style={{ flex:1, height:'4px', background:'var(--border-subtle)', borderRadius:'99px', overflow:'hidden' }}>
+                      <div style={{ height:'100%', borderRadius:'99px', background:'rgba(245,158,11,0.5)', width:`${Math.min(ach,100)}%`, transition:'width 0.5s ease' }} />
+                    </div>
+                    <span style={{ fontSize:'11px', fontWeight:600, color, width:'36px' }}>
+                      {tgtVal > 0 ? `${ach}%` : '—'}
+                    </span>
+                    <span style={{ fontSize:'10px', color:'var(--text-muted)', width:'60px' }}>
+                      {formatNumber(actualVal)} / {formatNumber(tgtVal)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -825,7 +913,7 @@ export default function TargetsPage() {
         open={showForm}
         onClose={() => { setShowForm(false); setEditTarget(null) }}
         editTarget={editTarget?._isNew ? null : editTarget}
-        pharmacies={pharmacies}
+        pharmacies={allowedPharmacies}
         entries={entries}
         onSave={handleSave}
         saving={saving}

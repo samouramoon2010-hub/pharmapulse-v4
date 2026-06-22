@@ -33,6 +33,8 @@ import {
 }                               from './ingestion/ingestionSafetyGuards'
 import { withCreateOwnership }  from './security/dataOwnership'
 import { guardKpiEntryWrite, assertGuard } from './security/accessGuard'
+import { DEFAULT_KPI_REGISTRY }  from '../engine/kpiRegistry'
+import type { KpiRegistry }      from '../engine/kpiRegistry'
 
 import type {
   RawIngestionRow,
@@ -44,8 +46,8 @@ import type {
 
 import type { GuardContext } from './security/accessGuard'
 
-// ── Excel column name mappings ────────────────────────────────
-// Maps Excel header variations → RawIngestionRow fields
+// ── Excel column name mappings — structural (non-KPI) fields ──
+// Maps Excel header variations → RawIngestionRow identity fields.
 const COLUMN_MAP: Record<string, keyof RawIngestionRow> = {
   // Date
   'date':            'rawDate',
@@ -58,8 +60,15 @@ const COLUMN_MAP: Record<string, keyof RawIngestionRow> = {
   'pharmacyCode':    'rawPharmacyCode',
   'branchCode':      'rawPharmacyCode',
   'كود الفرع':       'rawPharmacyCode',
+}
 
-  // KPIs
+// ── Legacy KPI column aliases — explicit legacy adapter ────────
+// Core KPI Dependency Removal — Stage C: the 5 original Core KPIs keep
+// their exact historical header spellings so old Excel/CSV exports keep
+// importing unchanged. This is the ONLY place legacy KPI names are
+// hardcoded; any KPI added to the registry after this point does NOT
+// get an entry here — its column header is resolved dynamically below.
+const LEGACY_KPI_COLUMN_MAP: Record<string, keyof RawIngestionRow> = {
   'wasfaty':         'rawWasfaty',
   'Wasfaty':         'rawWasfaty',
   'وصفتي':           'rawWasfaty',
@@ -84,27 +93,122 @@ const COLUMN_MAP: Record<string, keyof RawIngestionRow> = {
   'البيع المتقاطع': 'rawCrossSelling',
 }
 
+const LEGACY_ENGINE_KEYS = new Set(['wasfaty', 'omni', 'wellness', 'basket', 'crossSelling'])
+
+/**
+ * Resolve an Excel/CSV column header to an active KPI Registry engine key.
+ * Accepts the registry business key, its engine key (aliasFor), or its
+ * English/Arabic label — case-insensitive. This is what lets an arbitrary
+ * new KPI be imported with zero source-code changes: the column header
+ * just has to match the KPI's registry key or label.
+ *
+ * The legacy 5 Core KPIs are excluded here — they're already resolved via
+ * LEGACY_KPI_COLUMN_MAP above to preserve byte-identical behavior.
+ */
+function resolveDynamicKpiColumn(header: string, registry: KpiRegistry): string | null {
+  const lower = header.trim().toLowerCase()
+  for (const kpi of Object.values(registry)) {
+    if (!kpi.isActive) continue
+    const engineKey = kpi.aliasFor ?? kpi.key
+    if (LEGACY_ENGINE_KEYS.has(engineKey)) continue
+    if (kpi.key.toLowerCase() === lower)                return engineKey
+    if (engineKey.toLowerCase() === lower)              return engineKey
+    if (kpi.label && kpi.label.toLowerCase() === lower) return engineKey
+    if (kpi.labelAr && kpi.labelAr === header.trim())   return engineKey
+  }
+  return null
+}
+
+const NUMERIC_VALUE_RE = /^-?[\d,]+(\.\d+)?$/
+
 // ── 1. Parse Excel rows → RawIngestionRow[] ───────────────────
 export function parseExcelRowsToRaw(
   rows:       Record<string, unknown>[],
   sourceFile: string,
+  registry:   KpiRegistry = DEFAULT_KPI_REGISTRY,
 ): RawIngestionRow[] {
   return rows.map((row, idx) => {
     const raw: RawIngestionRow = { rowIndex: idx + 2, sourceFile }
 
     for (const [key, val] of Object.entries(row)) {
-      const mapped = COLUMN_MAP[key.trim()]
-      if (mapped) {
-        (raw as Record<string, unknown>)[mapped] = String(val ?? '').trim()
-      } else {
-        // Store unmapped columns in extras
-        if (!raw.rawExtras) raw.rawExtras = {}
-        raw.rawExtras[key] = String(val ?? '').trim()
+      const trimmedKey = key.trim()
+      const strVal     = String(val ?? '').trim()
+
+      // 1. Structural identity fields — unchanged
+      const structuralField = COLUMN_MAP[trimmedKey]
+      if (structuralField) {
+        (raw as Record<string, unknown>)[structuralField] = strVal
+        continue
       }
+
+      // 2. The 5 legacy Core KPI fields — explicit legacy adapter
+      const legacyField = LEGACY_KPI_COLUMN_MAP[trimmedKey]
+      if (legacyField) {
+        (raw as Record<string, unknown>)[legacyField] = strVal
+        continue
+      }
+
+      // 3. Any other active KPI Registry entry — dynamic, no hardcoded names
+      const engineKey = resolveDynamicKpiColumn(trimmedKey, registry)
+      if (engineKey) {
+        if (!raw.rawKpiValues) raw.rawKpiValues = {}
+        raw.rawKpiValues[engineKey] = strVal
+        continue
+      }
+
+      // 4. Looks like an attempted KPI reading (purely numeric) but matched
+      //    no active registry key — flag it instead of silently dropping it
+      //    into extras with no signal (Stage C: "reject or flag unknown
+      //    KPI keys... do not silently map unknown KPI values to Core fields").
+      if (strVal !== '' && trimmedKey.toLowerCase() !== 'notes' && NUMERIC_VALUE_RE.test(strVal)) {
+        if (!raw.unknownKpiColumns) raw.unknownKpiColumns = []
+        raw.unknownKpiColumns.push(trimmedKey)
+      }
+
+      // Store unmapped columns in extras
+      if (!raw.rawExtras) raw.rawExtras = {}
+      raw.rawExtras[trimmedKey] = strVal
     }
 
     return raw
   })
+}
+
+// ── 1b. Bulk Target import — registry-driven field resolution ──
+// Core KPI Dependency Removal — Closure Certification (Stage D):
+// bulk target import previously cherry-picked the 5 legacy `*Target`
+// fields by name. saveTarget() itself already accepts ANY key ending in
+// "Target" (no hardcoded allowlist) — this helper just forwards that
+// same dynamic contract to the bulk import path instead of re-imposing
+// a fixed list, while flagging `*Target` columns that don't match any
+// active registry KPI's targetField (informational only — the value is
+// still forwarded, since saveTarget's own naming convention is the
+// actual contract; this only flags likely typos for the admin to review).
+export interface TargetImportResult {
+  targetFields:         Record<string, number>
+  unknownTargetColumns: string[]
+}
+
+export function buildTargetImportPayload(
+  row:      Record<string, unknown>,
+  registry: KpiRegistry = DEFAULT_KPI_REGISTRY,
+): TargetImportResult {
+  const knownTargetFields = new Set(
+    Object.values(registry)
+      .filter((kpi) => kpi.isActive && kpi.targetField)
+      .map((kpi) => kpi.targetField as string),
+  )
+
+  const targetFields: Record<string, number> = {}
+  const unknownTargetColumns: string[] = []
+
+  for (const [key, val] of Object.entries(row)) {
+    if (!key.endsWith('Target')) continue
+    targetFields[key] = Number(val) || 0
+    if (!knownTargetFields.has(key)) unknownTargetColumns.push(key)
+  }
+
+  return { targetFields, unknownTargetColumns }
 }
 
 // ── 2. Resolve pharmacyId from code ──────────────────────────

@@ -19,12 +19,36 @@ export const COL = {
   NOTIFICATIONS:      'notifications',
   LEADERBOARD:        'leaderboard',
   KPI_REGISTRY:       'kpi_registry',
+  // KPI Registry Audit Trail — Milestone 3.5
+  // One document per KPI change event. Append-only — no updates or deletes.
+  KPI_AUDIT_LOGS:     'kpi_audit_logs',
   // Historical Data Layer V1
   DAILY_SUMMARIES:    'daily_summaries',
   MONTHLY_SUMMARIES:  'monthly_summaries',
   FORECAST_SNAPSHOTS: 'forecast_snapshots',
   RISK_SNAPSHOTS:     'risk_snapshots',
   RANKING_HISTORY:    'ranking_history',
+  // Ingestion Pipeline
+  STAGING_ENTRIES:    'staging_entries',
+  // RBAC Phase 1 — Territory Infrastructure
+  DISTRICTS:          'districts',
+  REGIONS:            'regions',
+  // Personal Targets — PT-1
+  PERSONAL_TARGETS:   'personal_targets',
+  // Evaluation Registry — ER-0
+  EVALUATION_PROFILES: 'evaluation_profiles',
+  // Evaluation Ledger — ER-2A
+  EVALUATION_RESULTS:  'evaluation_results',
+  // Branch Classification — RF-0
+  CLASSIFICATIONS:     'classifications',
+  // Ranking Snapshots — RF-1B
+  RANKING_SNAPSHOTS:   'ranking_snapshots',
+  // Demo Data — RF-0E
+  DEMO_BATCHES:        'demo_batches',
+  // V2 Shadow Evaluation Logs — diagnostic only, never affects official results
+  SHADOW_EVALUATION_LOGS: 'shadow_evaluation_logs',
+  // Runtime feature flags — read-only config for operational switches
+  SYSTEM_CONFIG:       'system_config',
 }
 
 // ── Config from .env ─────────────────────────────────────────

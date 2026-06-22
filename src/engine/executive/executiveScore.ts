@@ -5,10 +5,11 @@
 // ============================================================
 
 import {
-  KPI_KEYS, KPI_META, KPI_WEIGHTS,
+  KPI_KEYS, KPI_WEIGHTS,
   computeKpiStats, computeOverallAchievement,
   computePace, computeTrendDirection,
   sumKpi, extractDailyValues, getDayProgress,
+  getProductionEngineKeys, getKpiMetaForKey, getKpiWeightForKey,
 } from '../kpiAnalyticsEngine'
 
 import type { BranchInput } from './executiveTypes'
@@ -18,6 +19,18 @@ import {
   type KpiScoreBreakdown,
   GRADE_THRESHOLDS,
 } from './executiveTypes'
+
+// Protected Engines Migration Phase C — Executive BI.
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. kpiBreakdown's actual/target reads
+// are routed through the Dynamic Reader only where proven parity holds for
+// the live registry sample; otherwise they fall back to the exact
+// pre-migration computation. The overall/adjusted score formulas below are
+// derived only from kpiBreakdown, so parity-gated reads cannot change the
+// score whenever parity actually holds — and no call site passes a
+// registry yet, so production is unaffected.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Grade from score ──────────────────────────────────────────
 export function scoreToGrade(score: number): ExecutiveGrade {
@@ -93,24 +106,51 @@ function trendAdjustment(direction: string): number {
 }
 
 // ── Main scoring function ─────────────────────────────────────
-export function computeExecutiveScore(branch: BranchInput): ExecutiveScore {
+// registry is optional at this pure-function layer for backward
+// compatibility with its large existing test suite (no test may be
+// weakened). Core KPI Dependency Removal — No Silent Core Fallback
+// Closure: every ACTIVE PRODUCTION caller resolves and passes the live
+// registry at the orchestrator/hook boundary (see requireLiveRegistry()
+// in engine/kpiRegistry/registryGuard.ts) — this optional parameter is
+// exercised with `undefined` only by historical-compatibility tests.
+export function computeExecutiveScore(branch: BranchInput, registry?: KpiRegistry): ExecutiveScore {
   const dp = getDayProgress()
 
-  // Per-KPI breakdown
-  const kpiBreakdown: KpiScoreBreakdown[] = KPI_KEYS.map((kpiKey) => {
-    const actual = sumKpi(branch.mtdEntries, kpiKey)
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(branch.mtdEntries[0] ?? null, branch.target ?? null, registry, 'executiveBI')
+    : undefined
+
+  // Per-KPI breakdown.
+  // Core KPI Dependency Removal — Stage F: widens to every active
+  // production_evaluation KPI when a registry is supplied; identical to
+  // before (5 Core keys only) when absent. weightedScore is naturally
+  // weight-gated — a KPI with registry weight 0 (every current non-Core
+  // production KPI) contributes 0 to the overall score regardless of its
+  // achievementPct, so this widening is zero-drift today.
+  const breakdownKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const kpiBreakdown: KpiScoreBreakdown[] = breakdownKeys.map((kpiKey) => {
+    const actual = registry && policy
+      ? sumPilotActual(branch.mtdEntries as Record<string, unknown>[], kpiKey, registry, policy)
+      : sumKpi(branch.mtdEntries, kpiKey)
     // Safe target extraction — parse strings, exclude NaN/negative
-    const rawT = branch.target
-      ? branch.target[KPI_META[kpiKey].targetField as keyof typeof branch.target]
-      : undefined
-    const tgtN = typeof rawT === 'string' ? parseFloat(rawT) : Number(rawT ?? 0)
-    const target = (isNaN(tgtN) || !isFinite(tgtN) || tgtN <= 0) ? 0 : tgtN
+    const legacyTarget = () => {
+      const rawT = branch.target
+        ? branch.target[getKpiMetaForKey(kpiKey, registry).targetField as keyof typeof branch.target]
+        : undefined
+      const tgtN = typeof rawT === 'string' ? parseFloat(rawT) : Number(rawT ?? 0)
+      return (isNaN(tgtN) || !isFinite(tgtN) || tgtN <= 0) ? 0 : tgtN
+    }
+    const target = registry && policy
+      ? readPilotTarget(branch.target as Record<string, unknown> | null | undefined, kpiKey, registry, policy, legacyTarget)
+      : legacyTarget()
     const stats  = computeKpiStats(actual, target, dp, kpiKey)
-    const weight = KPI_WEIGHTS[kpiKey]
+    const weight = registry ? getKpiWeightForKey(kpiKey, registry) : KPI_WEIGHTS[kpiKey]
 
     return {
       kpiKey,
-      label:          KPI_META[kpiKey].en,
+      label:          getKpiMetaForKey(kpiKey, registry).en,
       actual,
       target,
       achievementPct: stats.achievementPct,
@@ -121,12 +161,14 @@ export function computeExecutiveScore(branch: BranchInput): ExecutiveScore {
   })
 
   // Weighted overall (same formula as kpiAnalyticsEngine)
+  // FIX: include target so computeOverallAchievement passes the !stat.target guard.
+  // Without target, every KPI was excluded → overall = 0 always.
   const kpiStatsMap = kpiBreakdown.reduce((acc, k) => {
-    acc[k.kpiKey] = { achievementPct: k.achievementPct }
+    acc[k.kpiKey] = { achievementPct: k.achievementPct, target: k.target }
     return acc
-  }, {} as Record<string, { achievementPct: number }>)
+  }, {} as Record<string, { achievementPct: number; target: number }>)
 
-  const overall = computeOverallAchievement(kpiStatsMap as any)
+  const overall = computeOverallAchievement(kpiStatsMap as any, KPI_WEIGHTS, false, registry)
 
   // Adjustments
   // Submission rate: prefer explicit fields, fall back to distinct userId count

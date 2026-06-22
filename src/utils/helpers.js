@@ -5,18 +5,37 @@
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns'
 import { ar } from 'date-fns/locale'
 
+// ── Centralized number/date locale (Number Locale Consistency bundle) ──
+// All numeric digits in this app must render as Western digits (0-9),
+// regardless of UI language — Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) were
+// leaking into English-mode screens because several call sites passed
+// 'ar-SA' explicitly (which defaults to the "arabext" numbering system)
+// or passed no locale at all (falling back to the browser/OS locale).
+// Every numeric formatter in the app should route through formatNumber()
+// below instead of calling toLocaleString directly with no locale (or
+// an implicit one). Text labels (currency symbol, role names, etc.) are
+// untouched — this only controls which digit glyphs are rendered.
+export const APP_NUMBER_LOCALE = 'en-US'
+
+export function formatNumber(value, options) {
+  if (value === null || value === undefined || value === '') return '—'
+  const num = Number(value)
+  if (Number.isNaN(num)) return '—'
+  return num.toLocaleString(APP_NUMBER_LOCALE, options)
+}
+
 // Format number based on KPI type
 export function formatKpiValue(value, type, unit = '') {
   if (value === null || value === undefined) return '—'
   switch (type) {
     case 'currency':
-      return `${Number(value).toLocaleString('ar-SA')} ${unit || 'ر.س'}`
+      return `${formatNumber(value)} ${unit || 'ر.س'}`
     case 'percentage':
       return `${Number(value).toFixed(1)}%`
     case 'boolean':
       return value ? '✓ نعم' : '✗ لا'
     case 'number':
-      return `${Number(value).toLocaleString('ar-SA')} ${unit || ''}`
+      return `${formatNumber(value)} ${unit || ''}`
     default:
       return `${value} ${unit || ''}`
   }

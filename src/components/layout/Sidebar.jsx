@@ -5,47 +5,90 @@ import React, { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
+  Map, Layers, UserCheck, ClipboardCheck, PlayCircle,
   Target, BarChart2, FileSpreadsheet, ShieldCheck, Settings,
   LogOut, Bell, X, PanelLeftClose, PanelLeft, BarChart3, Database,
+  GitBranch, Trophy, FlaskConical, Sparkles, CheckSquare, ListTodo, BookOpen, Bot,
 } from 'lucide-react'
 import { useAuthStore }    from '../../store/authStore'
 import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
 import Logo, { LogoIcon } from '../brand/Logo'
+import { useI18n }         from '../../hooks/useI18n'
+import PersonalIdentitySignature, { isSignatureIdentity } from '../identity/PersonalIdentitySignature'
 
+// UI3-D — Linear-style 3-group taxonomy: Intelligence Operations /
+// Data Architecture / Platform. "Actions" (and a couple of small
+// role-specific groups like "My Work"/"People") stay as their own
+// groups since they don't conceptually fit any of the 3 — every
+// existing route from before this regroup is still present and
+// permission-gated exactly as before; only group labels/order moved.
 const NAV_CONFIG = {
   admin: [
     { group: '', items: [
       { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
-    { group: 'Analytics', items: [
-      { icon: TrendingUp,      label: 'Reports',      path: '/reports' },
-      { icon: Target,          label: 'Targets',      path: '/targets' },
-      { icon: BarChart3,       label: 'Executive BI', path: '/executive' },
+    { group: 'Intelligence Operations', items: [
+      { icon: BarChart3,  label: 'Executive BI', path: '/executive' },
+      { icon: Trophy,     label: 'Rankings',     path: '/admin/rankings' },
+      { icon: Bot,        label: 'Assistant',    path: '/assistant' },
     ]},
-    { group: 'Administration', items: [
-      { icon: Building2,       label: 'Pharmacies', path: '/pharmacies' },
-      { icon: Users,           label: 'Users',      path: '/users' },
-      { icon: FileSpreadsheet, label: 'Import',     path: '/import' },
-      { icon: Database,       label: 'KPI Registry', path: '/admin/kpis' },
+    { group: 'Data Architecture', items: [
+      { icon: Database,        label: 'KPI Registry',          path: '/admin/kpis' },
+      { icon: FlaskConical,    label: 'Dynamic KPI Shadow',    path: '/admin/dynamic-kpi-shadow' },
+      { icon: BookOpen,        label: 'Profile Studio',        path: '/profile-studio' },
+      // ER-0 — Evaluation Registry (Evaluation Ledger analog)
+      { icon: ClipboardCheck,  label: 'Evaluation Registry',   path: '/admin/evaluation-registry' },
+      // ER-2A — Evaluation execution
+      { icon: PlayCircle,      label: 'Run Evaluation',        path: '/admin/evaluation-run' },
+      { icon: FileSpreadsheet, label: 'Import',                path: '/import' },
+      { icon: Building2,       label: 'Pharmacies',            path: '/pharmacies' },
+      { icon: Users,           label: 'Users',                 path: '/users' },
+      // RBAC Phase 1 — Territory Infrastructure
+      { icon: Map,    label: 'Regions',   path: '/admin/regions' },
+      { icon: Layers, label: 'Districts', path: '/admin/districts' },
+      // RF-0 — Branch Classification Foundation
+      { icon: GitBranch, label: 'Branch Classifications', path: '/admin/classifications' },
+      // RF-0E — Demo Data Seeder
+      { icon: FlaskConical, label: 'Demo Data', path: '/admin/demo-data' },
     ]},
-    { group: 'System', items: [
-      { icon: ShieldCheck,     label: 'Audit Log',      path: '/audit' },
-      { icon: Bell,            label: 'Notifications',   path: '/notifications' },
-      { icon: Settings,        label: 'Settings',        path: '/settings' },
+    { group: 'Actions / Work', items: [
+      { icon: CheckSquare, label: 'My Actions', path: '/actions/my'    },
+      { icon: ListTodo,    label: 'Task Board', path: '/actions/tasks' },
+    ]},
+    { group: 'Platform', items: [
+      { icon: TrendingUp,      label: 'Reports',          path: '/reports' },
+      { icon: Target,          label: 'Targets',          path: '/targets' },
+      { icon: UserCheck,       label: 'Personal Targets', path: '/personal-targets' },
+      { icon: ShieldCheck,     label: 'Audit Log',        path: '/audit' },
+      { icon: Bell,            label: 'Notifications',    path: '/notifications' },
+      { icon: Settings,        label: 'Settings',         path: '/settings' },
     ]},
   ],
   manager: [
     { group: '', items: [
       { icon: LayoutDashboard, label: 'Dashboard',  path: '/dashboard', exact: true },
     ]},
-    { group: 'Analytics', items: [
-      { icon: TrendingUp, label: 'Reports',  path: '/reports' },
-      { icon: Target,     label: 'Targets',  path: '/targets' },
-      { icon: Users,      label: 'Team',     path: '/team' },
+    { group: 'My Work', items: [
+      { icon: ClipboardList, label: 'KPI Entry', path: '/entry' },
     ]},
-    { group: 'System', items: [
-      { icon: Bell,     label: 'Notifications', path: '/notifications' },
-      { icon: Settings, label: 'Settings',      path: '/settings' },
+    { group: 'Intelligence Operations', items: [
+      { icon: BarChart3,  label: 'Executive BI', path: '/executive' },
+      { icon: Users,      label: 'Team',         path: '/team' },
+      { icon: Bot,        label: 'Assistant',    path: '/assistant' },
+    ]},
+    { group: 'Data Architecture', items: [
+      { icon: BookOpen,   label: 'Profile Studio',   path: '/profile-studio' },
+    ]},
+    { group: 'Actions / Work', items: [
+      { icon: CheckSquare, label: 'My Actions', path: '/actions/my'    },
+      { icon: ListTodo,    label: 'Task Board', path: '/actions/tasks' },
+    ]},
+    { group: 'Platform', items: [
+      { icon: TrendingUp, label: 'Reports',          path: '/reports' },
+      { icon: Target,     label: 'Targets',          path: '/targets' },
+      { icon: UserCheck,  label: 'Personal Targets', path: '/personal-targets' },
+      { icon: Bell,       label: 'Notifications',    path: '/notifications' },
+      { icon: Settings,   label: 'Settings',         path: '/settings' },
     ]},
   ],
   pharmacist: [
@@ -53,17 +96,93 @@ const NAV_CONFIG = {
       { icon: LayoutDashboard, label: 'Dashboard',   path: '/dashboard', exact: true },
     ]},
     { group: 'My Work', items: [
-      { icon: ClipboardList, label: 'KPI Entry',    path: '/entry' },
-      { icon: TrendingUp,    label: 'Performance',  path: '/performance' },
+      { icon: ClipboardList, label: 'KPI Entry',   path: '/entry' },
     ]},
-    { group: 'System', items: [
+    { group: 'Intelligence Operations', items: [
+      { icon: TrendingUp, label: 'Performance',     path: '/performance' },
+      { icon: Sparkles,   label: 'My Intelligence', path: '/my-intelligence' },
+    ]},
+    { group: 'Actions / Work', items: [
+      { icon: CheckSquare, label: 'My Actions', path: '/actions/my' },
+    ]},
+    { group: 'Platform', items: [
       { icon: Bell,     label: 'Notifications', path: '/notifications' },
       { icon: Settings, label: 'Settings',      path: '/settings' },
     ]},
   ],
 }
 
-const ROLE_LABELS = { admin:'Admin', manager:'Manager', pharmacist:'Pharmacist' }
+// branch_manager: forward-compat alias for manager nav.
+// Not an active production role in the current deployment.
+// When branch_manager users are activated in future, they
+// will inherit manager nav (including Executive BI via the
+// same 'manager' role check if needed, or via their own
+// config at that point). Phase A routes use 'manager' only.
+NAV_CONFIG.branch_manager = NAV_CONFIG.manager
+
+// district_supervisor: territory oversight nav (Phase 3A).
+// No KPI Entry — supervisors manage territory, not individual data entry.
+// No Personal Targets — supervisors have no pharmacyId.
+NAV_CONFIG.district_supervisor = [
+  { group: '', items: [
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', exact: true },
+  ]},
+  { group: 'Intelligence Operations', items: [
+    { icon: BarChart3, label: 'Executive BI', path: '/executive' },
+    { icon: Users, label: 'Team', path: '/team' },
+    { icon: Bot, label: 'Assistant', path: '/assistant' },
+  ]},
+  { group: 'Data Architecture', items: [
+    { icon: UserCheck, label: 'People', path: '/users' },
+    { icon: BookOpen, label: 'Profile Studio', path: '/profile-studio' },
+  ]},
+  { group: 'Actions / Work', items: [
+    { icon: CheckSquare, label: 'My Actions', path: '/actions/my' },
+    { icon: ListTodo, label: 'Task Board', path: '/actions/tasks' },
+  ]},
+  { group: 'Platform', items: [
+    { icon: TrendingUp, label: 'Reports', path: '/reports' },
+    { icon: Target, label: 'Targets', path: '/targets' },
+    { icon: Bell, label: 'Notifications', path: '/notifications' },
+    { icon: Settings, label: 'Settings', path: '/settings' },
+  ]},
+]
+// Phase 3A-1B: regional_manager gets same nav as district_supervisor.
+NAV_CONFIG.regional_manager = NAV_CONFIG.district_supervisor
+
+// general_manager: executive nav + Actions Layer (Phase 3C-3D).
+NAV_CONFIG.general_manager = [
+  { group: '', items: [
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', exact: true },
+  ]},
+  { group: 'Intelligence Operations', items: [
+    { icon: BarChart3,  label: 'Executive BI',   path: '/executive' },
+    { icon: Users,      label: 'Team',           path: '/team' },
+    { icon: Bot,        label: 'Assistant',      path: '/assistant' },
+  ]},
+  { group: 'Data Architecture', items: [
+    { icon: BookOpen,   label: 'Profile Studio', path: '/profile-studio' },
+  ]},
+  { group: 'Actions / Work', items: [
+    { icon: CheckSquare, label: 'My Actions', path: '/actions/my'    },
+    { icon: ListTodo,    label: 'Task Board', path: '/actions/tasks' },
+  ]},
+  { group: 'Platform', items: [
+    { icon: TrendingUp, label: 'Reports',        path: '/reports' },
+    { icon: Target,     label: 'Targets',        path: '/targets' },
+    { icon: Bell,        label: 'Notifications', path: '/notifications' },
+    { icon: Settings,    label: 'Settings',      path: '/settings' },
+  ]},
+]
+
+const ROLE_LABELS = {
+  admin:               'Admin',
+  manager:             'Manager',
+  branch_manager:      'Branch Manager',
+  district_supervisor: 'District Supervisor',
+  regional_manager:    'Regional Manager',
+  pharmacist:          'Pharmacist',
+}
 
 function resolveNav(role) {
   return NAV_CONFIG[role] || NAV_CONFIG.pharmacist
@@ -120,6 +239,22 @@ export default function Sidebar({ mobileOpen, onClose }) {
   const location = useLocation()
   const { userProfile, logout } = useAuthStore()
   const { sidebarMode, toggleSidebar } = useSettingsStore()
+  const { t } = useI18n()
+
+  // Nav label i18n map — translates known sidebar labels to current language.
+  // Unknown labels fall through unchanged (safe for any hardcoded label).
+  const navLabel = (label) => {
+    const KEY_MAP = {
+      'Dashboard':    t('nav.dashboard'),
+      'Reports':      t('nav.reports'),
+      'Targets':      t('nav.targets'),
+      'Team':         t('nav.team'),
+      'Performance':  t('nav.performance'),
+      'KPI Entry':    t('nav.entry'),
+      'Settings':     t('nav.settings'),
+    }
+    return KEY_MAP[label] ?? label
+  }
 
   const role       = userProfile?.role || 'pharmacist'
   const navGroups  = resolveNav(role)
@@ -166,13 +301,19 @@ export default function Sidebar({ mobileOpen, onClose }) {
               {userProfile?.displayName?.[0] || 'U'}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold truncate leading-none"
-                   style={{ color: 'var(--text-primary)' }}>
-                {userProfile?.displayName}
-              </div>
-              <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {ROLE_LABELS[role] || role}
-              </div>
+              {isSignatureIdentity(userProfile?.displayName) ? (
+                <PersonalIdentitySignature name={userProfile.displayName} />
+              ) : (
+                <>
+                  <div className="text-xs font-semibold truncate leading-none"
+                       style={{ color: 'var(--text-primary)' }}>
+                    {userProfile?.displayName}
+                  </div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {ROLE_LABELS[role] || role}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -203,9 +344,10 @@ export default function Sidebar({ mobileOpen, onClose }) {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const active = isActive(item.path, item.exact)
+                const translatedItem = { ...item, label: navLabel(item.label) }
                 return collapsed && !isMobile
-                  ? <NavCollapsed key={item.path} item={item} active={active} onClick={() => go(item.path)} />
-                  : <NavExpanded  key={item.path} item={item} active={active} onClick={() => go(item.path)} />
+                  ? <NavCollapsed key={item.path} item={translatedItem} active={active} onClick={() => go(item.path)} />
+                  : <NavExpanded  key={item.path} item={translatedItem} active={active} onClick={() => go(item.path)} />
               })}
             </div>
           </div>

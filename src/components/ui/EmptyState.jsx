@@ -1,5 +1,13 @@
 // ============================================================
 // EmptyState — Context-aware elegant placeholders
+//
+// `tone` added in UI 3.0 Product Surface Bundle (UI3-2E) — tints the
+// icon container using the same semantic tone vocabulary as
+// design/tokens.ts STATUS_TOKENS (positive/caution/negative/neutral),
+// so empty states can read as reassuring (neutral/positive) or
+// attention-worthy (caution/negative) without inventing a new color
+// system. Defaults to the existing muted look when omitted, so every
+// pre-existing call site renders unchanged.
 // ============================================================
 import React from 'react'
 import {
@@ -7,9 +15,11 @@ import {
   BarChart2, Zap, Building2, RefreshCw,
   ClipboardList, TrendingUp,
 } from 'lucide-react'
+import { getStatusToken } from '../../design/tokens'
 
 // ── Generic EmptyState (used across pages) ────────────────────
-export default function EmptyState({ icon: Icon, title, description, action, compact = false }) {
+export default function EmptyState({ icon: Icon, title, description, action, compact = false, tone }) {
+  const token = tone ? getStatusToken(tone) : null
   return (
     <div className="animate-fade-in" style={{
       display:'flex', flexDirection:'column', alignItems:'center',
@@ -22,10 +32,10 @@ export default function EmptyState({ icon: Icon, title, description, action, com
           borderRadius: compact ? '8px' : '10px',
           display:'flex', alignItems:'center', justifyContent:'center',
           marginBottom: compact ? '10px' : '12px',
-          background:'var(--bg-overlay)',
-          border:'1px solid var(--border-subtle)',
+          background: token?.bg ?? 'var(--bg-overlay)',
+          border: `1px solid ${token?.border ?? 'var(--border-subtle)'}`,
         }}>
-          <Icon style={{ width: compact ? 16 : 18, height: compact ? 16 : 18, color:'var(--text-muted)' }} strokeWidth={1.5} />
+          <Icon style={{ width: compact ? 16 : 18, height: compact ? 16 : 18, color: token?.color ?? 'var(--text-muted)' }} strokeWidth={1.5} />
         </div>
       )}
       <div style={{

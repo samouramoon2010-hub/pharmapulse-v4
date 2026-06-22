@@ -327,9 +327,9 @@ describe('DashboardPage — source patch verification', () => {
   it('no longer has a bare single-pharmacy target lookup for admin', () => {
     // Old: targets.find((t) => t.pharmacyId === pharmacyId && t.month === thisMonth)
     // Should NOT appear as the only target lookup — admin branch must aggregate
-    // Note: the manager/pharmacist branch still has a similar find, so check for isAdmin guard
-    expect(DASHBOARD_SRC).toContain('isAdmin')
-    expect(DASHBOARD_SRC).toMatch(/isAdmin[\s\S]{1,200}aggregated|aggregated[\s\S]{1,200}isAdmin/m)
+    // Note: the manager/pharmacist branch still has a similar find, so check for scope guard
+    expect(DASHBOARD_SRC).toContain("scope?.type === 'all'")
+    expect(DASHBOARD_SRC).toMatch(/scope\?\.type === 'all'[\s\S]{1,200}aggregated|aggregated[\s\S]{1,200}scope\?\.type === 'all'/m)
   })
 
   it('admin path aggregates by summing Target fields', () => {

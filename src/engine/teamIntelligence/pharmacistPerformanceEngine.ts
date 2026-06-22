@@ -11,7 +11,19 @@ import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
   computeKpiStats, computePace, getDayProgress,
   sumKpi, computeAchievementPct, getTrafficLight,
-  findWeakestKpi, findStrongestKpi, computeOverallAchievement, safeReadTarget } from '../kpiAnalyticsEngine'
+  findWeakestKpi, findStrongestKpi, computeOverallAchievement, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey, getKpiWeightForKey, type KpiKey } from '../kpiAnalyticsEngine'
+
+// Protected Engines Migration Phase A — Team Intelligence Engine.
+// registry is optional everywhere below: when omitted (the case at every
+// current production call site), every function below uses the exact
+// pre-migration legacy computation, byte-for-byte. When a registry IS
+// supplied, sumPilotActual/readPilotTarget become the source only when
+// parity is proven for that KPI against a real sample — otherwise they
+// silently fall back to the same legacy computation. No call site has
+// been changed to pass a registry yet; this phase only adds the capability.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 import type {
   PharmacistInput,
@@ -21,6 +33,41 @@ import type {
   OperationalRisk,
   CoachingPriority,
 } from './teamIntelligenceTypes'
+
+// ── PT-2: personal target resolver ───────────────────────────
+//
+// Returns the effective target value for a KPI key, preferring the
+// pharmacist's personal target when available and falling back to the
+// branch target. This is the single resolution point — no other part
+// of this engine needs to know about personal targets directly.
+//
+// personalTarget.targets is keyed by targetFieldName (e.g. 'wasfatyTarget').
+// KPI_META[k].targetField is the same naming scheme.
+// Direct field access is safe here because KPI_META covers all KPI_KEYS.
+function resolveTargetValue(
+  kpiKey:         KpiKey,
+  branchTarget:   import('../kpiAnalyticsEngine').MonthlyTarget | null,
+  personalTarget: import('../../services/personalTargetService').PersonalTargetDoc | null | undefined,
+  registry?:      KpiRegistry,
+  policy?:        PilotPolicy,
+): number {
+  // Personal target takes precedence when present and non-zero
+  if (personalTarget?.targets) {
+    const fieldName = getKpiMetaForKey(kpiKey, registry).targetField
+    const personal  = personalTarget.targets[fieldName]
+    if (personal != null && personal > 0) return personal
+    // Personal target exists but this field is zero/missing → use zero
+    // (the manager explicitly gave this pharmacist no target for this KPI)
+    if (personal != null) return 0
+  }
+  // Fall back to branch target
+  if (!branchTarget) return 0
+  const legacyRead = () => safeReadTarget(branchTarget as any, getKpiMetaForKey(kpiKey, registry).targetField)
+  if (registry && policy) {
+    return readPilotTarget(branchTarget as any, kpiKey, registry, policy, legacyRead)
+  }
+  return legacyRead()
+}
 
 // ── EMA smoother ──────────────────────────────────────────────
 function ema(values: number[], alpha = 0.4): number {
@@ -40,14 +87,20 @@ function cv(values: number[]): number {
 
 // ── Daily values for a KPI ────────────────────────────────────
 function dailyKpi(
-  entries: PharmacistInput['mtdEntries'],
-  kpiKey:  typeof KPI_KEYS[number],
-  now:     Date,
-  days:    number,
+  entries:  PharmacistInput['mtdEntries'],
+  kpiKey:   KpiKey,
+  now:      Date,
+  days:     number,
+  registry?: KpiRegistry,
+  policy?:   PilotPolicy,
 ): number[] {
   return Array.from({ length: days }, (_, i) => {
     const d = format(subDays(now, days - 1 - i), 'yyyy-MM-dd')
-    return entries.filter(e => e.date === d).reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+    const dayEntries = entries.filter(e => e.date === d)
+    if (registry && policy) {
+      return sumPilotActual(dayEntries as Record<string, unknown>[], kpiKey, registry, policy)
+    }
+    return dayEntries.reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
   })
 }
 
@@ -56,6 +109,8 @@ function dailyKpi(
 export function computeConsistencyScore(
   input:     PharmacistInput,
   now:       Date = new Date(),
+  registry?: KpiRegistry,
+  policy?:   PilotPolicy,
 ): number {
   const submissionRate = input.expectedSubmissionDays > 0
     ? input.actualSubmissionDays / input.expectedSubmissionDays
@@ -63,10 +118,11 @@ export function computeConsistencyScore(
 
   // Average CV across KPIs from last 14 days
   const hist = input.historicalEntries ?? input.mtdEntries
-  const avgCV = KPI_KEYS.reduce((sum, k) => {
-    const vals = dailyKpi(hist, k, now, 14)
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const avgCV = keys.reduce((sum, k) => {
+    const vals = dailyKpi(hist, k, now, 14, registry, policy)
     return sum + cv(vals)
-  }, 0) / KPI_KEYS.length
+  }, 0) / keys.length
 
   // Score: high submission rate × low variance
   const varianceScore = Math.max(0, 1 - Math.min(avgCV, 1))
@@ -77,12 +133,14 @@ export function computeConsistencyScore(
 export function computePharmacistMomentum(
   input: PharmacistInput,
   now:   Date = new Date(),
+  registry?: KpiRegistry,
+  policy?:   PilotPolicy,
 ): { direction: MomentumDirection; delta: number } {
   const hist = input.historicalEntries ?? input.mtdEntries
 
   // Use the primary KPI (wasfaty by weight) for momentum direction
   const primary = 'wasfaty'
-  const vals14  = dailyKpi(hist, primary, now, 14)
+  const vals14  = dailyKpi(hist, primary, now, 14, registry, policy)
 
   const thisWeek = ema(vals14.slice(7))
   const prevWeek = ema(vals14.slice(0, 7))
@@ -92,11 +150,13 @@ export function computePharmacistMomentum(
     : 0
 
   // Cross-KPI weighted momentum
-  const kpiDeltas = KPI_KEYS.map(k => {
-    const v = dailyKpi(hist, k, now, 14)
+  const momentumKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const kpiDeltas = momentumKeys.map(k => {
+    const v = dailyKpi(hist, k, now, 14, registry, policy)
     const tw = ema(v.slice(7))
     const pw = ema(v.slice(0, 7))
-    return pw > 0 ? ((tw - pw) / pw) * 100 * (KPI_WEIGHTS[k] ?? 0.2) : 0
+    const weight = registry ? getKpiWeightForKey(k, registry) : (KPI_WEIGHTS[k] ?? 0.2)
+    return pw > 0 ? ((tw - pw) / pw) * 100 * weight : 0
   })
   const weightedDelta = Math.round(kpiDeltas.reduce((s, v) => s + v, 0))
 
@@ -137,7 +197,7 @@ function deriveCoachingPriority(
 // ── Coaching focus areas ──────────────────────────────────────
 function deriveCoachingFocusAreas(
   snapshots: KpiSnapshot[],
-): typeof KPI_KEYS[number][] {
+): KpiKey[] {
   return snapshots
     .filter(s => s.achievementPct < 75 && s.target > 0)
     .sort((a, b) => a.achievementPct - b.achievementPct)
@@ -149,6 +209,8 @@ function deriveCoachingFocusAreas(
 function detectImprovingAfterSupport(
   input: PharmacistInput,
   now:   Date,
+  registry?: KpiRegistry,
+  policy?:   PilotPolicy,
 ): boolean {
   const hist = input.historicalEntries ?? input.mtdEntries
   if (hist.length < 6) return false
@@ -158,13 +220,18 @@ function detectImprovingAfterSupport(
   const dp = getDayProgress(now)
 
   // Compute achievement in last 7 days vs prior 7 days per KPI
-  const recentAch = KPI_KEYS.reduce((sum, k) => {
+  const improvingKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const recentAch = improvingKeys.reduce((sum, k) => {
     const last7   = hist.slice(-7)
     const prior7  = hist.slice(-14, -7)
-    const tgt     = safeReadTarget(input.target as any, KPI_META[k].targetField)
+    const tgt     = resolveTargetValue(k, input.target, input.personalTarget, registry, policy)
     if (!tgt || !prior7.length) return sum
-    const recentRate = sumKpi(last7, k) / Math.max(last7.length, 1)
-    const priorRate  = sumKpi(prior7, k) / Math.max(prior7.length, 1)
+    const recentRate = (registry && policy
+      ? sumPilotActual(last7 as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(last7, k)) / Math.max(last7.length, 1)
+    const priorRate  = (registry && policy
+      ? sumPilotActual(prior7 as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(prior7, k)) / Math.max(prior7.length, 1)
     // Was below target pace in prior period?
     const targetDaily = tgt / 31
     const wasLow     = priorRate < targetDaily * 0.7
@@ -178,21 +245,60 @@ function detectImprovingAfterSupport(
 
 // ── Main function ─────────────────────────────────────────────
 export function computePharmacistPerformance(
-  input: PharmacistInput,
-  now:   Date = new Date(),
+  input:     PharmacistInput,
+  now:       Date = new Date(),
+  registry?: KpiRegistry,
 ): PharmacistPerformanceSummary {
   const dp    = getDayProgress(now)
   const month = format(now, 'yyyy-MM')
 
-  // Per-KPI snapshots
-  const kpiSnapshots: KpiSnapshot[] = KPI_KEYS.map(k => {
-    const actual = sumKpi(input.mtdEntries, k)
-    const target = input.target
-      ? safeReadTarget(input.target as any, KPI_META[k].targetField)
-      : 0
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy = registry
+    ? buildPilotPolicy(input.mtdEntries[0] ?? null, input.target ?? null, registry, 'branchIntelligence')
+    : undefined
+
+  // Per-KPI snapshots — PT-2: uses personal target when present, branch target as fallback
+  // Core KPI Dependency Removal — Stage F: widen to every active
+  // production_evaluation KPI when a registry is supplied; identical to
+  // before (5 Core keys only) when absent.
+  const snapshotKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const kpiSnapshots: KpiSnapshot[] = snapshotKeys.map(k => {
+    const actual         = registry && policy
+      ? sumPilotActual(input.mtdEntries as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(input.mtdEntries, k)
+    const target         = resolveTargetValue(k, input.target, input.personalTarget, registry, policy)
     const achievementPct = computeAchievementPct(actual, target)
     const status         = getTrafficLight(achievementPct, dp.ratio)
-    return { kpiKey: k, label: KPI_META[k].en, actual, target, achievementPct, status }
+
+    // B1 — Required Daily Units
+    const remaining      = Math.max(0, target - actual)
+    const requiredPerDay = (() => {
+      if (target <= 0)              return 0   // no target set
+      if (remaining <= 0)           return 0   // already achieved
+      if (dp.daysRemaining <= 0)    return 0   // month ended
+      const raw = remaining / dp.daysRemaining
+      return Math.round(raw * 10) / 10         // 1 decimal place
+    })()
+    const expectedToDate = target > 0
+      ? Math.round(target * dp.ratio * 10) / 10
+      : 0
+    const paceStatus: KpiSnapshot['paceStatus'] = (() => {
+      if (target <= 0)           return 'achieved'  // no target → treat as achieved
+      if (remaining <= 0)        return 'achieved'
+      if (actual >= expectedToDate * 1.05) return 'ahead'
+      if (actual >= expectedToDate * 0.95) return 'on_track'
+      if (dp.daysRemaining <= 0)            return 'critical'
+      const ratio = dp.daysRemaining > 0
+        ? (actual / Math.max(1, dp.currentDay)) / (target / Math.max(1, dp.totalDays))
+        : 0
+      if (ratio >= 0.9)  return 'behind'
+      return 'critical'
+    })()
+
+    return { kpiKey: k, label: getKpiMetaForKey(k, registry).en, actual, target, achievementPct, status,
+             remaining, requiredPerDay, expectedToDate, paceStatus }
   })
 
   // Weighted overall achievement
@@ -200,19 +306,22 @@ export function computePharmacistPerformance(
     kpiSnapshots.map(s => [s.kpiKey, { achievementPct: s.achievementPct }])
   )
   const overallAchPct = Math.round(
-    KPI_KEYS.reduce((sum, k) => sum + (kpiStatsMap[k]?.achievementPct ?? 0) * (KPI_WEIGHTS[k] ?? 0.2), 0)
+    snapshotKeys.reduce((sum, k) => {
+      const weight = registry ? getKpiWeightForKey(k, registry) : (KPI_WEIGHTS[k] ?? 0.2)
+      return sum + (kpiStatsMap[k]?.achievementPct ?? 0) * weight
+    }, 0)
   )
   const performanceScore = Math.min(100, overallAchPct)
 
   // Strongest / weakest
-  const strongestKpi = KPI_KEYS.reduce((best, k) =>
-    (kpiStatsMap[k]?.achievementPct ?? 0) > (kpiStatsMap[best]?.achievementPct ?? 0) ? k : best, KPI_KEYS[0])
-  const weakestKpi   = KPI_KEYS.reduce((worst, k) =>
-    (kpiStatsMap[k]?.achievementPct ?? Infinity) < (kpiStatsMap[worst]?.achievementPct ?? Infinity) ? k : worst, KPI_KEYS[0])
+  const strongestKpi = snapshotKeys.reduce((best, k) =>
+    (kpiStatsMap[k]?.achievementPct ?? 0) > (kpiStatsMap[best]?.achievementPct ?? 0) ? k : best, snapshotKeys[0])
+  const weakestKpi   = snapshotKeys.reduce((worst, k) =>
+    (kpiStatsMap[k]?.achievementPct ?? Infinity) < (kpiStatsMap[worst]?.achievementPct ?? Infinity) ? k : worst, snapshotKeys[0])
 
   // Consistency + momentum
-  const consistencyScore = computeConsistencyScore(input, now)
-  const { direction: momentumDirection, delta: momentumDelta } = computePharmacistMomentum(input, now)
+  const consistencyScore = computeConsistencyScore(input, now, registry, policy)
+  const { direction: momentumDirection, delta: momentumDelta } = computePharmacistMomentum(input, now, registry, policy)
 
   // Operational risk + coaching
   const operationalRisk  = deriveOperationalRisk(performanceScore, consistencyScore, momentumDirection)
@@ -225,7 +334,7 @@ export function computePharmacistPerformance(
     : 0
   const missedDays = Math.max(0, input.expectedSubmissionDays - input.actualSubmissionDays)
 
-  const improvingAfterSupport = detectImprovingAfterSupport(input, now)
+  const improvingAfterSupport = detectImprovingAfterSupport(input, now, registry, policy)
 
   return {
     userId:      input.userId,

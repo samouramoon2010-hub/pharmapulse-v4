@@ -5,9 +5,19 @@
 // ============================================================
 
 import { format, formatDistanceToNow, parseISO, subDays, differenceInHours } from 'date-fns'
-import { KPI_META, KPI_KEYS, sumKpi, computeAchievementPct, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
+import { KPI_KEYS, sumKpi, computeAchievementPct, getDayProgress, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey } from '../kpiAnalyticsEngine'
 import type { LiveAnalyticsInput, ActivityFeedItem, ActivityType, ActivitySeverity } from './liveAnalyticsTypes'
 import type { MonthlyTarget } from '../kpiAnalyticsEngine'
+
+// Protected Engines Migration Phase D — Live Analytics (Activity Feed).
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. Actual/target reads feeding feed
+// items are routed through the Dynamic Reader only where proven parity
+// holds against a real sample; otherwise they fall back to the exact
+// pre-migration computation. No call site passes a registry yet.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Event severity scoring ─────────────────────────────────────
 // Higher score = shown first in feed
@@ -59,27 +69,36 @@ function makeItem(
 
 // ── Today's KPI entry events ──────────────────────────────────
 // Collapsed: one item per KPI (not one per entry row)
-function todayEntryEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
+function todayEntryEvents(input: LiveAnalyticsInput, registry?: KpiRegistry, policy?: PilotPolicy): ActivityFeedItem[] {
   const { todayEntries, target, now } = input
   if (!todayEntries.length) return []
 
   const dp  = getDayProgress(now)
   const ts  = now.toISOString()
 
-  return KPI_KEYS
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  return keys
     .map((k) => {
-      const val = todayEntries.reduce((s, e) => s + (Number(e[k]) || 0), 0)
+      const val = registry && policy
+        ? sumPilotActual(todayEntries as Record<string, unknown>[], k, registry, policy)
+        : todayEntries.reduce((s, e) => s + (Number(e[k]) || 0), 0)
       if (val <= 0) return null
 
-      const tgt = target
-        ? safeReadTarget(target as any, KPI_META[k].targetField)
+      const legacyTarget = () => target
+        ? safeReadTarget(target as any, getKpiMetaForKey(k, registry).targetField)
         : 0
-      const mtd = sumKpi(input.mtdEntries, k)
+      const tgt = registry && policy
+        ? readPilotTarget(target as Record<string, unknown> | null | undefined, k, registry, policy, legacyTarget)
+        : legacyTarget()
+      const mtd = registry && policy
+        ? sumPilotActual(input.mtdEntries as Record<string, unknown>[], k, registry, policy)
+        : sumKpi(input.mtdEntries, k)
       const ach = tgt > 0 ? computeAchievementPct(mtd, tgt) : 0
+      const label = getKpiMetaForKey(k, registry).en
 
       return makeItem(
         'KPI_ENTRY', 'info',
-        `${KPI_META[k].en} — ${val.toLocaleString()} today`,
+        `${label} — ${val.toLocaleString()} today`,
         tgt > 0 ? `MTD: ${mtd.toLocaleString()} · ${ach}% of target` : 'Recorded',
         ts,
         { kpiKey: k, value: val },
@@ -89,23 +108,29 @@ function todayEntryEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
 }
 
 // ── Milestone events ──────────────────────────────────────────
-function milestoneEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
+function milestoneEvents(input: LiveAnalyticsInput, registry?: KpiRegistry, policy?: PilotPolicy): ActivityFeedItem[] {
   const { mtdEntries, target, now } = input
   if (!target) return []
   const ts = now.toISOString()
   const MILESTONES = [50, 75, 90, 100]
   const results: ActivityFeedItem[] = []
 
-  for (const k of KPI_KEYS) {
-    const actual = sumKpi(mtdEntries, k)
-    const tgt    = safeReadTarget(target as any, KPI_META[k].targetField)
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  for (const k of keys) {
+    const actual = registry && policy
+      ? sumPilotActual(mtdEntries as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(mtdEntries, k)
+    const tgt    = registry && policy
+      ? readPilotTarget(target as Record<string, unknown> | null | undefined, k, registry, policy, () => safeReadTarget(target as any, getKpiMetaForKey(k, registry).targetField))
+      : safeReadTarget(target as any, getKpiMetaForKey(k, registry).targetField)
     if (!tgt) continue
     const pct = computeAchievementPct(actual, tgt)
+    const label = getKpiMetaForKey(k, registry).en
 
     if (pct >= 100) {
       results.push(makeItem(
         'TARGET_HIT', 'success',
-        `${KPI_META[k].en} — Target Hit! 🎯`,
+        `${label} — Target Hit! 🎯`,
         `${actual.toLocaleString()} / ${tgt.toLocaleString()} — ${pct}%`,
         ts,
         { kpiKey: k, value: pct },
@@ -115,7 +140,7 @@ function milestoneEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
       if (nearest) {
         results.push(makeItem(
           'MILESTONE', 'success',
-          `${KPI_META[k].en} — ${nearest}% reached`,
+          `${label} — ${nearest}% reached`,
           `${actual.toLocaleString()} of ${tgt.toLocaleString()} this month`,
           ts,
           { kpiKey: k, value: nearest },
@@ -128,17 +153,19 @@ function milestoneEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
 
 // ── Pace change events (only meaningful shifts) ───────────────
 // Only surfaces changes > 15% and only for non-trivial values
-function paceChangeEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
+function paceChangeEvents(input: LiveAnalyticsInput, registry?: KpiRegistry, policy?: PilotPolicy): ActivityFeedItem[] {
   const { mtdEntries, now } = input
   const results: ActivityFeedItem[] = []
   const today     = format(now, 'yyyy-MM-dd')
   const yesterday = format(subDays(now, 1), 'yyyy-MM-dd')
 
-  for (const k of KPI_KEYS) {
-    const todayVal = mtdEntries.filter((e) => e.date === today)
-      .reduce((s, e) => s + (Number(e[k]) || 0), 0)
-    const yestVal  = mtdEntries.filter((e) => e.date === yesterday)
-      .reduce((s, e) => s + (Number(e[k]) || 0), 0)
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  for (const k of keys) {
+    const sum = (entries: typeof mtdEntries) => registry && policy
+      ? sumPilotActual(entries as Record<string, unknown>[], k, registry, policy)
+      : entries.reduce((s, e) => s + (Number(e[k]) || 0), 0)
+    const todayVal = sum(mtdEntries.filter((e) => e.date === today))
+    const yestVal  = sum(mtdEntries.filter((e) => e.date === yesterday))
 
     if (!yestVal || yestVal < 3 || !todayVal) continue  // suppress noise
 
@@ -146,10 +173,11 @@ function paceChangeEvents(input: LiveAnalyticsInput): ActivityFeedItem[] {
     if (Math.abs(changePct) < 15) continue
 
     const improving = changePct > 0
+    const label = getKpiMetaForKey(k, registry).en
     results.push(makeItem(
       'PACE_CHANGE',
       improving ? 'success' : 'warning',
-      `${KPI_META[k].en} ${improving ? '▲' : '▼'} ${Math.abs(changePct)}% vs yesterday`,
+      `${label} ${improving ? '▲' : '▼'} ${Math.abs(changePct)}% vs yesterday`,
       `Today: ${todayVal.toLocaleString()} · Yesterday: ${yestVal.toLocaleString()}`,
       now.toISOString(),
       { kpiKey: k, value: changePct },
@@ -170,11 +198,18 @@ function dayProgressEvent(input: LiveAnalyticsInput): ActivityFeedItem {
 }
 
 // ── Main feed generator ───────────────────────────────────────
-export function generateActivityFeed(input: LiveAnalyticsInput): ActivityFeedItem[] {
+export function generateActivityFeed(input: LiveAnalyticsInput, registry?: KpiRegistry): ActivityFeedItem[] {
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(input.mtdEntries[0] ?? null, input.target ?? null, registry, 'liveAnalytics')
+    : undefined
+
   const all = [
-    ...milestoneEvents(input),    // highest priority — milestones first
-    ...paceChangeEvents(input),
-    ...todayEntryEvents(input),
+    ...milestoneEvents(input, registry, policy),    // highest priority — milestones first
+    ...paceChangeEvents(input, registry, policy),
+    ...todayEntryEvents(input, registry, policy),
     dayProgressEvent(input),
   ]
 

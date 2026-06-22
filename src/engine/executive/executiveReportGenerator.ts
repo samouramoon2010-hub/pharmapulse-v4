@@ -9,7 +9,8 @@ import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
   sumKpi, computeAchievementPct, getTrafficLight,
   findWeakestKpi, findStrongestKpi, getDayProgress,
-  computeKpiStats, safeReadTarget } from '../kpiAnalyticsEngine'
+  computeKpiStats, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey, getKpiWeightForKey } from '../kpiAnalyticsEngine'
 
 import { computeExecutiveScore, scoreToGrade } from './executiveScore'
 import { computeBranchTrend }                  from './trendEngine'
@@ -28,36 +29,65 @@ import type {
   PortfolioRiskDistribution,
 } from './executiveTypes'
 
+// Branch Intelligence Registry Wiring Bundle — registry is optional and
+// simply passed through to computeExecutiveScore/computeBranchTrend/
+// computeBranchRiskProfile (all already registry-aware since the
+// Protected Engines Migration Bundle, Phase C), plus the local
+// weakest/strongest kpiStatsMap below, gated by dynamicReaderPilot.
+// No call site is required to pass a registry — when omitted, behavior
+// is byte-identical to before.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
+
 // ── Single branch summary ─────────────────────────────────────
 export function generateBranchSummary(
   branch:     BranchInput,
   reportDate: string,
   reportMonth: string,
+  registry?: KpiRegistry,
 ): BranchExecutiveSummary {
   const dp    = getDayProgress()
-  const score = computeExecutiveScore(branch)
-  const trend = computeBranchTrend(branch)
-  const risk  = computeBranchRiskProfile(branch)
+  const score = computeExecutiveScore(branch, registry)
+  const trend = computeBranchTrend(branch, registry)
+  const risk  = computeBranchRiskProfile(branch, registry)
 
-  // KPI stats map for weakest/strongest detection
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(branch.mtdEntries[0] ?? null, branch.target ?? null, registry, 'executiveBI')
+    : undefined
+
+  // KPI stats map for weakest/strongest detection.
+  // Core KPI Dependency Removal — Stage F: widens to every active
+  // production_evaluation KPI when a registry is supplied; identical to
+  // before (5 Core keys only) when absent.
+  const statsKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
   const kpiStatsMap = Object.fromEntries(
-    KPI_KEYS.map((k) => {
-      const actual = sumKpi(branch.mtdEntries, k)
-      const target = branch.target
-        ? safeReadTarget(branch.target as any, KPI_META[k].targetField)
+    statsKeys.map((k) => {
+      const actual = registry && policy
+        ? sumPilotActual(branch.mtdEntries as Record<string, unknown>[], k, registry, policy)
+        : sumKpi(branch.mtdEntries, k)
+      const legacyTarget = () => branch.target
+        ? safeReadTarget(branch.target as any, getKpiMetaForKey(k, registry).targetField)
         : 0
+      const target = registry && policy
+        ? readPilotTarget(branch.target as Record<string, unknown> | null | undefined, k, registry, policy, legacyTarget)
+        : legacyTarget()
       return [k, computeKpiStats(actual, target, dp, k)]
     })
   )
 
-  const weakestKpi   = findWeakestKpi(kpiStatsMap as any)
-  const strongestKpi = findStrongestKpi(kpiStatsMap as any)
+  const weakestKpi   = findWeakestKpi(kpiStatsMap as any, registry)
+  const strongestKpi = findStrongestKpi(kpiStatsMap as any, registry)
 
-  // Weighted overall achievement
+  // Weighted overall achievement — weight-gated, so KPIs with registry
+  // weight 0 (every current non-Core production KPI) contribute 0
+  // regardless of achievementPct. Zero-drift today.
   const overallAchPct = Math.round(
-    KPI_KEYS.reduce((sum, k) => {
+    statsKeys.reduce((sum, k) => {
       const s = kpiStatsMap[k]
-      return sum + (s?.achievementPct ?? 0) * (KPI_WEIGHTS[k] ?? 0.2)
+      const weight = registry ? getKpiWeightForKey(k, registry) : (KPI_WEIGHTS[k] ?? 0.2)
+      return sum + (s?.achievementPct ?? 0) * weight
     }, 0)
   )
 
@@ -84,13 +114,13 @@ export function generateBranchSummary(
 }
 
 // ── Full portfolio report ─────────────────────────────────────
-export function generateExecutiveReport(input: ExecutiveReportInput): ExecutiveReport {
+export function generateExecutiveReport(input: ExecutiveReportInput, registry?: KpiRegistry): ExecutiveReport {
   const { branches, reportDate, reportMonth, generatedBy } = input
   const reportId = `exec-${reportDate}-${Date.now()}`
 
   // Generate per-branch summaries
   const allSummaries = branches.map((b) =>
-    generateBranchSummary(b, reportDate, reportMonth)
+    generateBranchSummary(b, reportDate, reportMonth, registry)
   )
 
   // Risk distribution
@@ -107,14 +137,19 @@ export function generateExecutiveReport(input: ExecutiveReportInput): ExecutiveR
   // A branch with no target for KPI X is excluded from KPI X's portfolio calculation
   // entirely — including its actual — to prevent denominator/numerator asymmetry
   // that would produce artificially inflated achievement percentages.
+  // Core KPI Dependency Removal — Stage F: widens to every active
+  // production_evaluation KPI when a registry is supplied. Each KPI's
+  // portfolio aggregate is independent (no shared denominator across
+  // KPIs), so widening adds entries without changing any existing one.
+  const portfolioAchKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
   const portfolioAch = Object.fromEntries(
-    KPI_KEYS.map((k) => {
+    portfolioAchKeys.map((k) => {
       let totalActual = 0
       let totalTarget = 0
 
       for (const b of branches) {
         const t = b.target
-          ? safeReadTarget(b.target as any, KPI_META[k].targetField)
+          ? safeReadTarget(b.target as any, getKpiMetaForKey(k, registry).targetField)
           : 0
 
         // Only include this branch in the portfolio aggregate when it has

@@ -3,16 +3,11 @@
 // Receives pre-computed BranchExecutiveSummary. No analytics.
 // ============================================================
 import React from 'react'
+import { Link } from 'react-router-dom'
 import { X, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { GRADE_COLORS, GRADE_BG, GRADE_BORDER } from '../../engine/executive'
 import { TRAFFIC_COLORS } from '../../engine'
-
-const RISK_CFG = {
-  ON_TRACK:    { label: 'On Track',    color: '#22c55e', bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.2)'   },
-  LOW_RISK:    { label: 'Low Risk',    color: '#00d2ad', bg: 'rgba(0,210,173,0.08)',   border: 'rgba(0,210,173,0.2)'   },
-  MEDIUM_RISK: { label: 'Medium Risk', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.2)'  },
-  HIGH_RISK:   { label: 'High Risk',   color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)'   },
-}
+import { RISK_LEVEL_COLORS as RISK_CFG } from '../../design/tokens'
 
 function TrendIcon({ direction }) {
   if (direction === 'ACCELERATING' || direction === 'IMPROVING')
@@ -154,6 +149,23 @@ export default function BranchDrilldown({ branch, onClose }) {
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
             {branch.recommendations[0].body}
           </div>
+        </div>
+      )}
+
+      {/* Branch Intelligence deep-link — only rendered when pharmacyId is known */}
+      {branch.pharmacyId && (
+        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+          <Link
+            to={`/branch/${branch.pharmacyId}/intelligence`}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              padding: '8px 12px', borderRadius: '7px', fontSize: '12px', fontWeight: 600,
+              border: '1px solid var(--border-subtle)', background: 'transparent',
+              color: 'var(--text-secondary)', textDecoration: 'none',
+            }}
+          >
+            View Branch Intelligence →
+          </Link>
         </div>
       )}
     </div>

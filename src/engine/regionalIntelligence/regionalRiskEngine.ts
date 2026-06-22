@@ -21,7 +21,7 @@
 //   rollup source for trend analysis over quarterly periods.
 // ============================================================
 
-import { KPI_META, KPI_KEYS } from '../kpiAnalyticsEngine'
+import { getKpiMetaForKey } from '../kpiAnalyticsEngine'
 
 import type { KpiKey } from '../kpiAnalyticsEngine'
 
@@ -114,7 +114,7 @@ function detectRiskReasons(
       k.meanAchievementPct < THRESHOLDS.weakKpiAchievementFloor,
   )
   if (weakKpis.length >= THRESHOLDS.weakKpiClusterCount) {
-    const kpiNames = weakKpis.map((k) => KPI_META[k.kpiKey].en).join(', ')
+    const kpiNames = weakKpis.map((k) => getKpiMetaForKey(k.kpiKey).en).join(', ')
     reasons.push({
       code:        'WEAK_KPI_CLUSTER',
       description: `${weakKpis.length} KPIs are below ${THRESHOLDS.weakKpiAchievementFloor}% regional achievement: ${kpiNames}.`,
@@ -184,7 +184,7 @@ function buildPriorityFocusAreas(
   // KPI focus area — based on weakest KPIs
   const weakKpis = rollup.weakestKpis
   if (weakKpis.length > 0) {
-    const kpiNames = weakKpis.map((k) => KPI_META[k].en).join(' & ')
+    const kpiNames = weakKpis.map((k) => getKpiMetaForKey(k).en).join(' & ')
     const weakAvg  = rollup.kpiAverages
       .filter((k) => weakKpis.includes(k.kpiKey))
       .map((k) => k.meanAchievementPct)

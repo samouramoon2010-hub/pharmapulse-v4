@@ -6,11 +6,13 @@
 // No business logic here — all analytics in the engine layer.
 // ============================================================
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format, getDaysInMonth } from 'date-fns'
 
 import { useKpiStore }      from '../store/kpiStore'
 import { usePharmacyStore } from '../store/pharmacyStore'
+import { useScopeProfile }         from './useScopeProfile'
+import { filterAllowedPharmacies } from '../services/scopeResolver'
 
 import {
   filterToCurrentMonth,
@@ -22,12 +24,17 @@ import {
   generateRegionalIntelligence,
 } from '../engine/regionalIntelligence'
 
+import { subscribeKpiRegistry } from '../services/kpiRegistryService'
+import { DEFAULT_KPI_REGISTRY } from '../engine/kpiRegistry'
+
 import type {
   BranchRollupInput,
+  BranchRollupSummary,
   RegionalPeriod,
   RegionalIntelligenceOutput,
 } from '../engine/regionalIntelligence'
 
+import type { KpiRegistry } from '../engine/kpiRegistry'
 import type { KpiEntry, MonthlyTarget } from '../engine'
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -66,10 +73,13 @@ function buildCurrentPeriod(): RegionalPeriod {
 // ── Hook return shape ─────────────────────────────────────────
 
 export interface UseRegionalIntelligenceResult {
-  intelligence: RegionalIntelligenceOutput | null
-  loading:      boolean
+  intelligence:  RegionalIntelligenceOutput | null
+  branchRollups: BranchRollupSummary[]
+  /** Live KPI registry — dynamic/custom production KPIs included automatically. */
+  liveRegistry:  KpiRegistry
+  loading:       boolean
   /** True when stores have data but no branches found */
-  empty:        boolean
+  empty:         boolean
 }
 
 // ── Main hook ─────────────────────────────────────────────────
@@ -77,8 +87,20 @@ export interface UseRegionalIntelligenceResult {
 export function useRegionalIntelligence(): UseRegionalIntelligenceResult {
   const { entries, targets, loading: kpiLoading }  = useKpiStore()
   const { pharmacies, loading: pharmacyLoading }   = usePharmacyStore()
+  const { scope, loading: scopeLoading }           = useScopeProfile()
 
-  const loading = kpiLoading || pharmacyLoading
+  const loading = kpiLoading || pharmacyLoading || scopeLoading
+
+  // ── Live KPI registry — dynamic/custom production KPIs ───
+  // Same subscribe-with-fallback pattern used by other pages
+  // (TargetsPage, SettingsPage, DashboardPage, etc.).
+  const [liveRegistry, setLiveRegistry] = useState<KpiRegistry>(DEFAULT_KPI_REGISTRY)
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      () => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
 
   // ── Build reporting period ────────────────────────────────
   // Captured once per render; stable within the same day.
@@ -95,17 +117,26 @@ export function useRegionalIntelligence(): UseRegionalIntelligenceResult {
     [today_], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
+  // ── Phase 2G-2: scope-driven pharmacy list ────────────────
+  // Mirrors the fix in useExecutiveReport — same scope resolver pattern.
+  // scope null → [] (loading); all → full list; single → own branch;
+  // list → assigned branches; none → [].
+  const scopedPharmacies = useMemo(() => {
+    if (!scope) return []
+    return filterAllowedPharmacies(scope, pharmacies)
+  }, [scope, pharmacies])
+
   // ── Assemble BranchRollupInput[] ─────────────────────────
   // Reuses the same store data already loaded by useExecutiveReport.
   // Zero additional Firestore reads.
   const branchInputs = useMemo<BranchRollupInput[]>(() => {
-    if (loading || !pharmacies.length) return []
+    if (loading || !scopedPharmacies.length) return []
 
     const today        = today_
     const historyStart = historyStart_
     const currentMonth = currentMonth_
 
-    return pharmacies
+    return scopedPharmacies
       .filter((p) => p.active !== false)
       .map((pharmacy): BranchRollupInput => {
         const pharmacyEntries = (entries as KpiEntry[]).filter(
@@ -138,25 +169,31 @@ export function useRegionalIntelligence(): UseRegionalIntelligenceResult {
           submittedToday,
         }
       })
-  }, [entries, targets, pharmacies, loading, today_, currentMonth_, historyStart_])
+  }, [entries, targets, scopedPharmacies, loading, today_, currentMonth_, historyStart_])
 
   // ── Build BranchRollupSummary[] + generate intelligence ──
   // Both steps are pure engine calls — no business logic here.
-  const intelligence = useMemo<RegionalIntelligenceOutput | null>(() => {
-    if (!branchInputs.length) return null
+  const [branchRollups, intelligence] = useMemo<[BranchRollupSummary[], RegionalIntelligenceOutput | null]>(() => {
+    if (!branchInputs.length) return [[], null]
 
     const rollupSummaries = branchInputs.map((input) =>
-      generateBranchRollup(input, period),
+      generateBranchRollup(input, period, liveRegistry),
     )
 
-    return generateRegionalIntelligence({
-      branchRollups: rollupSummaries,
-      period,
-    })
-  }, [branchInputs, period])
+    return [
+      rollupSummaries,
+      generateRegionalIntelligence({
+        branchRollups: rollupSummaries,
+        period,
+        registry: liveRegistry,
+      }),
+    ]
+  }, [branchInputs, period, liveRegistry])
 
   return {
     intelligence,
+    branchRollups,
+    liveRegistry,
     loading,
     empty: !loading && !intelligence,
   }

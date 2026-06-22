@@ -2,36 +2,38 @@
 // PortfolioKpiHeatmap — renders pre-computed portfolio KPI data
 // Receives processed ExecutiveReport output. No analytics here.
 //
-// INTENTIONALLY CORE-ANALYTICS-ONLY (by design):
-//   Uses KPI_KEYS + KPI_META from kpiAnalyticsEngine.
-//   Renders only the 5 core KPIs that ExecutiveReport computes.
-//   Custom KPIs are not yet scored by the executive engine;
-//   they will appear here once executiveEngine is extended.
-//   This is documented as a deferred non-blocking limitation.
+// Core KPI Dependency Removal — No Silent Core Fallback Closure:
+// renders every key present in report.portfolioAch (already
+// resolved by the executive engine from the live registry passed
+// in by ExecutiveDashboard.jsx). Falls back to the fixed Core list
+// only when no registry is supplied, mirroring the engine's own
+// optional-registry contract.
 //
 // Phase 5B safety: cfg guaranteed via ?? TRAFFIC_COLORS.good
 // fallback — no crash if ach.status is unexpected.
 // ============================================================
 import React from 'react'
-import { TRAFFIC_COLORS, KPI_META, KPI_KEYS } from '../../engine'
+import { TRAFFIC_COLORS, KPI_KEYS, getProductionEngineKeys, getKpiMetaForKey } from '../../engine'
+import { formatNumber } from '../../utils/helpers'
 
 
-export default function PortfolioKpiHeatmap({  report  }) {
+export default function PortfolioKpiHeatmap({  report, isManager, registry  }) {
   const { portfolioAch } = report
+  const kpiKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
 
   return (
     <div className="card" style={{ padding: '20px', background: 'var(--bg-surface)' }}>
       <div style={{ marginBottom: '16px' }}>
-        <div className="section-title">Portfolio KPI Achievement</div>
-        <div className="section-subtitle">Aggregate across all active branches · {report.reportMonth}</div>
+        <div className="section-title">{isManager ? 'Branch KPI Achievement' : 'Portfolio KPI Achievement'}</div>
+        <div className="section-subtitle">{isManager ? report.reportMonth : `Aggregate across all active branches · ${report.reportMonth}`}</div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {KPI_KEYS.map((kpiKey) => {
+        {kpiKeys.map((kpiKey) => {
           const ach    = portfolioAch[kpiKey]
           if (!ach) return null
-          const cfg    = TRAFFIC_COLORS[ach.status] ?? TRAFFIC_COLORS.good ?? { color: '#a1a1aa', bg: 'transparent', border: '#a1a1aa', labelAr: '—' }
-          const meta   = KPI_META[kpiKey] ?? { en: kpiKey, ar: kpiKey, unit: '', targetField: '' }
+          const cfg    = TRAFFIC_COLORS[ach.status] ?? TRAFFIC_COLORS.good ?? { color: '#a1a1aa', bg: 'transparent', border: '#a1a1aa', label: '—' }
+          const meta   = getKpiMetaForKey(kpiKey, registry)
           const pct    = Math.min(ach.achievementPct, 100)
 
           return (
@@ -62,7 +64,7 @@ export default function PortfolioKpiHeatmap({  report  }) {
                     border: `1px solid ${cfg.border}`,
                     fontWeight: 500,
                   }}>
-                    {cfg.labelAr}
+                    {cfg.label}
                   </span>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: cfg.color, fontVariantNumeric: 'tabular-nums' }}>
                     {ach.achievementPct}%
@@ -82,10 +84,10 @@ export default function PortfolioKpiHeatmap({  report  }) {
               {/* Bottom row: actual vs target */}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  Actual: {ach.totalActual.toLocaleString()} {meta.unit}
+                  Actual: {formatNumber(ach.totalActual)} {meta.unit}
                 </span>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  Target: {ach.totalTarget.toLocaleString()}
+                  Target: {formatNumber(ach.totalTarget)}
                 </span>
               </div>
             </div>

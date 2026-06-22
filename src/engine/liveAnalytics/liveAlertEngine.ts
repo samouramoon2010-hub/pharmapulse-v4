@@ -5,9 +5,19 @@
 // ============================================================
 
 import { format, subDays, differenceInMinutes, parseISO } from 'date-fns'
-import { KPI_META, KPI_KEYS, getDayProgress } from '../kpiAnalyticsEngine'
+import { KPI_KEYS, getDayProgress, getProductionEngineKeys, getKpiMetaForKey } from '../kpiAnalyticsEngine'
 import type { LiveAnalyticsInput, KpiHealthSignal } from './liveAnalyticsTypes'
 import type { LiveAlert, AlertType, AlertPriority } from './liveAnalyticsTypes'
+
+// Protected Engines Migration Phase D — Live Analytics (Alerts).
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. The raw mtdEntries reads used to
+// detect declines/pace drops are routed through the Dynamic Reader only
+// where proven parity holds against a real sample; otherwise they fall
+// back to the exact pre-migration computation. Alert thresholds and
+// formulas are completely untouched. No call site passes a registry yet.
+import { buildPilotPolicy, sumPilotActual, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Alert fingerprint (for cooldown / dedup) ──────────────────
 function fingerprint(type: AlertType, kpiKey?: string): string {
@@ -155,15 +165,18 @@ function targetHitAlerts(health: KpiHealthSignal[]): LiveAlert[] {
 
 // IMPROVED: requires 3 consecutive days AND a minimum absolute value
 // Prevents firing on near-zero data (0→0→0 trivially "declines")
-function consecutiveDeclineAlerts(input: LiveAnalyticsInput): LiveAlert[] {
+function consecutiveDeclineAlerts(input: LiveAnalyticsInput, registry?: KpiRegistry, policy?: PilotPolicy): LiveAlert[] {
   const { mtdEntries, now } = input
   const results: LiveAlert[] = []
 
-  for (const k of KPI_KEYS) {
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  for (const k of keys) {
     const days = Array.from({ length: 4 }, (_, i) => {
       const d = format(subDays(now, i), 'yyyy-MM-dd')
-      return mtdEntries.filter((e) => e.date === d)
-        .reduce((s, e) => s + (Number(e[k as keyof typeof e]) || 0), 0)
+      const dayEntries = mtdEntries.filter((e) => e.date === d)
+      return registry && policy
+        ? sumPilotActual(dayEntries as Record<string, unknown>[], k, registry, policy)
+        : dayEntries.reduce((s, e) => s + (Number(e[k as keyof typeof e]) || 0), 0)
     }).reverse()
 
     // Require: 3-day decline AND minimum value (not near-zero noise)
@@ -172,10 +185,11 @@ function consecutiveDeclineAlerts(input: LiveAnalyticsInput): LiveAlert[] {
 
     if (!isDecline) continue
 
+    const label = getKpiMetaForKey(k, registry).en
     results.push(makeAlert(
       'CONSECUTIVE_DECLINE', 'warning',
-      `${KPI_META[k].en} — 3-Day Decline`,
-      `${KPI_META[k].en} declining for 3 consecutive days. Review today's submission.`,
+      `${label} — 3-Day Decline`,
+      `${label} declining for 3 consecutive days. Review today's submission.`,
       { kpiKey: k },
     ))
   }
@@ -184,7 +198,7 @@ function consecutiveDeclineAlerts(input: LiveAnalyticsInput): LiveAlert[] {
 }
 
 // IMPROVED: only fires when pace dropped by >20% vs yesterday AND current pace is meaningful
-function paceDropAlerts(input: LiveAnalyticsInput, health: KpiHealthSignal[]): LiveAlert[] {
+function paceDropAlerts(input: LiveAnalyticsInput, health: KpiHealthSignal[], registry?: KpiRegistry, policy?: PilotPolicy): LiveAlert[] {
   const { mtdEntries, now } = input
   const results: LiveAlert[] = []
   const today     = format(now, 'yyyy-MM-dd')
@@ -197,10 +211,11 @@ function paceDropAlerts(input: LiveAnalyticsInput, health: KpiHealthSignal[]): L
   for (const h of health) {
     if (h.target <= 0) continue
 
-    const todayVal = mtdEntries.filter((e) => e.date === today)
-      .reduce((s, e) => s + (Number(e[h.kpiKey as keyof typeof e]) || 0), 0)
-    const yestVal  = mtdEntries.filter((e) => e.date === yesterday)
-      .reduce((s, e) => s + (Number(e[h.kpiKey as keyof typeof e]) || 0), 0)
+    const sum = (entries: typeof mtdEntries) => registry && policy
+      ? sumPilotActual(entries as Record<string, unknown>[], h.kpiKey, registry, policy)
+      : entries.reduce((s, e) => s + (Number(e[h.kpiKey as keyof typeof e]) || 0), 0)
+    const todayVal = sum(mtdEntries.filter((e) => e.date === today))
+    const yestVal  = sum(mtdEntries.filter((e) => e.date === yesterday))
 
     if (!yestVal || yestVal < 3) continue  // suppress near-zero noise
 
@@ -229,8 +244,16 @@ export function generateLiveAlerts(
   input:        LiveAnalyticsInput,
   health:       KpiHealthSignal[],
   recentAlerts: LiveAlert[] = [],  // Phase 2: pass previous alerts for cooldown
+  registry?:    KpiRegistry,
 ): LiveAlert[] {
   const ORDER: Record<AlertPriority, number> = { critical:0, warning:1, info:2 }
+
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(input.mtdEntries[0] ?? null, input.target ?? null, registry, 'liveAnalytics')
+    : undefined
 
   const candidates: LiveAlert[] = [
     missingEntryAlert(input),
@@ -238,8 +261,8 @@ export function generateLiveAlerts(
     ...forecastMissAlerts(health),
     ...milestoneNearAlerts(health),
     ...targetHitAlerts(health),
-    ...consecutiveDeclineAlerts(input),
-    ...paceDropAlerts(input, health),
+    ...consecutiveDeclineAlerts(input, registry, policy),
+    ...paceDropAlerts(input, health, registry, policy),
   ].filter((a): a is LiveAlert => a !== null)
 
   // ── Quality filters ───────────────────────────────────────
@@ -274,7 +297,12 @@ export function countSuppressedAlerts(
   health:       KpiHealthSignal[],
   active:       LiveAlert[],
   recentAlerts: LiveAlert[] = [],
+  registry?:    KpiRegistry,
 ): number {
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(input.mtdEntries[0] ?? null, input.target ?? null, registry, 'liveAnalytics')
+    : undefined
+
   // Re-generate without filters to count total candidates
   const all: LiveAlert[] = [
     missingEntryAlert(input),
@@ -282,8 +310,8 @@ export function countSuppressedAlerts(
     ...forecastMissAlerts(health),
     ...milestoneNearAlerts(health),
     ...targetHitAlerts(health),
-    ...consecutiveDeclineAlerts(input),
-    ...paceDropAlerts(input, health),
+    ...consecutiveDeclineAlerts(input, registry, policy),
+    ...paceDropAlerts(input, health, registry, policy),
   ].filter((a): a is LiveAlert => a !== null)
 
   return Math.max(0, all.length - active.length)

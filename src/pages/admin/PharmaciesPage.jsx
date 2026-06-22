@@ -11,14 +11,16 @@ import { usePharmacyStore } from '../../store/pharmacyStore'
 import { useToastStore } from '../../components/ui/Toast'
 import ConfirmModal from '../../components/ui/ConfirmModal'
 import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
-import { pharmacyCodeExists } from '../../services/pharmacyService'
+import { pharmacyCodeExists, updatePharmacyClassification } from '../../services/pharmacyService'
+import { subscribeToClassifications } from '../../classification/repository'
+import { UNCLASSIFIED_ID } from '../../classification/constants'
 
 const SA_REGIONS = [
   'الرياض','مكة المكرمة','المدينة المنورة','القصيم','المنطقة الشرقية',
   'عسير','تبوك','حائل','الحدود الشمالية','جازان','نجران','الباحة','الجوف',
 ]
 
-const EMPTY = { code:'', name:'', region:'الرياض', city:'', managerEmail:'', active:true }
+const EMPTY = { code:'', name:'', region:'الرياض', city:'', managerEmail:'', active:true, branchClassification: UNCLASSIFIED_ID }
 
 function F({ label, required, error, children }) {
   return (
@@ -50,8 +52,19 @@ export default function PharmaciesPage() {
   const [errors,       setErrors]       = useState({})
   const [saving,       setSaving]       = useState(false)
   const [confirm,      setConfirm]      = useState(null)
+  // RF-0B: classification registry
+  const [registry,     setRegistry]     = useState([])
+  const [regLoading,   setRegLoading]   = useState(true)
 
   useEffect(() => { const u = subscribe(); return u }, [])
+  // RF-0B: load classification registry with real-time subscription
+  useEffect(() => {
+    const unsub = subscribeToClassifications(
+      (data) => { setRegistry(data.filter((c) => c.active).sort((a,b) => a.order - b.order)); setRegLoading(false) },
+      () => setRegLoading(false),
+    )
+    return unsub
+  }, [])
 
   const filtered = useMemo(() => pharmacies.filter((p) => {
     const q  = search.toLowerCase()
@@ -66,7 +79,8 @@ export default function PharmaciesPage() {
   const openCreate = () => { setForm(EMPTY); setEditId(null); setErrors({}); setShowForm(true) }
   const openEdit   = (p)  => {
     setForm({ code:p.code, name:p.name, region:p.region||'الرياض',
-              city:p.city||'', managerEmail:p.managerEmail||'', active:p.active!==false })
+              city:p.city||'', managerEmail:p.managerEmail||'', active:p.active!==false,
+              branchClassification: p.branchClassification || UNCLASSIFIED_ID })
     setEditId(p.id); setErrors({}); setShowForm(true)
   }
   const closeForm = () => { setShowForm(false); setEditId(null) }
@@ -88,8 +102,19 @@ export default function PharmaciesPage() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setSaving(true)
     try {
-      if (editId) { await update(editId, form, userProfile?.uid, userProfile?.role); toast.success('Branch updated') }
-      else        { await create(form, userProfile?.uid, userProfile?.role); toast.success('Branch created') }
+      if (editId) {
+        // Separate classification from core fields — classification uses RF-0 assignment path
+        const { branchClassification: newClass, ...coreData } = form
+        const existing = pharmacies.find((p) => p.id === editId)
+        await update(editId, coreData, userProfile?.uid, userProfile?.role)
+        if (newClass && newClass !== (existing?.branchClassification || UNCLASSIFIED_ID)) {
+          await updatePharmacyClassification(editId, newClass, userProfile?.uid, userProfile?.role)
+        }
+        toast.success('Branch updated')
+      } else {
+        await create(form, userProfile?.uid, userProfile?.role)
+        toast.success('Branch created')
+      }
       closeForm()
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
@@ -127,6 +152,14 @@ export default function PharmaciesPage() {
       ),
     },
     { key:'region', label:'Region', sortable:true, render:(v)=><span style={{ fontSize:'12px' }}>{v||'—'}</span> },
+    {
+      key:'branchClassification', label:'Classification', sortable:true,
+      render:(v,row)=>{
+        if (!v || v === UNCLASSIFIED_ID) return <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>—</span>
+        const cls = registry.find(c=>c.id===v)
+        return <span style={{ fontSize:'11px', color:'var(--text-primary)' }}>{cls?.labelAr || cls?.label || v}</span>
+      },
+    },
     {
       key:'active', label:'Status', align:'center', sortable:true,
       render:(v)=><StatusPill status={v!==false?'active':'inactive'} label={v!==false?'Active':'Inactive'} />,
@@ -245,6 +278,28 @@ export default function PharmaciesPage() {
                     </button>
                   ))}
                 </div>
+              </F>
+              {/* RF-0B: Branch Classification */}
+              <F label="Branch Classification">
+                <select
+                  value={form.branchClassification || UNCLASSIFIED_ID}
+                  onChange={(e) => sf('branchClassification', e.target.value)}
+                  style={{ height:'34px', fontSize:'12px', width:'100%' }}
+                  disabled={regLoading}
+                >
+                  {regLoading && <option value={UNCLASSIFIED_ID}>Loading…</option>}
+                  {!regLoading && registry.length === 0 && (
+                    <option value={UNCLASSIFIED_ID}>Unclassified (registry not seeded)</option>
+                  )}
+                  {!regLoading && registry.map((c) => (
+                    <option key={c.id} value={c.id}>{c.labelAr || c.label} ({c.id})</option>
+                  ))}
+                </select>
+                {editId && form.branchClassification !== (pharmacies.find(p=>p.id===editId)?.branchClassification || UNCLASSIFIED_ID) && (
+                  <p style={{ fontSize:'11px', color:'#f59e0b', marginTop:'4px' }}>
+                    ⚠ Changing classification will write a history entry.
+                  </p>
+                )}
               </F>
               <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
                 <button onClick={closeForm} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>Cancel</button>

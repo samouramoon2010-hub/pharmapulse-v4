@@ -151,7 +151,7 @@ export default function TeamIntelligenceCard({ teamResult, loading }) {
                 <div key={s.userId} style={ROW}>
                   <div style={{ width:5, height:5, borderRadius:'50%', background:'#00d2ad', flexShrink:0 }} />
                   <span style={{ flex:1, fontSize:'11px', color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {s.displayName || s.userId}
+                    {s.displayName || 'Unknown User'}
                   </span>
                   <span style={{ fontSize:'10px', fontWeight:600, color:'#00d2ad', fontVariantNumeric:'tabular-nums' }}>
                     {MOMENTUM_ICON[s.momentumDirection]} {s.performanceScore}%
@@ -173,7 +173,7 @@ export default function TeamIntelligenceCard({ teamResult, loading }) {
                   <div key={s.userId} style={ROW}>
                     <div style={{ width:5, height:5, borderRadius:'50%', background:riskCfg.color, flexShrink:0 }} />
                     <span style={{ flex:1, fontSize:'11px', color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {s.displayName || s.userId}
+                      {s.displayName || 'Unknown User'}
                     </span>
                     <span style={{ fontSize:'10px', color:riskCfg.color, fontWeight:500 }}>
                       {riskCfg.label} risk · {s.performanceScore}%

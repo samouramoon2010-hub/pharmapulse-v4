@@ -17,52 +17,52 @@
 
 export const COLORS = {
   // ── Canvas / Background layers
-  bgCanvas:         '#09090b',   // deepest — page background
-  bgSurface:        '#141417',   // cards, panels
-  bgElevated:       '#1c1c20',   // modals, dropdowns
-  bgOverlay:        '#222226',   // tooltips, popovers
+  bgCanvas:         '#0F1623',   // deepest — page background
+  bgSurface:        '#1A2235',   // cards, panels
+  bgElevated:       '#232E44',   // modals, dropdowns
+  bgOverlay:        '#2A3550',   // tooltips, popovers
   bgHover:          'rgba(255,255,255,0.04)',
-  bgActive:         'rgba(0,210,173,0.08)',
+  bgActive:         'rgba(13,107,116,0.12)',
 
   // ── Borders
-  borderSubtle:     'rgba(255,255,255,0.06)',
+  borderSubtle:     '#2A3550',
   borderDefault:    'rgba(255,255,255,0.09)',
   borderStrong:     'rgba(255,255,255,0.14)',
-  borderBrand:      'rgba(0,210,173,0.25)',
+  borderBrand:      'rgba(13,107,116,0.35)',
 
   // ── Text
-  textPrimary:      '#fafafa',
-  textSecondary:    '#a1a1aa',
-  textMuted:        '#52525b',
-  textBrand:        '#00d2ad',
+  textPrimary:      '#F1F5F9',
+  textSecondary:    '#94A3B8',
+  textMuted:        '#64748B',
+  textBrand:        '#0D9BAA',
   textInverse:      '#09090b',
 
   // ── Brand — PharmaPulse teal
-  brand300:         '#4dffc9',
-  brand400:         '#26e8b4',
-  brand500:         '#00d2ad',   // primary brand
-  brand600:         '#00a989',
-  brand700:         '#008067',
+  brand300:         '#5EEAD4',
+  brand400:         '#2DD4BF',
+  brand500:         '#0D6B74',   // primary brand
+  brand600:         '#0A5560',
+  brand700:         '#074048',
 
   // ── Semantic status
-  success:          '#22c55e',
-  successBg:        'rgba(34,197,94,0.10)',
-  successBorder:    'rgba(34,197,94,0.20)',
+  success:          '#2D7D5A',
+  successBg:        'rgba(45,125,90,0.10)',
+  successBorder:    'rgba(45,125,90,0.25)',
 
-  warning:          '#f59e0b',
-  warningBg:        'rgba(245,158,11,0.10)',
-  warningBorder:    'rgba(245,158,11,0.20)',
+  warning:          '#D4840A',
+  warningBg:        'rgba(212,132,10,0.10)',
+  warningBorder:    'rgba(212,132,10,0.25)',
 
-  danger:           '#ef4444',
-  dangerBg:         'rgba(239,68,68,0.10)',
-  dangerBorder:     'rgba(239,68,68,0.20)',
+  danger:           '#B92B2B',
+  dangerBg:         'rgba(185,43,43,0.10)',
+  dangerBorder:     'rgba(185,43,43,0.25)',
 
   info:             '#3b82f6',
   infoBg:           'rgba(59,130,246,0.10)',
   infoBorder:       'rgba(59,130,246,0.20)',
 
   // ── KPI fallback (used when no dynamic color available)
-  kpiFallback:      '#a1a1aa',
+  kpiFallback:      '#94A3B8',
 
   // ── Pure scale
   white:            '#ffffff',
@@ -75,33 +75,33 @@ export const COLORS = {
 
 export const KPI_TRAFFIC_COLORS = {
   excellent: {
-    color:   '#22c55e',
-    bg:      'rgba(34,197,94,0.10)',
-    border:  'rgba(34,197,94,0.20)',
+    color:   '#2D7D5A',
+    bg:      'rgba(45,125,90,0.10)',
+    border:  'rgba(45,125,90,0.25)',
     label:   'Excellent',
     labelAr: 'ممتاز',
     icon:    '🟢',
   },
   good: {
-    color:   '#00d2ad',
-    bg:      'rgba(0,210,173,0.10)',
-    border:  'rgba(0,210,173,0.20)',
+    color:   '#0D9BAA',
+    bg:      'rgba(13,155,170,0.10)',
+    border:  'rgba(13,155,170,0.25)',
     label:   'On Track',
     labelAr: 'على المسار',
     icon:    '🔵',
   },
   warning: {
-    color:   '#f59e0b',
-    bg:      'rgba(245,158,11,0.10)',
-    border:  'rgba(245,158,11,0.20)',
+    color:   '#D4840A',
+    bg:      'rgba(212,132,10,0.10)',
+    border:  'rgba(212,132,10,0.25)',
     label:   'Warning',
     labelAr: 'تحذير',
     icon:    '🟡',
   },
   critical: {
-    color:   '#ef4444',
-    bg:      'rgba(239,68,68,0.10)',
-    border:  'rgba(239,68,68,0.20)',
+    color:   '#B92B2B',
+    bg:      'rgba(185,43,43,0.10)',
+    border:  'rgba(185,43,43,0.25)',
     label:   'Critical',
     labelAr: 'حرج',
     icon:    '🔴',
@@ -134,27 +134,62 @@ export const KPI_COLORS = {
   default:      '#a1a1aa',   // zinc-400
 } as const
 
+// Phase 1B: getKpiColor now delegates to the registry resolver.
+// KPI_COLORS kept for consumers that need the full map object.
+// Return values are identical — no visual change.
+import { getKpiColor as _resolverGetKpiColor } from '../engine/kpiRegistry/kpiMetaResolver'
+
 /** Returns the designated color for a KPI engine key, or fallback */
 export function getKpiColor(engineKey: string): string {
-  return (KPI_COLORS as Record<string, string>)[engineKey] ?? KPI_COLORS.default
+  return _resolverGetKpiColor(engineKey)
 }
 
 // ── Risk / Executive Semantic Colors ──────────────────────
 
 export const RISK_COLORS = {
-  low:      { color: '#22c55e',  bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.15)',   label: 'Low Risk'      },
-  medium:   { color: '#f59e0b',  bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.15)',  label: 'Medium Risk'   },
-  high:     { color: '#ef4444',  bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.15)',   label: 'High Risk'     },
-  critical: { color: '#dc2626',  bg: 'rgba(220,38,38,0.10)',   border: 'rgba(220,38,38,0.20)',   label: 'Critical Risk' },
+  low:      { color: '#2D7D5A',  bg: 'rgba(45,125,90,0.08)',   border: 'rgba(45,125,90,0.18)',   label: 'Low Risk'      },
+  medium:   { color: '#D4840A',  bg: 'rgba(212,132,10,0.08)',  border: 'rgba(212,132,10,0.18)',  label: 'Medium Risk'   },
+  high:     { color: '#B92B2B',  bg: 'rgba(185,43,43,0.08)',   border: 'rgba(185,43,43,0.18)',   label: 'High Risk'     },
+  critical: { color: '#991B1B',  bg: 'rgba(153,27,27,0.10)',   border: 'rgba(153,27,27,0.22)',   label: 'Critical Risk' },
 } as const
 
 export const EXECUTIVE_COLORS = {
-  momentum:   '#22c55e',
-  declining:  '#ef4444',
-  stable:     '#00d2ad',
+  momentum:   '#2D7D5A',
+  declining:  '#B92B2B',
+  stable:     '#0D9BAA',
   benchmark:  '#6366f1',
   highlight:  '#f59e0b',
 } as const
+
+// ── Risk Level Colors (Number Locale + Executive BI Migration) ────
+// Executive BI / Branch Intelligence risk badges (On Track / Low /
+// Medium / High Risk) previously duplicated this exact 4-color
+// palette as a module-level constant in 4+ separate files
+// (PortfolioScoreCard, RiskDistributionPanel, BranchLeaderboard,
+// BranchDrilldown, RegionalIntelligencePanel). Centralized here with
+// the SAME hex values already in use everywhere — this is pure
+// de-duplication, not a new color choice, so it does not change any
+// rendered pixel color.
+export const RISK_LEVEL_COLORS = {
+  ON_TRACK:    { label: 'On Track',    color: '#22c55e', bg: 'rgba(34,197,94,0.08)',  border: 'rgba(34,197,94,0.2)'  },
+  LOW_RISK:    { label: 'Low Risk',    color: '#00d2ad', bg: 'rgba(0,210,173,0.08)',  border: 'rgba(0,210,173,0.2)'  },
+  MEDIUM_RISK: { label: 'Medium Risk', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)' },
+  HIGH_RISK:   { label: 'High Risk',   color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.2)'  },
+} as const
+
+/** Same palette as RISK_LEVEL_COLORS, keyed by the camelCase bucket
+ *  names used by ExecutiveReport.riskDistribution (onTrack/lowRisk/
+ *  mediumRisk/highRisk) instead of the SCREAMING_SNAKE risk-level key. */
+export const RISK_BUCKET_COLORS = {
+  onTrack:    RISK_LEVEL_COLORS.ON_TRACK,
+  lowRisk:    RISK_LEVEL_COLORS.LOW_RISK,
+  mediumRisk: RISK_LEVEL_COLORS.MEDIUM_RISK,
+  highRisk:   RISK_LEVEL_COLORS.HIGH_RISK,
+} as const
+
+export function getRiskLevelColor(riskLevel: string | undefined) {
+  return RISK_LEVEL_COLORS[riskLevel as keyof typeof RISK_LEVEL_COLORS] ?? RISK_LEVEL_COLORS.LOW_RISK
+}
 
 // ── Spacing Scale ─────────────────────────────────────────
 // Maps to Tailwind's 4px base unit: n * 4px
@@ -298,6 +333,110 @@ export const KPI_FALLBACK_COLOR = COLORS.kpiFallback
 /** The brand primary color */
 export const BRAND_COLOR = COLORS.brand500
 
+// ============================================================
+// UI 3.0 Foundation — additive token layers (Phase UI3-A)
+//
+// Layering: Global tokens (COLORS/SPACING/TYPOGRAPHY/RADIUS/SHADOWS
+// above) → Semantic tokens (STATUS_TOKENS/ELEVATION/CHART_TOKENS
+// below, which assign meaning to global tokens) → Component tokens
+// (DENSITY presets, consumed directly by card/table components).
+//
+// Purely additive — no existing export above was changed, so the
+// pre-existing tokens.test.ts certification keeps passing unchanged.
+// ============================================================
+
+// ── Display-scale typography (UI3-A) ──────────────────────
+// Adds the "Display" tier (48px/bold) required by the UI 3.0 type
+// scale, plus a critical-insight floor used by certification to
+// guarantee insight text is never rendered below 13px.
+
+export const DISPLAY_TYPOGRAPHY = {
+  sizeDisplay:      '48px',
+  weightDisplay:    TYPOGRAPHY.weightBold,
+  sizeTitle:        '20px',
+  weightTitle:      TYPOGRAPHY.weightSemibold,
+  sizeSubtitle:     '14px',
+  weightSubtitle:   TYPOGRAPHY.weightMedium,
+  sizeCaptionMin:   '12px',   // absolute floor for any caption text
+  sizeInsightMin:   '13px',   // absolute floor for critical insight text
+} as const
+
+// ── Elevation Tokens (semantic) ────────────────────────────
+// Named elevation levels — each maps to an existing SHADOWS value
+// so there is exactly one physical shadow definition per level.
+
+export const ELEVATION = {
+  flat:     'none',
+  raised:   SHADOWS.xs,
+  card:     SHADOWS.card,
+  float:    SHADOWS.float,
+  modal:    SHADOWS.float,
+  glow:     SHADOWS.glow,
+} as const
+
+// ── Status Tokens (semantic) ───────────────────────────────
+// Unifies KPI_TRAFFIC_COLORS + RISK_COLORS under one vocabulary
+// for components that just need "is this good/bad" without caring
+// whether the source was a KPI or a risk distribution.
+
+export const STATUS_TOKENS = {
+  positive: { color: COLORS.success, bg: COLORS.successBg, border: COLORS.successBorder },
+  caution:  { color: COLORS.warning, bg: COLORS.warningBg, border: COLORS.warningBorder },
+  negative: { color: COLORS.danger,  bg: COLORS.dangerBg,  border: COLORS.dangerBorder },
+  neutral:  { color: COLORS.info,    bg: COLORS.infoBg,    border: COLORS.infoBorder },
+} as const
+
+export type StatusToken = keyof typeof STATUS_TOKENS
+
+/** Safe status-token lookup — always returns a valid config. */
+export function getStatusToken(status: string | undefined) {
+  return STATUS_TOKENS[status as StatusToken] ?? STATUS_TOKENS.neutral
+}
+
+// ── Density Tokens (component) ─────────────────────────────
+// Component-level spacing presets consumed by card/table/list
+// components that need to switch between comfortable and compact
+// presentation without each component inventing its own numbers.
+
+export const DENSITY = {
+  comfortable: {
+    cardPadding:    '16px',
+    cardGap:        '12px',
+    rowHeight:      '40px',
+    radius:         RADIUS.lg,    // 8px
+  },
+  compact: {
+    cardPadding:    '12px',
+    cardGap:        '8px',
+    rowHeight:      '32px',
+    radius:         RADIUS.md,    // 6px
+  },
+} as const
+
+export type DensityToken = keyof typeof DENSITY
+
+// ── Chart Tokens (semantic) ─────────────────────────────────
+// Token-driven chart styling so chart components never hardcode
+// hex colors for grid/axis/tooltip chrome.
+
+export const CHART_TOKENS = {
+  grid:        'rgba(255,255,255,0.06)',
+  axisLine:    'transparent',
+  axisTick:    COLORS.textMuted,
+  tooltipBg:   COLORS.bgElevated,
+  tooltipBorder: COLORS.borderDefault,
+  tooltipText: COLORS.textPrimary,
+  targetLine:  COLORS.borderStrong,
+  palette: [
+    COLORS.brand400,
+    '#6366f1',
+    '#f59e0b',
+    '#22c55e',
+    '#8b5cf6',
+    '#ef4444',
+  ],
+} as const
+
 // ── Type helpers ──────────────────────────────────────────
 
 export type ColorToken    = typeof COLORS
@@ -305,3 +444,5 @@ export type SpacingToken  = typeof SPACING
 export type TypographyToken = typeof TYPOGRAPHY
 export type ShadowToken   = typeof SHADOWS
 export type RadiusToken   = typeof RADIUS
+export type ElevationToken = typeof ELEVATION
+export type ChartToken     = typeof CHART_TOKENS

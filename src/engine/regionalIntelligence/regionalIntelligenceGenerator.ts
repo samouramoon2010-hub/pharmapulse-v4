@@ -332,7 +332,12 @@ export function generateRegionalIntelligence(
   const { branchRollups, previousRegionalRollups } = input
 
   // ── Step 1: Regional rollup aggregation ──────────────────────
-  const regionalSummaries = generateRegionalRollups(branchRollups)
+  // registry is optional here for backward compatibility with the large
+  // existing test suite. Core KPI Dependency Removal — No Silent Core
+  // Fallback Closure: every ACTIVE PRODUCTION caller resolves and passes
+  // the live registry at the orchestrator/hook boundary (see
+  // requireLiveRegistry() in engine/kpiRegistry/registryGuard.ts).
+  const regionalSummaries = generateRegionalRollups(branchRollups, input.registry)
 
   // ── Step 2: Trend analysis ────────────────────────────────────
   const regionalTrends = analyzeAllRegionalTrends(

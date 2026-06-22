@@ -54,6 +54,22 @@ export default function KpiManagementPage() {
     [mergedRegistry],
   )
 
+  // ── Registry health stats ──────────────────────────────────
+  const healthStats = useMemo(() => {
+    const counts = { draft:0, pilot_tracking:0, shadow_evaluation:0, production_evaluation:0, archived:0 }
+    const warnings = []
+    allKpis.forEach((kpi) => {
+      const stage = kpi.lifecycleStage ?? 'production_evaluation'
+      if (stage in counts) counts[stage] = counts[stage] + 1
+      if (!kpi.labelAr || kpi.labelAr.trim() === kpi.label) warnings.push(`${kpi.key}: Missing Arabic label`)
+      if (!kpi.coachingAction)   warnings.push(`${kpi.key}: Missing coaching action (EN)`)
+      if (!kpi.coachingActionAr) warnings.push(`${kpi.key}: Missing coaching action (AR)`)
+    })
+    const primaryKpis = allKpis.filter((k) => k.isPrimary)
+    if (primaryKpis.length !== 1) warnings.push(`Registry must have exactly one primary KPI (found ${primaryKpis.length})`)
+    return { counts, warnings }
+  }, [allKpis])
+
   // Existing keys set for duplicate-key validation
   const existingKeys = useMemo(() => new Set(Object.keys(mergedRegistry)), [mergedRegistry])
 
@@ -185,6 +201,42 @@ export default function KpiManagementPage() {
         KPI changes are persisted to Firestore and shared across all devices.
         Protected core KPIs cannot be deleted or archived. No hard deletes — archive instead.
       </div>
+
+      {/* ── Registry Health Dashboard (Part G) ─────────────────── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:'8px' }}>
+        {[
+          { label:'Total',       count: allKpis.length,                               color:'var(--text-primary)' },
+          { label:'Draft',       count: healthStats.counts.draft,                     color:'#a1a1aa' },
+          { label:'Pilot',       count: healthStats.counts.pilot_tracking,            color:'#f59e0b' },
+          { label:'Shadow',      count: healthStats.counts.shadow_evaluation,         color:'#60a5fa' },
+          { label:'Production',  count: healthStats.counts.production_evaluation,     color:'#22c55e' },
+          { label:'Archived',    count: healthStats.counts.archived,                  color:'#6b7280' },
+        ].map(({ label, count, color }) => (
+          <div key={label} style={{
+            padding:'10px 12px', borderRadius:'8px',
+            background:'var(--bg-elevated)', border:'1px solid var(--border-subtle)',
+            display:'flex', flexDirection:'column', gap:'4px',
+          }}>
+            <div style={{ fontSize:'20px', fontWeight:700, color, fontVariantNumeric:'tabular-nums' }}>{count}</div>
+            <div style={{ fontSize:'10px', color:'var(--text-muted)', fontWeight:500 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Validation warnings */}
+      {healthStats.warnings.length > 0 && (
+        <div style={{ borderRadius:'8px', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', padding:'10px 14px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'6px', fontSize:'11px', fontWeight:600, color:'#f59e0b' }}>
+            <AlertTriangle style={{ width:12, height:12 }} />
+            Registry Validation Warnings ({healthStats.warnings.length})
+          </div>
+          <ul style={{ margin:0, paddingLeft:'16px', display:'flex', flexDirection:'column', gap:'3px' }}>
+            {healthStats.warnings.map((w, i) => (
+              <li key={i} style={{ fontSize:'11px', color:'#f59e0b', opacity:0.85 }}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Table */}
       <KpiRegistryTable

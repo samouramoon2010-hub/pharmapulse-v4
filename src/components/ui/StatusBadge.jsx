@@ -25,13 +25,13 @@ const RISK_MAP = {
 }
 
 const SEMANTIC_MAP = {
-  active:   { color: '#22c55e',  bg: 'rgba(34,197,94,0.10)',   border: 'rgba(34,197,94,0.20)',   label: 'Active'   },
-  inactive: { color: '#a1a1aa',  bg: 'rgba(161,161,170,0.10)', border: 'rgba(161,161,170,0.20)', label: 'Inactive' },
-  pending:  { color: '#f59e0b',  bg: 'rgba(245,158,11,0.10)',  border: 'rgba(245,158,11,0.20)',  label: 'Pending'  },
-  approved: { color: '#22c55e',  bg: 'rgba(34,197,94,0.10)',   border: 'rgba(34,197,94,0.20)',   label: 'Approved' },
-  rejected: { color: '#ef4444',  bg: 'rgba(239,68,68,0.10)',   border: 'rgba(239,68,68,0.20)',   label: 'Rejected' },
+  active:   { color: '#2D7D5A',  bg: 'rgba(45,125,90,0.10)',   border: 'rgba(45,125,90,0.22)',   label: 'Active'   },
+  inactive: { color: '#94A3B8',  bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.20)', label: 'Inactive' },
+  pending:  { color: '#D4840A',  bg: 'rgba(212,132,10,0.10)',  border: 'rgba(212,132,10,0.22)',  label: 'Pending'  },
+  approved: { color: '#2D7D5A',  bg: 'rgba(45,125,90,0.10)',   border: 'rgba(45,125,90,0.22)',   label: 'Approved' },
+  rejected: { color: '#B92B2B',  bg: 'rgba(185,43,43,0.10)',   border: 'rgba(185,43,43,0.22)',   label: 'Rejected' },
   draft:    { color: '#6366f1',  bg: 'rgba(99,102,241,0.10)',  border: 'rgba(99,102,241,0.20)',  label: 'Draft'    },
-  archived: { color: '#52525b',  bg: 'rgba(82,82,91,0.10)',    border: 'rgba(82,82,91,0.20)',    label: 'Archived' },
+  archived: { color: '#64748B',  bg: 'rgba(100,116,139,0.10)', border: 'rgba(100,116,139,0.18)', label: 'Archived' },
 }
 
 const FALLBACK_CFG = {

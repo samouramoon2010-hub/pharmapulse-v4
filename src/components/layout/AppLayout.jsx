@@ -3,14 +3,19 @@
 // ============================================================
 import React, { useState, useEffect, useRef } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
-import { Menu, Bell, ChevronDown, Palette, Calendar, Search } from 'lucide-react'
+import { Menu, Bell, ChevronDown, Palette, Calendar, Search, Sparkles } from 'lucide-react'
 import Sidebar   from './Sidebar'
 import MobileNav from './MobileNav'
+import { LogoIcon } from '../brand/Logo'
 import { useAuthStore }    from '../../store/authStore'
 import { useSettingsStore, SIDEBAR_MODE, THEME_META, applyTheme } from '../../store/settingsStore'
 import { ToastContainer }  from '../ui/Toast'
 import { useAutoLogout }   from '../../hooks/useAutoLogout'
 import CommandPalette, { useCommandPalette } from '../ui/CommandPalette'
+import FuturisticAmbientLayer from '../ui/FuturisticAmbientLayer'
+import OfflineBanner from '../ui/OfflineBanner'
+import SyncStatusIndicator from '../ui/SyncStatusIndicator'
+import { useTheme } from '../../theme/useTheme'
 
 const ROLE_LABELS = { admin:'Admin', manager:'Manager', pharmacist:'Pharmacist' }
 const DAYS_EN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
@@ -77,6 +82,31 @@ function ThemeSwitcher() {
   )
 }
 
+// ── Theme T1 quick toggle ────────────────────────────────────
+// Minimal, visual-only header control for the new Theme Engine
+// (T1-D). Cycles Corporate -> Executive -> Futuristic -> Medical ->
+// AMOLED -> Apple -> Cyber. Deliberately separate from the existing
+// ThemeSwitcher dropdown above (the older, untouched 9-preset
+// runtime theme system) — no Settings Center, no dropdown, just a
+// single click-to-cycle button showing the current theme name.
+function ThemeT1QuickToggle() {
+  const { activeTheme, cycleTheme } = useTheme()
+  return (
+    <button
+      onClick={cycleTheme}
+      data-testid="theme-t1-toggle"
+      className="btn btn-ghost btn-icon"
+      title={`Theme: ${activeTheme.name} — click to cycle`}
+      style={{ display: 'flex', alignItems: 'center', gap: '5px', width: 'auto', padding: '0 8px' }}
+    >
+      <Sparkles className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+      <span className="hidden lg:inline text-xs" style={{ color: 'var(--text-muted)' }}>
+        {activeTheme.name}
+      </span>
+    </button>
+  )
+}
+
 export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const navigate  = useNavigate()
@@ -93,11 +123,17 @@ export default function AppLayout() {
   const sidebarW  = collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-w)'
 
   return (
-    <div className="min-h-screen" style={{ background:'var(--bg-base)' }}>
+    <div className="min-h-screen" style={{ background:'var(--bg-base)', position:'relative' }}>
+      {/* Futuristic theme ambient background — renders only when theme === pharmapulse-futuristic */}
+      <FuturisticAmbientLayer />
+
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       <div className="flex flex-col min-h-screen transition-all duration-300"
            style={{ paddingRight:`clamp(0px, calc(100vw - 1023px), ${sidebarW})` }}>
+
+        {/* Offline First Bundle — non-blocking offline notice */}
+        <OfflineBanner />
 
         {/* ── Topbar ── */}
         <header className="sticky top-0 z-20 flex items-center gap-4 px-4 lg:px-5"
@@ -111,6 +147,17 @@ export default function AppLayout() {
           <button onClick={() => setMobileOpen(true)} className="lg:hidden btn btn-ghost btn-icon -mr-1">
             <Menu className="w-4 h-4" />
           </button>
+
+          {/* Product identity — command header mark (UI3-C) */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <LogoIcon size={18} />
+            <span className="hidden md:inline text-xs font-semibold tracking-wide"
+                  style={{ color: 'var(--text-secondary)' }}>
+              PharmaPulse
+            </span>
+          </div>
+
+          <div className="hidden sm:block h-4 w-px" style={{ background: 'var(--border-default)' }} />
 
           {/* Date chip */}
           <DateChip />
@@ -132,9 +179,13 @@ export default function AppLayout() {
             Live
           </div>
 
+          {/* Offline First Bundle — real connectivity/sync status */}
+          <SyncStatusIndicator />
+
           {/* Right actions */}
           <div className="flex items-center gap-0.5 mr-auto">
             <ThemeSwitcher />
+            <ThemeT1QuickToggle />
 
             <button onClick={() => navigate('/notifications')}
               className="btn btn-ghost btn-icon relative">

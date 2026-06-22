@@ -13,6 +13,12 @@ import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db, COL } from '../services/firebase'
 import { logAction, AUDIT_ACTION } from '../services/auditService'
 
+// Fields a user may update on their own profile via updateProfile().
+// Sensitive fields (role, active, pharmacyId, regionIds, districtId,
+// supervisorId, managerId) are intentionally absent — admin uses
+// userService.updateUserProfile() for those.
+const SELF_UPDATE_WHITELIST = ['displayName', 'phone']
+
 const AUTH_ERROR_MAP = {
   'auth/user-not-found':         'البريد الإلكتروني غير مسجّل',
   'auth/wrong-password':         'كلمة المرور غير صحيحة',
@@ -31,9 +37,14 @@ export const useAuthStore = create(
       userProfile: null,
       loading:     true,
       error:       null,
+      _loggingIn:  false,   // true while login() is in-flight; suppresses duplicate onAuthStateChanged fetch
 
       init: () => {
         const unsub = onAuthStateChanged(auth, async (fbUser) => {
+          // Skip if login() is already fetching the profile — avoids two concurrent
+          // _fetchProfile() Firestore reads for the same UID and a non-deterministic
+          // set() race where onAuthStateChanged could overwrite login()'s result.
+          if (get()._loggingIn) return
           if (fbUser) {
             const profile = await get()._fetchProfile(fbUser.uid)
             set({ user: { uid: fbUser.uid, email: fbUser.email }, userProfile: profile, loading: false })
@@ -55,7 +66,9 @@ export const useAuthStore = create(
       },
 
       login: async (email, password, rememberMe = true) => {
-        set({ error: null, loading: true })
+        // Do NOT set loading:true here — that would unmount <BrowserRouter> (before Fix 1 it
+        // also silently dropped the navigate() call). LoginPage owns the submitting spinner.
+        set({ error: null, _loggingIn: true })
         try {
           await setPersistence(auth,
             rememberMe ? browserLocalPersistence : browserSessionPersistence
@@ -66,11 +79,11 @@ export const useAuthStore = create(
           await updateDoc(doc(db, COL.USERS, user.uid), { lastLoginAt: serverTimestamp() }).catch(() => {})
           await logAction({ action: AUDIT_ACTION.LOGIN, collection: COL.USERS,
             docId: user.uid, userId: user.uid, userRole: profile.role, meta: { email } })
-          set({ user: { uid: user.uid, email: user.email }, userProfile: profile, loading: false })
+          set({ user: { uid: user.uid, email: user.email }, userProfile: profile, _loggingIn: false })
           return profile
         } catch (err) {
           const msg = AUTH_ERROR_MAP[err.code] || AUTH_ERROR_MAP[err.message] || err.message || 'خطأ في تسجيل الدخول'
-          set({ error: msg, loading: false })
+          set({ error: msg, _loggingIn: false })
           throw new Error(msg)
         }
       },
@@ -97,8 +110,11 @@ export const useAuthStore = create(
       updateProfile: async (data) => {
         const { user, userProfile } = get()
         if (!user) return
-        await updateDoc(doc(db, COL.USERS, user.uid), { ...data, updatedAt: serverTimestamp() })
-        set({ userProfile: { ...userProfile, ...data } })
+        const safe = Object.fromEntries(
+          Object.entries(data).filter(([k]) => SELF_UPDATE_WHITELIST.includes(k))
+        )
+        await updateDoc(doc(db, COL.USERS, user.uid), { ...safe, updatedAt: serverTimestamp() })
+        set({ userProfile: { ...userProfile, ...safe } })
       },
 
       clearError: () => set({ error: null }),

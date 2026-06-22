@@ -96,7 +96,7 @@ function RecommendationCard({ rec }) {
 
 const INITIAL_SHOW = 4
 
-export default function ExecutiveInsightsFeed({ report }) {
+export default function ExecutiveInsightsFeed({ report, isManager }) {
   const [showAllInsights, setShowAllInsights] = useState(false)
   const [showAllRecs,     setShowAllRecs]     = useState(false)
 
@@ -112,7 +112,7 @@ export default function ExecutiveInsightsFeed({ report }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
           <Lightbulb style={{ width: 15, height: 15, color: 'var(--text-muted)' }} strokeWidth={1.75} />
           <div>
-            <div className="section-title">Portfolio Insights</div>
+            <div className="section-title">{isManager ? 'Branch Insights' : 'Portfolio Insights'}</div>
             <div className="section-subtitle">{insights.length} signals detected</div>
           </div>
         </div>

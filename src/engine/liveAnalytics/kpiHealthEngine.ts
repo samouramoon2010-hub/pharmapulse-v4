@@ -9,10 +9,21 @@ import { format, subDays } from 'date-fns'
 import {
   KPI_KEYS, KPI_META,
   computeKpiStats, computePace, computeForecast,
-  sumKpi, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
+  sumKpi, getDayProgress, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey } from '../kpiAnalyticsEngine'
 
 import type { LiveAnalyticsInput } from './liveAnalyticsTypes'
 import type { KpiHealthSignal, KpiHealthState } from './liveAnalyticsTypes'
+
+// Protected Engines Migration Phase D — Live Analytics (KPI Health).
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. Actual/target reads feeding the
+// health-state derivation are routed through the Dynamic Reader only
+// where proven parity holds against a real sample; otherwise they fall
+// back to the exact pre-migration computation. Health-state thresholds
+// and formulas are completely untouched. No call site passes a registry yet.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Coefficient of variation (consistency measure) ────────────
 function computeCV(values: number[]): number {
@@ -94,11 +105,14 @@ function computePulse(
   kpiKey:     typeof KPI_KEYS[number],
   today:      string,
   yesterday:  string,
+  registry?:  KpiRegistry,
+  policy?:    PilotPolicy,
 ): { pulse: 'up' | 'down' | 'flat'; pulseValue: number } {
-  const todayVal = mtdEntries.filter((e) => e.date === today)
-    .reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
-  const yestVal  = mtdEntries.filter((e) => e.date === yesterday)
-    .reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+  const sum = (entries: LiveAnalyticsInput['mtdEntries']) => registry && policy
+    ? sumPilotActual(entries as Record<string, unknown>[], kpiKey, registry, policy)
+    : entries.reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+  const todayVal = sum(mtdEntries.filter((e) => e.date === today))
+  const yestVal  = sum(mtdEntries.filter((e) => e.date === yesterday))
 
   if (!yestVal && !todayVal) return { pulse: 'flat', pulseValue: 0 }
   if (!yestVal)              return { pulse: 'up',   pulseValue: todayVal }
@@ -117,37 +131,59 @@ function getRecentDailyValues(
   kpiKey:     typeof KPI_KEYS[number],
   now:        Date,
   n:          number,
+  registry?:  KpiRegistry,
+  policy?:    PilotPolicy,
 ): number[] {
   return Array.from({ length: n }, (_, i) => {
     const d = format(subDays(now, n - 1 - i), 'yyyy-MM-dd')
-    return mtdEntries.filter((e) => e.date === d)
-      .reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+    const dayEntries = mtdEntries.filter((e) => e.date === d)
+    return registry && policy
+      ? sumPilotActual(dayEntries as Record<string, unknown>[], kpiKey, registry, policy)
+      : dayEntries.reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
   })
 }
 
 // ── Main health computation ───────────────────────────────────
-export function computeKpiHealth(input: LiveAnalyticsInput): KpiHealthSignal[] {
+export function computeKpiHealth(input: LiveAnalyticsInput, registry?: KpiRegistry): KpiHealthSignal[] {
   const { mtdEntries, todayEntries, target, now } = input
   const dp        = getDayProgress(now)
   const today     = format(now, 'yyyy-MM-dd')
   const yesterday = format(subDays(now, 1), 'yyyy-MM-dd')
 
-  return KPI_KEYS.map((k) => {
-    const actual   = sumKpi(mtdEntries, k)
-    const todayVal = sumKpi(todayEntries, k)
-    const tgt      = target
-      ? safeReadTarget(target as any, KPI_META[k].targetField)
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(mtdEntries[0] ?? null, target ?? null, registry, 'liveAnalytics')
+    : undefined
+
+  // Core KPI Dependency Removal — Stage F: widens to every active
+  // production_evaluation KPI when a registry is supplied; identical to
+  // before (5 Core keys only) when absent.
+  const healthKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  return healthKeys.map((k) => {
+    const actual   = registry && policy
+      ? sumPilotActual(mtdEntries as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(mtdEntries, k)
+    const todayVal = registry && policy
+      ? sumPilotActual(todayEntries as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(todayEntries, k)
+    const legacyTarget = () => target
+      ? safeReadTarget(target as any, getKpiMetaForKey(k, registry).targetField)
       : 0
+    const tgt      = registry && policy
+      ? readPilotTarget(target as Record<string, unknown> | null | undefined, k, registry, policy, legacyTarget)
+      : legacyTarget()
 
     const stats    = computeKpiStats(actual, tgt, dp, k)
     const pace     = computePace(actual, tgt, dp)
     const forecast = computeForecast(actual, tgt, dp)
 
     // Recent daily values for trend analysis
-    const recentValues = getRecentDailyValues(mtdEntries, k, now, 7)
+    const recentValues = getRecentDailyValues(mtdEntries, k, now, 7, registry, policy)
     const cv           = computeCV(recentValues)
 
-    const { pulse, pulseValue } = computePulse(mtdEntries, k, today, yesterday)
+    const { pulse, pulseValue } = computePulse(mtdEntries, k, today, yesterday, registry, policy)
 
     const expectedPct = Math.round(dp.ratio * 100)
     const state = tgt > 0
@@ -156,7 +192,7 @@ export function computeKpiHealth(input: LiveAnalyticsInput): KpiHealthSignal[] {
 
     return {
       kpiKey:         k,
-      label:          KPI_META[k].en,
+      label:          getKpiMetaForKey(k, registry).en,
       state,
       achievementPct: stats.achievementPct,
       expectedPct,

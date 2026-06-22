@@ -36,6 +36,7 @@ import {
   sumKpi, findWeakestKpi, findStrongestKpi,
   computeOverallAchievement, computeKpiStats,
 } from '../../engine'
+import { formatNumber } from '../../utils/helpers'
 
 // Safe fallback color — never undefined
 const FALLBACK_COLOR = DEFAULT_KPI_UI_CONFIG.defaultColor  // '#a1a1aa'
@@ -320,7 +321,7 @@ export default function PharmacistPerformancePage() {
                   {s?.target > 0 ? `${s.achievementPct}%` : '—'}
                 </div>
                 <div style={{ width:'70px', textAlign:'left', fontSize:'10px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
-                  {s?.actual?.toLocaleString() || 0} / {s?.target?.toLocaleString() || '—'}
+                  {(s?.actual != null ? formatNumber(s.actual) : 0)} / {(s?.target != null ? formatNumber(s.target) : '—')}
                 </div>
               </div>
             )
@@ -331,8 +332,8 @@ export default function PharmacistPerformancePage() {
         {focusPace && myTarget && (
           <div style={{ marginTop:'12px', display:'flex', gap:'12px', flexWrap:'wrap' }}>
             {[
-              { label:'Current rate/day',  value: focusPace.currentDailyRate.toLocaleString() },
-              { label:'Required rate/day', value: focusPace.requiredDailyPace.toLocaleString() },
+              { label:'Current rate/day',  value: formatNumber(focusPace.currentDailyRate) },
+              { label:'Required rate/day', value: formatNumber(focusPace.requiredDailyPace) },
               { label:'Pace status',       value: focusPace.paceStatus.replace(/_/g,' ') },
             ].map((item) => (
               <div key={item.label} style={{ fontSize:'10px' }}>

@@ -3,44 +3,16 @@
 // Receives processed ExecutiveReport output. No analytics here.
 // ============================================================
 import React from 'react'
+import { RISK_BUCKET_COLORS } from '../../design/tokens'
 
+// Same 4-color risk palette as BranchLeaderboard/BranchDrilldown/
+// RegionalIntelligencePanel, sourced from the shared token instead of
+// a locally-duplicated hex map (Number Locale + Executive BI Migration).
+const BUCKETS = Object.entries(RISK_BUCKET_COLORS).map(([key, cfg]) => ({
+  key, label: cfg.label, color: cfg.color, bg: cfg.bg, border: cfg.border, dot: cfg.color,
+}))
 
-const BUCKETS = [
-  {
-    key:    'onTrack'   ,
-    label:  'On Track',
-    color:  '#22c55e',
-    bg:     'rgba(34,197,94,0.08)',
-    border: 'rgba(34,197,94,0.2)',
-    dot:    '#22c55e',
-  },
-  {
-    key:    'lowRisk'   ,
-    label:  'Low Risk',
-    color:  '#00d2ad',
-    bg:     'rgba(0,210,173,0.08)',
-    border: 'rgba(0,210,173,0.2)',
-    dot:    '#00d2ad',
-  },
-  {
-    key:    'mediumRisk',
-    label:  'Medium Risk',
-    color:  '#f59e0b',
-    bg:     'rgba(245,158,11,0.08)',
-    border: 'rgba(245,158,11,0.2)',
-    dot:    '#f59e0b',
-  },
-  {
-    key:    'highRisk'  ,
-    label:  'High Risk',
-    color:  '#ef4444',
-    bg:     'rgba(239,68,68,0.08)',
-    border: 'rgba(239,68,68,0.2)',
-    dot:    '#ef4444',
-  },
-]
-
-export default function RiskDistributionPanel({  report  }) {
+export default function RiskDistributionPanel({  report, isManager  }) {
   const { riskDistribution, totalBranches } = report
 
   const total = Math.max(1, totalBranches)
@@ -48,8 +20,8 @@ export default function RiskDistributionPanel({  report  }) {
   return (
     <div className="card" style={{ padding: '20px', background: 'var(--bg-surface)' }}>
       <div style={{ marginBottom: '16px' }}>
-        <div className="section-title">Risk Distribution</div>
-        <div className="section-subtitle">All {totalBranches} branches · {report.reportMonth}</div>
+        <div className="section-title">{isManager ? 'Branch Risk Status' : 'Risk Distribution'}</div>
+        <div className="section-subtitle">{isManager ? report.reportMonth : `All ${totalBranches} branches · ${report.reportMonth}`}</div>
       </div>
 
       {/* Segmented bar */}

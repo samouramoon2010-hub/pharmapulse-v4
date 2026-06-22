@@ -131,6 +131,7 @@ export function validateRow(
   }
 
   // ── KPI values ──
+  // The 5 legacy Core fields — byte-identical to prior behavior.
   const kpiFields = [
     { raw: raw.rawWasfaty,      field: 'wasfaty'      },
     { raw: raw.rawOmni,         field: 'omni'         },
@@ -145,6 +146,30 @@ export function validateRow(
     errors.push(...result.errors)
     warnings.push(...result.warnings)
     kpiValues[field] = result.value
+  }
+
+  // Core KPI Dependency Removal — Stage C: any other active KPI Registry
+  // entry whose column was present in this import. rawKpiValues is only
+  // populated (by parseExcelRowsToRaw) for headers that resolved to an
+  // active registry key, so no further registry lookup is needed here —
+  // no hardcoded switch on KPI name, arbitrary kpiKey values are accepted.
+  for (const [engineKey, rawVal] of Object.entries(raw.rawKpiValues ?? {})) {
+    if (engineKey in kpiValues) continue
+    const result = parseKpiValue(rawVal, engineKey)
+    errors.push(...result.errors)
+    warnings.push(...result.warnings)
+    kpiValues[engineKey] = result.value
+  }
+
+  // Flag columns that looked like an attempted KPI reading but matched no
+  // active registry key — explicit "reject or flag" per Stage C, instead
+  // of disappearing silently into rawExtras.
+  for (const col of raw.unknownKpiColumns ?? []) {
+    warnings.push({
+      code:    'UNKNOWN_KPI_KEY',
+      field:   col,
+      message: `Column "${col}" did not match any active KPI in the registry — value was not imported`,
+    })
   }
 
   const isValid = errors.length === 0
@@ -168,6 +193,7 @@ export function validateRow(
       wellness:     kpiValues.wellness,
       basket:       kpiValues.basket,
       crossSelling: kpiValues.crossSelling,
+      kpiValues,
       stagedAt:     new Date().toISOString(),
       errors:       [],
       warnings,

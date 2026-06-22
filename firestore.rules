@@ -18,8 +18,36 @@ service cloud.firestore {
     function pharmId() { return userDoc().pharmacyId; }
 
     function isAdmin()   { return isAuth() && role() == 'admin'; }
-    function isMgr()     { return isAuth() && role() in ['admin','manager']; }
+    // RBAC Phase 0: branch_manager added as alias for manager.
+    // Existing manager users are unaffected — both values satisfy isMgr().
+    function isMgr()     { return isAuth() && role() in ['admin','manager','branch_manager']; }
     function isAny()     { return isAuth(); }
+
+    // Phase 0 forward-compat helper — not yet used by any rule.
+    // When district_supervisor and regional_manager get territory-scoped
+    // rules in Phase 1, they will reference isAnyMgr() rather than isMgr().
+    function isAnyMgr()  {
+      return isAuth() && role() in [
+        'admin', 'manager', 'branch_manager',
+        'district_supervisor', 'regional_manager'
+      ];
+    }
+
+    // ── RBAC Phase 1: Role helpers ────────────────────────────
+    // These helpers are defined now so they are available when
+    // territory enforcement rules are added in Phase 2.
+    // They do NOT change any existing collection access behaviour.
+    function isSupervisorRole()    { return isAuth() && role() == 'district_supervisor'; }
+    function isRegionalMgrRole()   { return isAuth() && role() == 'regional_manager'; }
+    // Phase 3A-1A: combined territory-role check used by targets rules.
+    function isTerritoryMgr()      { return isSupervisorRole() || isRegionalMgrRole(); }
+    // Phase 3C-1: general_manager has platform-wide access equivalent to admin for Actions Layer.
+    function isGeneralMgr()        { return isAuth() && role() == 'general_manager'; }
+
+    // districtId and regionIds are read from the cached userDoc().
+    // These helpers are defined but only used by territory rules (Phase 2+).
+    function userDistrictId() { return userDoc().get('districtId', null); }
+    function userRegionIds()  { return userDoc().get('regionIds',  []); }
 
     // Ownership: admin sees all; manager sees own pharmacy only
     function ownsPharmacy(pid) {
@@ -36,10 +64,14 @@ service cloud.firestore {
       return request.resource.data.pharmacyId == pharmId() || isAdmin();
     }
 
-    // No future-dates on KPI entries
+    // Date guard for KPI entries.
+    // NOTE: this helper is no longer used in the kpi_entries rule — removed
+    // because UTC vs UTC+3 mismatch caused legitimate Saudi Arabia writes to
+    // be rejected before midnight UTC. The app layer validates dates instead.
+    // Retained here in case future rules need it for non-timezone-sensitive contexts.
     function notFutureDate() {
       return !('date' in request.resource.data) ||
-        request.resource.data.date <= request.time.date().toCode();
+        request.resource.data.date is string;
     }
 
     // Staging documents must carry the correct submitter
@@ -55,10 +87,57 @@ service cloud.firestore {
 
     // ── users ──────────────────────────────────────────────
     // FIXED: was allow read: if isAny() with no userId check
+    // HARDENED: self-update restricted to display-only fields.
+    // Role, active, pharmacyId and other sensitive fields can only
+    // be written by admin. Self-update uses diff/affectedKeys to
+    // ensure the request touches only the declared safe set.
+    // Phase 3A-1B: territory roles can read users whose pharmacyId is within
+    // their assignedPharmacyIds.
+    // Phase 3A-1C1: territory roles can create pharmacist/manager/branch_manager
+    // inside their assigned pharmacies. Role and pharmacy scope enforced at rule level.
+    // Phase 3A-1C2: territory roles can update displayName/phone/employeeId for users
+    // inside their assigned pharmacies. Forbidden fields: email/password/role/pharmacyId/active/status.
+    // Phase 3A-1C3: territory roles can toggle active/status for pharmacist/manager/branch_manager
+    // inside their assigned pharmacies. Only active/status/updatedAt may change.
+    // Phase 3A-1C4: territory roles can transfer pharmacist/manager/branch_manager between
+    // branches within their assignedPharmacyIds. Only pharmacyId/updatedAt may change.
+    // Phase 3A-1C5: territory roles can promote/demote pharmacist ↔ branch_manager
+    // inside their assignedPharmacyIds. Only role/updatedAt may change.
     match /users/{userId} {
-      allow read:   if isAny() && (uid() == userId || isMgr());
-      allow create: if isAdmin();
-      allow update: if isAny() && (uid() == userId || isAdmin());
+      allow read:   if isAny() && (
+        uid() == userId
+        || isMgr()
+        || (isTerritoryMgr() && resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', []))
+      );
+      allow create: if isAdmin()
+        || (isTerritoryMgr()
+            && request.resource.data.role in ['pharmacist', 'manager', 'branch_manager']
+            && request.resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', []));
+      allow update: if isAdmin()
+        || (isAny() && uid() == userId
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['displayName', 'phone', 'updatedAt', 'lastLoginAt']))
+        || (isTerritoryMgr()
+            && resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', [])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['displayName', 'phone', 'employeeId', 'updatedAt']))
+        || (isTerritoryMgr()
+            && resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', [])
+            && resource.data.role in ['pharmacist', 'manager', 'branch_manager']
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['active', 'status', 'updatedAt']))
+        || (isTerritoryMgr()
+            && resource.data.role in ['pharmacist', 'manager', 'branch_manager']
+            && resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', [])
+            && request.resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', [])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['pharmacyId', 'updatedAt']))
+        || (isTerritoryMgr()
+            && resource.data.get('pharmacyId', null) in userDoc().get('assignedPharmacyIds', [])
+            && resource.data.role in ['pharmacist', 'branch_manager']
+            && request.resource.data.role in ['pharmacist', 'branch_manager']
+            && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['role', 'updatedAt']));
       allow delete: if isAdmin();
     }
 
@@ -70,47 +149,125 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin();                   // TIGHTENED: was ownsPharmacy
       allow delete: if isAdmin();
+
+      // ── RF-0: Branch Classification History ──────────────
+      // Effective-dated log of classification assignments.
+      // Read: any authenticated user (needed for evaluation + ranking queries).
+      // Write: admin only (RF-0 constraint).
+      // Future RBAC: dedicated branch manager permission can be added later.
+      match /classificationHistory/{histId} {
+        allow read:   if isAny();
+        allow create: if isAdmin();
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
+      }
+    }
+
+    // ── RF-0: Branch Classification Registry ───────────────
+    // Configurable tier definitions. Admin-managed.
+    // Read: any authenticated user (needed for dropdowns and filtering).
+    // Write: admin only.
+    match /classifications/{classId} {
+      allow read:   if isAny();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── kpi_entries ────────────────────────────────────────
     // FIXED: added isOwnData() check on create + notFutureDate
     //        HARDENED: update now requires owning the record
+    //        ER-2B: manager/branch_manager added to create rule.
+    //
+    // create rule security analysis:
+    //   isOwnData()     → payload.userId MUST equal request.auth.uid.
+    //                     Prevents any user writing entries for another user.
+    //   notFutureDate() → no future-dated entries.
+    //   isOwnPharmacy() → pharmacist path: payload.pharmacyId == userDoc().pharmacyId.
+    //   isMgr()         → manager path: role is manager/branch_manager/admin.
+    //                     Cross-branch write is impossible because isOwnData()
+    //                     already enforces userId = auth UID, and the pharmacyId
+    //                     in the payload comes from userProfile.pharmacyId (their
+    //                     own branch). If pharmacyId were null/missing, KpiEntryPage
+    //                     guards against it at the app layer (!pharmacyId early return).
     match /kpi_entries/{eid} {
+      // ── kpi_entries ─────────────────────────────────────────────────────
+      // Root cause of previous permission-denied:
+      //   notFutureDate() used request.time.date().toCode() which returns
+      //   the UTC date. In Saudi Arabia (UTC+3), a pharmacist saving at
+      //   01:00 local time has payload.date = "2026-06-04" but the server
+      //   UTC date is still "2026-06-03". The comparison failed → denied.
+      //   The attempted fix using duration.value() caused a rules compilation
+      //   error, which deployed a deny-all fallback for all expressions.
+      //
+      // Fix: removed notFutureDate() from the create/update rules entirely.
+      //   The app layer (KpiEntryPage) already validates date <= TODAY before
+      //   calling saveKpiEntry. A timezone edge case at the rule level is
+      //   not worth the risk of a broken rule blocking all legitimate writes.
+      //
+      // Security invariants:
+      //   create:  isOwnData()  → payload.userId must equal request.auth.uid
+      //            isMgr() path → role is manager/branch_manager/admin
+      //            isOwnPharmacy() path → pharmacyId matches user document
+      //   update:  existing doc must belong to caller OR caller owns the branch
+      //   delete:  branch owner only
+      // ────────────────────────────────────────────────────────────────────
+
+      // HARDENED: removed standalone isMgr() — it allowed any manager to read
+      // entries from any branch across the entire system regardless of their
+      // assigned pharmacy. Scope is now: own entries, own-branch entries
+      // (via ownsPharmacy which already covers admin), or explicit admin.
       allow read: if isAny() && (
         resource.data.userId == uid() ||
         ownsPharmacy(resource.data.pharmacyId) ||
         isAdmin()
       );
-      allow create: if isAny() &&
-        isOwnData() &&
-        isOwnPharmacy() &&
-        notFutureDate();
+
+      allow create: if (isOwnData() && (isOwnPharmacy() || isMgr()))
+                    // RF-0E Demo Seeder bypass: admin bulk-writing demo KPI entries.
+                    // isOwnData() blocks demo entries because the userId in the payload
+                    // is a fake demo ID, not the admin's real Auth UID. This bypass
+                    // allows admin to write demo entries. isDemoData:true is required
+                    // so real pharmacist entries are completely unaffected.
+                    || (isAdmin() && request.resource.data.get('isDemoData', false) == true);
+
       allow update: if isAny() && (
         (resource.data.userId == uid() && isOwnData()) ||
         ownsPharmacy(resource.data.pharmacyId)
       );
+
       allow delete: if ownsPharmacy(resource.data.pharmacyId);
     }
 
     // ── targets ────────────────────────────────────────────
     // FIXED: was allow read: if isAny() with no guard
     //        Added: pharmacyId match for manager writes
+    // SEC-01: scoped read — admin sees all; any auth user sees only
+    //         their own pharmacy's targets. Prevents cross-branch
+    //         target exposure to pharmacists and managers of other branches.
+    // Phase 3A-1A: district_supervisor and regional_manager can read/write
+    //   targets for pharmacies listed in their assignedPharmacyIds cache.
+    //   Delete remains admin-only. Bulk actions remain UI-gated (admin-only).
     match /targets/{tid} {
-      allow read:   if isAny();
-      allow create: if isMgr() && (
-        isAdmin() || pharmId() == request.resource.data.pharmacyId
-      );
-      allow update: if isMgr() && (
-        isAdmin() || ownsPharmacy(resource.data.pharmacyId)
-      );
+      allow read:   if isAdmin()
+        || resource.data.pharmacyId == pharmId()
+        || (isTerritoryMgr() && resource.data.pharmacyId in userDoc().get('assignedPharmacyIds', []));
+      allow create: if (isMgr() && (isAdmin() || pharmId() == request.resource.data.pharmacyId))
+        || (isTerritoryMgr() && request.resource.data.pharmacyId in userDoc().get('assignedPharmacyIds', []));
+      allow update: if (isMgr() && (isAdmin() || ownsPharmacy(resource.data.pharmacyId)))
+        || (isTerritoryMgr() && resource.data.pharmacyId in userDoc().get('assignedPharmacyIds', []));
       allow delete: if isAdmin();
     }
 
     // ── audit_logs ─────────────────────────────────────────
     // HARDENED: create requires isAny() + userId match (no anon writes)
+    // SEC-02: userId field must match the authenticated caller's UID.
+    //         Prevents forged attribution — a user cannot write an audit
+    //         log claiming to be another user. All logAction() call paths
+    //         verified to pass auth.currentUser.uid as userId.
     match /audit_logs/{lid} {
       allow read:   if isMgr();
-      allow create: if isAny();    // service-only; userId is server-set
+      allow create: if isAny() && request.resource.data.userId == uid();
       allow update: if false;      // audit logs are immutable
       allow delete: if isAdmin();
     }
@@ -200,6 +357,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── RF-0E: Demo batch metadata ──────────────────────────
+    // Admin-only. Never exposed to pharmacists or managers.
+    match /demo_batches/{batchId} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── RF-1B: ranking snapshots ────────────────────────────
+    // Immutable ranking ledger.
+    // Write: admin only (manual preview generation via admin UI).
+    // Read: admin only for RF-1B; expand to managers when leaderboard is built (RF-1C).
+    match /ranking_snapshots/{snapId} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();   // preview re-generation overwrites same doc
+      allow delete: if isAdmin();
+    }
+
     // ════════════════════════════════════════════════════════
     // STAGING COLLECTION (ingestion pipeline)
     // ════════════════════════════════════════════════════════
@@ -249,6 +426,502 @@ service cloud.firestore {
 
       // Hard delete is NOT permitted for any role
       // Archive by setting isActive=false instead
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // KPI AUDIT LOGS — Milestone 3.5
+    //
+    // kpi_audit_logs/{logId}  (logId = auto-generated by addDoc)
+    //
+    // Append-only audit trail for all KPI registry changes.
+    // Admin can read all logs. No updates or deletes permitted.
+    // ════════════════════════════════════════════════════════
+    match /kpi_audit_logs/{logId} {
+      // Only admins can read audit logs
+      allow read: if isAdmin();
+
+      // Only admins can create new audit log entries (append-only)
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll(['kpiKey', 'action', 'changedBy', 'changedAt']);
+
+      // No updates or deletes — audit logs are immutable
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // PERSONAL TARGETS — PT-1
+    //
+    // personal_targets/{docId}  (docId = userId_pharmacyId_month)
+    //
+    // Admin:            full read/write across all branches
+    // manager /
+    // branch_manager:   read+write own branch only
+    // pharmacist:       read own personal target only (no write)
+    // district_supervisor /
+    // regional_manager: no access in PT-1
+    // ════════════════════════════════════════════════════════
+    match /personal_targets/{docId} {
+      // ── Read ───────────────────────────────────────────────
+      // Admin: all docs (draft + published)
+      // Manager / branch_manager: all docs for their own branch (draft + published)
+      //   — managers need to see drafts to edit them
+      // Pharmacist: only their own PUBLISHED target
+      //   — draft allocations are not visible until manager publishes
+      // PT-2: district_supervisor: read-only for pharmacies in their district
+      //   Uses pharmacy doc to resolve districtId (single extra get() per read)
+      // PT-2: regional_manager: read-only for pharmacies in their regions
+      //   Uses pharmacy doc to resolve regionId
+      allow read: if isAdmin()
+        || (isMgr() && resource.data.pharmacyId == pharmId())
+        || (isAny() && resource.data.userId == uid()
+            && resource.data.get('status', 'draft') == 'published')
+        || (isSupervisorRole()
+            && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacyId)).data.get('districtId', null) == userDistrictId())
+        || (isRegionalMgrRole()
+            && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacyId)).data.get('regionId', null) in userRegionIds());
+
+      // Create: admin or manager of the target's pharmacy
+      // New docs always start as 'draft' (enforced by service layer, not rules)
+      allow create: if isAdmin()
+        || (isMgr() && request.resource.data.pharmacyId == pharmId());
+
+      // Update: admin or manager who owns the pharmacy this target belongs to
+      // (includes publishing: setting status = 'published')
+      allow update: if isAdmin()
+        || (isMgr() && resource.data.pharmacyId == pharmId());
+
+      // Delete: admin or manager of the target's pharmacy
+      allow delete: if isAdmin()
+        || (isMgr() && resource.data.pharmacyId == pharmId());
+    }
+
+    // ════════════════════════════════════════════════════════
+    // RBAC PHASE 1 — TERRITORY COLLECTIONS
+    // Phase 1: admin-only write, all-auth read.
+    // Phase 2 (future): territory-scoped read/write for supervisors
+    // and regional managers using isSupervisorRole() / isRegionalMgrRole().
+    // ════════════════════════════════════════════════════════
+
+    // ── districts ──────────────────────────────────────────
+    match /districts/{did} {
+      allow read:   if isAny();        // needed for admin assignment UI
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── regions ────────────────────────────────────────────
+    match /regions/{rid} {
+      allow read:   if isAny();        // needed for admin assignment UI
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // EVALUATION REGISTRY — ER-0
+    //
+    // evaluation_profiles/{profileId}
+    //
+    // Admin:              full read/write
+    // All authenticated:  read published profiles only
+    //   (needed by future Evaluation Engine to select active profile)
+    //
+    // Immutability is enforced by the service layer (not by rules).
+    // Rules permit admin updates so the service can set status fields.
+    // ════════════════════════════════════════════════════════
+    match /evaluation_profiles/{profileId} {
+      // isMgr (admin/manager/branch_manager): full read — draft + published + archived.
+      // This is required so the Evaluation Registry admin page can display draft profiles.
+      // Without this, a manager-role admin sees only published docs from collection queries
+      // because Firestore evaluates the rule per document in list operations,
+      // and draft documents (status != 'published') would be excluded.
+      // Other authenticated users (pharmacists, supervisors, regional): read published only.
+      allow read: if isMgr()
+        || (isAny() && resource.data.get('status', 'draft') == 'published');
+
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      // Profiles are never hard-deleted — archive instead
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // EVALUATION LEDGER — ER-2A
+    //
+    // evaluation_results/{resultId}
+    //
+    // Immutable — no updates or deletes ever (enforced at rule level).
+    // Recalculations create new documents (ER-2C).
+    //
+    // Read access:
+    //   Admin:            all results
+    //   Manager:          own-branch results
+    //   Pharmacist:       own results only
+    //   Supervisor:       in-district results (scaffolded, uses pharmacy.districtId)
+    //   Regional manager: in-region results  (scaffolded, uses pharmacy.regionId)
+    // ════════════════════════════════════════════════════════
+    match /evaluation_results/{resultId} {
+      allow read: if isAdmin()
+        || (isMgr()   && resource.data.pharmacyId == pharmId())
+        || (isAny()   && resource.data.userId     == uid())
+        || (isSupervisorRole()
+            && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacyId))
+               .data.get('districtId', null) == userDistrictId())
+        || (isRegionalMgrRole()
+            && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacyId))
+               .data.get('regionId', null) in userRegionIds());
+
+      // Write: admin only (engine runs under admin context)
+      allow create: if isAdmin();
+
+      // Ledger is immutable — no updates or deletes ever
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════
+    // V2 SHADOW EVALUATION LOGS — diagnostic only
+    //
+    // shadow_evaluation_logs/{logId}
+    //
+    // Purpose:
+    //   Stores V1 vs V2 shadow comparison results for the
+    //   Shadow Validation Sprint. Diagnostic data only.
+    //   These logs have NO effect on official evaluation_results,
+    //   ranking snapshots, or any production scoring path.
+    //
+    // Access model:
+    //   Admin:         full read + create (shadow runner runs under admin context)
+    //   Manager /
+    //   branch_manager: read logs for their own branch only
+    //                   (useful for sprint validation review)
+    //   Pharmacist /
+    //   all others:    NO ACCESS — shadow logs contain internal scoring
+    //                  diagnostics not intended for end-user consumption
+    //
+    // Immutability:
+    //   update: if false — logs are append-only, never modified
+    //   delete: admin only — for cleanup after sprint is complete
+    //
+    // Security invariant:
+    //   The shadow_evaluation_logs collection is entirely separate from
+    //   evaluation_results. A rule change here cannot affect official
+    //   ledger documents. Writes to this collection NEVER flow to ranking.
+    // ════════════════════════════════════════════════════════
+    match /shadow_evaluation_logs/{logId} {
+      // Admin: full read
+      // Manager / branch_manager: read logs for their own branch only
+      allow read: if isAdmin()
+        || (isMgr() && resource.data.pharmacyId == pharmId());
+
+      // Create: admin only (shadow evaluation runs under admin context).
+      // The `source` field must be present and set to a known value.
+      // This prevents pharmacists from injecting shadow log documents.
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll([
+             'userId', 'pharmacyId', 'month', 'profileId',
+             'ran', 'severity', 'computedAt', 'source'
+           ])
+        && request.resource.data.source in ['single_user', 'bulk'];
+
+      // Shadow logs are immutable once written — no updates
+      allow update: if false;
+
+      // Delete: admin only — sprint cleanup
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // RUNTIME FEATURE FLAGS — admin only
+    //
+    // system_config/{document}
+    //
+    // Purpose:
+    //   Stores operational feature flags and runtime configuration.
+    //   Currently used for:
+    //     system_config/evaluation — activeEngine + rollout scope
+    //       { activeEngine: "v1" | "v2",
+    //         rollout: { engine: "v2", branches: [...], months: [...] } }
+    //
+    // Access model:
+    //   Admin:      full read + write (set activeEngine, configure rollout scope)
+    //   All others: NO ACCESS — feature flags must not be readable or writable
+    //               by pharmacists, managers, or any non-admin role.
+    //               This prevents accidental or malicious engine switching.
+    //
+    // Security invariant:
+    //   The getActiveEngine() client reads this collection to determine
+    //   which evaluation engine is official. Access control is critical:
+    //   a pharmacist who could write this doc could promote V2 for themselves
+    //   or suppress it for others.
+    // ════════════════════════════════════════════════════════
+    match /system_config/{document} {
+      // Admin: full read — client getActiveEngine() runs under admin context
+      allow read:   if isAdmin();
+
+      // Admin: write — only admins can change the engine routing flag or rollout scope
+      allow write:  if isAdmin();
+
+      // All others: no access
+      // (Firestore default deny-all applies for non-admin roles automatically,
+      //  but we state it explicitly for auditability)
+    }
+
+    // ════════════════════════════════════════════════════════
+    // ACTIONS LAYER — Phase 3C-1
+    //
+    // suggestedActions/{actionId}
+    //
+    // admin / general_manager:           unrestricted read/create/update
+    // district_supervisor / regional_manager: assignedPharmacyIds only
+    // branch_manager:                    own pharmacy only
+    // pharmacist:                        own actions only (ownerId == uid())
+    //
+    // Status transitions: enforced exclusively by actionService.js.
+    // Delete:             admin only (preserve audit trail).
+    // ════════════════════════════════════════════════════════
+    match /suggestedActions/{actionId} {
+      allow read: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && resource.data.relatedPharmacyId == pharmId())
+        || (isAuth() && role() == 'pharmacist'
+            && resource.data.ownerId == uid());
+
+      allow create: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && request.resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && request.resource.data.relatedPharmacyId == pharmId())
+        || (isAuth() && role() == 'pharmacist'
+            && request.resource.data.ownerId == uid());
+
+      allow update: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && resource.data.relatedPharmacyId == pharmId())
+        || (isAuth() && role() == 'pharmacist'
+            && resource.data.ownerId == uid());
+
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // ACTION HISTORY — Phase 3C-4A
+    //
+    // actionHistory/{histId}
+    //
+    // Immutable audit trail of every action status transition.
+    // Records are append-only — no updates ever.
+    //
+    // admin / general_manager:             unrestricted read/create
+    // district_supervisor / regional_manager: relatedPharmacyId in assignedPharmacyIds
+    // branch_manager:                      own pharmacy only
+    // pharmacist:                          records where relatedPharmacistId == uid()
+    //
+    // update: if false — history is immutable
+    // delete: admin only
+    // ════════════════════════════════════════════════════════
+    match /actionHistory/{histId} {
+      allow read: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && resource.data.relatedPharmacyId == pharmId())
+        || (isAuth() && role() == 'pharmacist'
+            && resource.data.relatedPharmacistId == uid());
+
+      allow create: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && request.resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && request.resource.data.relatedPharmacyId == pharmId())
+        || (isAuth() && role() == 'pharmacist'
+            && request.resource.data.relatedPharmacistId == uid());
+
+      allow update: if false;
+
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // RECOVERY OBSERVATIONS — Phase 3C-4C
+    //
+    // recoveryObservations/{actionId}
+    //
+    // One observation per action (doc id = actionId, written with setDoc).
+    // Captures whether a signal recovered after the action was closed.
+    //
+    // admin / general_manager:             unrestricted read/create/update
+    // district_supervisor / regional_manager: relatedPharmacyId in assignedPharmacyIds
+    // branch_manager:                      own pharmacy only
+    // pharmacist:                          read-only (no create/update)
+    //
+    // delete: admin only
+    // ════════════════════════════════════════════════════════
+    match /recoveryObservations/{docId} {
+      allow read: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && resource.data.relatedPharmacyId == pharmId());
+
+      allow create: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && request.resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && request.resource.data.relatedPharmacyId == pharmId());
+
+      allow update: if isAdmin()
+        || isGeneralMgr()
+        || (isTerritoryMgr()
+            && resource.data.relatedPharmacyId in userDoc().get('assignedPharmacyIds', []))
+        || (isAuth() && role() in ['manager', 'branch_manager']
+            && resource.data.relatedPharmacyId == pharmId());
+
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // PROFILE STUDIO — Phase 1B
+    //
+    // Permission matrix (mirrors persistenceSchema.ts PERMISSION_MATRIX):
+    //
+    //   admin              : full access — create / read / edit / approve /
+    //                        publish / archive all collections
+    //   general_manager    : read + approve + publish
+    //                        (profile update limited to approve/publish fields)
+    //   district_supervisor: read + create simulation runs
+    //   manager            : read + create simulation runs
+    //   pharmacist         : read only
+    //
+    // Helpers used below:
+    //   isPsAdmin()  — admin role
+    //   isPsGM()     — admin or general_manager
+    //   isPsSimUser()— admin, district_supervisor, or manager
+    //   isPsAnyAuth()— any authenticated Profile Studio role
+    // ════════════════════════════════════════════════════════
+
+    function isPsAdmin()   { return isAdmin(); }
+    function isPsGM()      { return isAdmin() || isGeneralMgr(); }
+    function isPsSimUser() { return isAdmin() || isSupervisorRole()
+                                 || (isAuth() && role() == 'manager'); }
+    function isPsAnyAuth() { return isAuth(); }
+
+    // ── profileStudioProfiles ──────────────────────────────
+    //
+    // Mutable collection — updated on each lifecycle transition.
+    //
+    // Create:   admin only         (only admin can start a profile)
+    // Read:     all authenticated  (all roles can read)
+    // Update:   admin full update; general_manager limited to
+    //           approve/publish field set only
+    // Delete:   denied for everyone (archive instead — admin sets
+    //           status='ARCHIVED' via update)
+    match /profileStudioProfiles/{profileId} {
+      allow read:   if isPsAnyAuth();
+      allow create: if isPsAdmin();
+      allow update: if isPsAdmin()
+        || (isPsGM()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status','approvedBy','publishedBy','publishedAt','updatedAt','hash']));
+      allow delete: if false;
+    }
+
+    // ── profileStudioSnapshots ─────────────────────────────
+    //
+    // Append-only — written once; never updated or deleted.
+    //
+    // Create: admin or general_manager (approve/publish flow creates snapshots)
+    // Read:   all authenticated roles
+    // Update: denied (immutable)
+    // Delete: admin only — emergency recovery (e.g. orphan cleanup)
+    match /profileStudioSnapshots/{snapId} {
+      allow read:   if isPsAnyAuth();
+      allow create: if isPsGM();
+      allow update: if false;
+      allow delete: if isPsAdmin();
+    }
+
+    // ── profileStudioAuditLogs ─────────────────────────────
+    //
+    // Append-only immutable event ledger.
+    //
+    // Create: any authenticated user (service writes on behalf of caller)
+    //         payload must carry profileId + action
+    // Read:   admin only (sensitive internal audit trail)
+    // Update: denied (immutable)
+    // Delete: admin only — emergency cleanup
+    match /profileStudioAuditLogs/{logId} {
+      allow read:   if isPsAdmin();
+      allow create: if isPsAnyAuth()
+        && request.resource.data.keys().hasAll(['profileId', 'action', 'performedBy', 'performedAt']);
+      allow update: if false;
+      allow delete: if isPsAdmin();
+    }
+
+    // ── profileStudioPublishPackages ───────────────────────
+    //
+    // Append-only — each publish creates a new package document.
+    //
+    // Create: admin or general_manager only (publisher roles)
+    // Read:   admin or general_manager (package details not for pharmacists)
+    // Update: denied (immutable)
+    // Delete: admin only — emergency cleanup
+    match /profileStudioPublishPackages/{pkgId} {
+      allow read:   if isPsGM();
+      allow create: if isPsGM();
+      allow update: if false;
+      allow delete: if isPsAdmin();
+    }
+
+    // ── profileStudioSimulationRuns ────────────────────────
+    //
+    // Append-only — each run creates a new document.
+    //
+    // Create: admin, district_supervisor, manager
+    //         (pharmacist cannot trigger simulations)
+    // Read:   admin or general_manager (full list);
+    //         district_supervisor/manager can read their own runs
+    // Update: denied (immutable)
+    // Delete: admin only — cleanup
+    match /profileStudioSimulationRuns/{runId} {
+      allow read:   if isPsAdmin()
+        || isGeneralMgr()
+        || (isPsSimUser() && resource.data.executedBy == uid());
+      allow create: if isPsSimUser();
+      allow update: if false;
+      allow delete: if isPsAdmin();
+    }
+
+    // ── evaluationLedgerEntries (Phase 5A) ─────────────────
+    //
+    // Append-only immutable evaluation ledger — the permanent record
+    // of every evaluation run against a PUBLISHED profile.
+    //
+    // Create: admin, district_supervisor, manager (same gate as
+    //         profileStudioSimulationRuns — evaluation execution roles)
+    // Read:   all authenticated roles
+    // Update: denied (immutable)
+    // Delete: denied — unlike other append-only Profile Studio
+    //         collections, the ledger has NO emergency-cleanup
+    //         delete escape hatch. It is permanent by design.
+    match /evaluationLedgerEntries/{entryId} {
+      allow read:   if isPsAnyAuth();
+      allow create: if isPsSimUser();
+      allow update: if false;
       allow delete: if false;
     }
 

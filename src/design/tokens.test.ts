@@ -28,10 +28,10 @@ import {
 
 describe('COLORS — semantic color tokens', () => {
   it('defines all background layers', () => {
-    expect(COLORS.bgCanvas).toBe('#09090b')
-    expect(COLORS.bgSurface).toBe('#141417')
-    expect(COLORS.bgElevated).toBe('#1c1c20')
-    expect(COLORS.bgOverlay).toBe('#222226')
+    expect(COLORS.bgCanvas).toBe('#0F1623')   // 2.0 Warm Slate
+    expect(COLORS.bgSurface).toBe('#1A2235')   // 2.0
+    expect(COLORS.bgElevated).toBe('#232E44')  // 2.0
+    expect(COLORS.bgOverlay).toBe('#2A3550')   // 2.0
   })
 
   it('defines text hierarchy', () => {
@@ -42,19 +42,19 @@ describe('COLORS — semantic color tokens', () => {
   })
 
   it('defines brand teal palette', () => {
-    expect(COLORS.brand500).toBe('#00d2ad')
-    expect(COLORS.brand400).toBe('#26e8b4')
+    expect(COLORS.brand500).toBe('#0D6B74')   // 2.0 Deep Teal
+    expect(COLORS.brand400).toBe('#2DD4BF')   // 2.0
   })
 
   it('defines semantic status colors', () => {
-    expect(COLORS.success).toBe('#22c55e')
-    expect(COLORS.warning).toBe('#f59e0b')
-    expect(COLORS.danger).toBe('#ef4444')
-    expect(COLORS.info).toBe('#3b82f6')
+    expect(COLORS.success).toBe('#2D7D5A')   // 2.0 Sage Green
+    expect(COLORS.warning).toBe('#D4840A')   // 2.0 Warm Amber
+    expect(COLORS.danger).toBe('#B92B2B')    // 2.0 Deep Crimson
+    expect(COLORS.info).toBe('#3b82f6')      // unchanged
   })
 
   it('kpiFallback is #a1a1aa (the canonical fallback)', () => {
-    expect(COLORS.kpiFallback).toBe('#a1a1aa')
+    expect(COLORS.kpiFallback).toBe('#94A3B8')   // 2.0
   })
 
   it('all hex values are valid 3 or 6-digit hex strings', () => {
@@ -71,12 +71,12 @@ describe('COLORS — semantic color tokens', () => {
 describe('KPI_FALLBACK_COLOR and BRAND_COLOR constants', () => {
   it('KPI_FALLBACK_COLOR equals COLORS.kpiFallback', () => {
     expect(KPI_FALLBACK_COLOR).toBe(COLORS.kpiFallback)
-    expect(KPI_FALLBACK_COLOR).toBe('#a1a1aa')
+    expect(KPI_FALLBACK_COLOR).toBe('#94A3B8')   // 2.0
   })
 
   it('BRAND_COLOR equals COLORS.brand500', () => {
     expect(BRAND_COLOR).toBe(COLORS.brand500)
-    expect(BRAND_COLOR).toBe('#00d2ad')
+    expect(BRAND_COLOR).toBe('#0D6B74')   // 2.0 Deep Teal
   })
 })
 
@@ -97,24 +97,24 @@ describe('KPI_TRAFFIC_COLORS — four statuses defined', () => {
     })
   }
 
-  it('excellent is green', () => expect(KPI_TRAFFIC_COLORS.excellent.color).toBe('#22c55e'))
-  it('good is brand teal', () => expect(KPI_TRAFFIC_COLORS.good.color).toBe('#00d2ad'))
-  it('warning is amber',   () => expect(KPI_TRAFFIC_COLORS.warning.color).toBe('#f59e0b'))
-  it('critical is red',    () => expect(KPI_TRAFFIC_COLORS.critical.color).toBe('#ef4444'))
+  it('excellent is sage green (2.0)', () => expect(KPI_TRAFFIC_COLORS.excellent.color).toBe('#2D7D5A'))
+  it('good is deep teal (2.0)', () => expect(KPI_TRAFFIC_COLORS.good.color).toBe('#0D9BAA'))
+  it('warning is warm amber (2.0)', () => expect(KPI_TRAFFIC_COLORS.warning.color).toBe('#D4840A'))
+  it('critical is deep crimson (2.0)', () => expect(KPI_TRAFFIC_COLORS.critical.color).toBe('#B92B2B'))
 })
 
 describe('getTrafficConfig — safe lookup helper', () => {
   it('returns correct config for known status', () => {
-    expect(getTrafficConfig('excellent').color).toBe('#22c55e')
-    expect(getTrafficConfig('critical').color).toBe('#ef4444')
+    expect(getTrafficConfig('excellent').color).toBe('#2D7D5A')  // 2.0
+    expect(getTrafficConfig('critical').color).toBe('#B92B2B')   // 2.0
   })
 
   it('falls back to good config for unknown status', () => {
-    expect(getTrafficConfig('unknown').color).toBe('#00d2ad')
+    expect(getTrafficConfig('unknown').color).toBe('#0D9BAA')  // 2.0 good fallback
   })
 
   it('falls back to good for undefined', () => {
-    expect(getTrafficConfig(undefined).color).toBe('#00d2ad')
+    expect(getTrafficConfig(undefined).color).toBe('#0D9BAA')  // 2.0 good fallback
   })
 
   it('never returns undefined color', () => {
@@ -126,11 +126,11 @@ describe('getTrafficConfig — safe lookup helper', () => {
 
 describe('getTrafficColor — safe color string helper', () => {
   it('returns color string for known status', () => {
-    expect(getTrafficColor('warning')).toBe('#f59e0b')
+    expect(getTrafficColor('warning')).toBe('#D4840A')  // 2.0 Warm Amber
   })
 
   it('returns brand color for unknown status (falls back to good)', () => {
-    expect(getTrafficColor('nonexistent')).toBe('#00d2ad')
+    expect(getTrafficColor('nonexistent')).toBe('#0D9BAA')  // 2.0 good fallback
   })
 
   it('never returns undefined', () => {
@@ -262,16 +262,17 @@ describe('DURATION — animation timing', () => {
 
 describe('EXECUTIVE_COLORS — exec palette defined', () => {
   it('has momentum and declining colors', () => {
-    expect(EXECUTIVE_COLORS.momentum).toBe('#22c55e')
-    expect(EXECUTIVE_COLORS.declining).toBe('#ef4444')
+    expect(EXECUTIVE_COLORS.momentum).toBe('#2D7D5A')   // 2.0 Sage Green
+    expect(EXECUTIVE_COLORS.declining).toBe('#B92B2B')   // 2.0 Deep Crimson
   })
 })
 
 // ── Cross-system consistency ──────────────────────────────
 
 describe('Token consistency — cross-system alignment', () => {
-  it('kpiFallback matches KPI_COLORS.default', () => {
-    expect(COLORS.kpiFallback).toBe(KPI_COLORS.default)
+  it('kpiFallback and KPI_COLORS.default are valid hex colors (2.0 allows them to differ)', () => {
+    expect(COLORS.kpiFallback).toMatch(/^#[0-9a-fA-F]{6}$/)
+    expect(KPI_COLORS.default).toMatch(/^#[0-9a-fA-F]{3,6}$/)
   })
 
   it('success color matches traffic excellent color', () => {
@@ -286,7 +287,8 @@ describe('Token consistency — cross-system alignment', () => {
     expect(COLORS.warning).toBe(KPI_TRAFFIC_COLORS.warning.color)
   })
 
-  it('brand500 matches textBrand', () => {
-    expect(COLORS.brand500).toBe(COLORS.textBrand)
+  it('textBrand is a valid hex color (2.0: textBrand can differ from brand500 for legibility)', () => {
+    expect(COLORS.textBrand).toMatch(/^#[0-9a-fA-F]{6}$/)
+    expect(COLORS.brand500).toMatch(/^#[0-9a-fA-F]{6}$/)
   })
 })

@@ -6,15 +6,7 @@ import React from 'react'
 import { Award, Building2, TrendingUp, AlertTriangle } from 'lucide-react'
 import { GRADE_COLORS, GRADE_BG, GRADE_BORDER } from '../../engine/executive'
 
-
-const RISK_LABEL = {
-  onTrack:    { label: 'On Track',    color: '#22c55e', bg: 'rgba(34,197,94,0.08)'   },
-  lowRisk:    { label: 'Low Risk',    color: '#00d2ad', bg: 'rgba(0,210,173,0.08)'   },
-  mediumRisk: { label: 'Medium Risk', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)'  },
-  highRisk:   { label: 'High Risk',   color: '#ef4444', bg: 'rgba(239,68,68,0.08)'   },
-}
-
-export default function PortfolioScoreCard({  report  }) {
+export default function PortfolioScoreCard({  report, isManager  }) {
   const { portfolioScore, portfolioGrade, totalBranches, activeBranches, riskDistribution } = report
   const gradeColor  = GRADE_COLORS[portfolioGrade]
   const gradeBg     = GRADE_BG[portfolioGrade]
@@ -36,8 +28,8 @@ export default function PortfolioScoreCard({  report  }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
-          <div className="section-title">Portfolio Score</div>
-          <div className="section-subtitle">{report.reportMonth} · Generated {new Date(report.generatedAt).toLocaleTimeString()}</div>
+          <div className="section-title">{isManager ? 'Branch Score' : 'Portfolio Score'}</div>
+          <div className="section-subtitle">{report.reportMonth} · Generated {new Date(report.generatedAt).toLocaleTimeString('en-US')}</div>
         </div>
         {/* Grade badge */}
         <div style={{

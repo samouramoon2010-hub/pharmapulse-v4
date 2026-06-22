@@ -154,7 +154,7 @@ describe('Firestore empty fallback', () => {
   it('merging empty remote produces target input configs', () => {
     const merged = mergeRemoteRegistryWithDefaults({})
     const configs = getTargetInputConfigs(merged)
-    expect(configs).toHaveLength(5)
+    expect(configs).toHaveLength(6)
   })
 })
 

@@ -27,9 +27,9 @@ import {
 // ─────────────────────────────────────────────────────────────
 
 describe('getTargetInputConfigs — generation', () => {
-  it('returns exactly 5 configs (core active KPIs only)', () => {
+  it('returns 6 configs (5 core + insuranceConversion pilot with targetInputEnabled)', () => {
     const configs = getTargetInputConfigs()
-    expect(configs).toHaveLength(5)
+    expect(configs).toHaveLength(6) // 5 core production + 1 pilot (insuranceConversion)
   })
 
   it('all returned configs have isVisibleForTargetInput = true', () => {
@@ -98,9 +98,15 @@ describe('getTargetInputConfigs — field order stability', () => {
     expect(configs[0].key).toBe('wasfaty')
   })
 
-  it('crossSelling is last of the core KPIs', () => {
+  it('crossSelling is last of the core KPIs, insuranceConversion comes after (pilot)', () => {
     const configs = getTargetInputConfigs()
-    expect(configs[configs.length - 1].key).toBe('crossSelling')
+    // crossSelling = sortOrder 50, insuranceConversion = sortOrder 110
+    // crossSelling at index 4 (0-indexed), insuranceConversion at index 5
+    const crossIdx = configs.findIndex((c) => c.key === 'crossSelling')
+    const insIdx   = configs.findIndex((c) => c.key === 'insuranceConversion')
+    expect(crossIdx).toBeGreaterThanOrEqual(0)
+    expect(insIdx).toBeGreaterThan(crossIdx)
+    expect(configs[configs.length - 1].key).toBe('insuranceConversion')
   })
 })
 

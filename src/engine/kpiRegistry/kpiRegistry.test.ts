@@ -56,11 +56,11 @@ describe('defaultKpiRegistry — production key completeness', () => {
   })
 
   it('has exactly 10 KPI definitions', () => {
-    expect(Object.keys(DEFAULT_KPI_REGISTRY)).toHaveLength(10)
+    expect(Object.keys(DEFAULT_KPI_REGISTRY)).toHaveLength(11)
   })
 
   it('DEFAULT_ALL_KPI_KEYS contains all 10 keys', () => {
-    expect(DEFAULT_ALL_KPI_KEYS).toHaveLength(10)
+    expect(DEFAULT_ALL_KPI_KEYS).toHaveLength(11)
     PRODUCTION_KEYS.forEach((key) => {
       expect(DEFAULT_ALL_KPI_KEYS).toContain(key)
     })
@@ -87,7 +87,7 @@ describe('defaultKpiRegistry — all production KPIs are active', () => {
   })
 
   it('DEFAULT_ACTIVE_KPI_KEYS contains all 10 production keys', () => {
-    expect(DEFAULT_ACTIVE_KPI_KEYS).toHaveLength(10)
+    expect(DEFAULT_ACTIVE_KPI_KEYS).toHaveLength(11)
     PRODUCTION_KEYS.forEach((key) => {
       expect(DEFAULT_ACTIVE_KPI_KEYS).toContain(key)
     })
@@ -95,7 +95,7 @@ describe('defaultKpiRegistry — all production KPIs are active', () => {
 
   it('getActiveKpis() returns all 10 production KPIs', () => {
     const active = getActiveKpis(DEFAULT_KPI_REGISTRY)
-    expect(active).toHaveLength(10)
+    expect(active).toHaveLength(11)
     PRODUCTION_KEYS.forEach((key) => {
       expect(active.map((k) => k.key)).toContain(key)
     })
@@ -411,7 +411,7 @@ describe('defaultKpiRegistry — field completeness', () => {
 describe('kpiRegistryTypes — utility functions', () => {
   it('getActiveKpis returns all 10 active KPIs sorted by sortOrder', () => {
     const active = getActiveKpis(DEFAULT_KPI_REGISTRY)
-    expect(active).toHaveLength(10)
+    expect(active).toHaveLength(11)
     for (let i = 1; i < active.length; i++) {
       expect(active[i].sortOrder).toBeGreaterThan(active[i - 1].sortOrder)
     }
@@ -445,7 +445,7 @@ describe('kpiRegistryTypes — utility functions', () => {
       expect(kpi.visibility.dashboardEnabled).toBe(true)
     })
     // All 10 production KPIs have dashboardEnabled = true
-    expect(dash).toHaveLength(10)
+    expect(dash).toHaveLength(11)
   })
 
   it('validateWeights returns false for empty registry', () => {

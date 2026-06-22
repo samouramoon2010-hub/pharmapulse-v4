@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Cairo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Cairo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -16,18 +16,24 @@
   --topbar-h:           52px;
   --mobile-nav-h:       60px;
 
-  /* ── Premium Zinc Dark (default) ────────────────────────── */
-  --bg-canvas:    #09090b;
-  --bg-surface:   #141417;
-  --bg-elevated:  #1c1c20;
-  --bg-overlay:   #222226;
-  --bg-hover:     rgba(255,255,255,0.04);
-  --bg-active:    rgba(0,210,173,0.08);
+  /* ════════════════════════════════════════════════════════
+     PharmaPulse 2.0 Design Tokens — Dark-First Default
+     Brand: Deep Teal / Warm Slate / Calm Authority
+     ════════════════════════════════════════════════════════ */
 
-  --border-subtle:  rgba(255,255,255,0.06);
+  /* ── 2.0 Primary Backgrounds ────────────────────────────── */
+  --bg-canvas:    #0F1623;
+  --bg-surface:   #1A2235;
+  --bg-elevated:  #232E44;
+  --bg-overlay:   #2A3550;
+  --bg-hover:     rgba(255,255,255,0.04);
+  --bg-active:    rgba(13,107,116,0.12);
+
+  /* ── 2.0 Borders ────────────────────────────────────────── */
+  --border-subtle:  #2A3550;
   --border-default: rgba(255,255,255,0.09);
-  --border-strong:  rgba(255,255,255,0.14);
-  --border-brand:   rgba(0,210,173,0.25);
+  --border-strong:  rgba(255,255,255,0.15);
+  --border-brand:   rgba(13,107,116,0.35);
 
   /* aliases for gradual migration */
   --bg-base:       var(--bg-canvas);
@@ -35,26 +41,61 @@
   --border:        var(--border-subtle);
   --border-hover:  var(--border-default);
 
-  --text-primary:    #fafafa;
-  --text-secondary:  #a1a1aa;
-  --text-muted:      #52525b;
-  --text-brand:      #00d2ad;
+  /* ── 2.0 Text ───────────────────────────────────────────── */
+  --text-primary:    #F1F5F9;
+  --text-secondary:  #94A3B8;
+  --text-muted:      #64748B;
+  --text-brand:      #0D9BAA;
 
-  --brand-300:  #4dffc9;
-  --brand-400:  #26e8b4;
-  --brand-500:  #00d2ad;
-  --brand-600:  #00a989;
+  /* ── 2.0 Brand — Deep Teal ──────────────────────────────── */
+  --brand-300:  #5EEAD4;
+  --brand-400:  #2DD4BF;
+  --brand-500:  #0D6B74;
+  --brand-600:  #0A5560;
 
-  --sidebar-bg: rgba(9,9,11,0.97);
-  --topbar-bg:  rgba(9,9,11,0.88);
-  --input-bg:   rgba(20,20,23,0.8);
-  --modal-bg:   rgba(14,14,16,0.99);
+  /* ── 2.0 Accent — Soft Cyan (for highlights only) ───────── */
+  --accent-400: #22D3EE;
+  --accent-500: #06B6D4;
 
-  /* ── KPI Status ─────────────────────────────────────────── */
-  --kpi-excellent: #22c55e;
-  --kpi-good:      #00d2ad;
-  --kpi-warning:   #f59e0b;
-  --kpi-critical:  #ef4444;
+  /* ── 2.0 Sidebar / Topbar ───────────────────────────────── */
+  --sidebar-bg: #1E2A3A;
+  --topbar-bg:  rgba(15,22,35,0.92);
+  --input-bg:   rgba(26,34,53,0.8);
+  --modal-bg:   rgba(15,22,35,0.99);
+
+  /* ── 2.0 Semantic Status ────────────────────────────────── */
+  /* Sage Green (calm, not neon) */
+  --status-success:        #2D7D5A;
+  --status-success-bg:     rgba(45,125,90,0.10);
+  --status-success-border: rgba(45,125,90,0.25);
+  --status-success-text:   #4ADE80;
+
+  /* Warm Amber (attention, not alarm) */
+  --status-warning:        #D4840A;
+  --status-warning-bg:     rgba(212,132,10,0.10);
+  --status-warning-border: rgba(212,132,10,0.25);
+  --status-warning-text:   #FCD34D;
+
+  /* Deep Crimson (crisis only) */
+  --status-critical:        #B92B2B;
+  --status-critical-bg:     rgba(185,43,43,0.10);
+  --status-critical-border: rgba(185,43,43,0.28);
+  --status-critical-text:   #FCA5A5;
+
+  /* Teal info (brand-aligned) */
+  --status-info:        #0D6B74;
+  --status-info-bg:     rgba(13,107,116,0.10);
+  --status-info-border: rgba(13,107,116,0.28);
+  --status-info-text:   #2DD4BF;
+
+  /* ── Legacy KPI traffic-light (kept for component compat) ── */
+  --kpi-excellent: #2D7D5A;
+  --kpi-good:      #0D9BAA;
+  --kpi-warning:   #D4840A;
+  --kpi-critical:  #B92B2B;
+
+  /* Alias — several pages reference --bg-input; canonical token is --input-bg */
+  --bg-input: var(--input-bg);
 
   color-scheme: dark;
 }
@@ -73,15 +114,15 @@
   }
 
   body {
-    /* Use Inter for numbers/latin, Cairo for Arabic */
-    font-family: 'Inter', 'Cairo', system-ui, sans-serif;
+    /* Inter for Latin/numbers, IBM Plex Sans Arabic for Arabic content, Cairo as fallback */
+    font-family: 'Inter', 'IBM Plex Sans Arabic', 'Cairo', system-ui, sans-serif;
     font-feature-settings: "tnum" 1, "kern" 1;
     background-color: var(--bg-canvas);
     color: var(--text-primary);
     min-height: 100vh;
-    /* Extremely subtle canvas texture */
+    /* Subtle executive canvas — teal at very low opacity, not neon */
     background-image:
-      radial-gradient(ellipse 80% 40% at 50% 0%, rgba(0,210,173,0.04) 0%, transparent 70%);
+      radial-gradient(ellipse 80% 40% at 50% 0%, rgba(13,107,116,0.06) 0%, transparent 70%);
     background-attachment: fixed;
     transition: background-color 0.3s ease, color 0.3s ease;
   }
@@ -108,7 +149,7 @@
   input:not([type=range]):not([type=checkbox]):not([type=radio]):focus,
   textarea:focus, select:focus {
     border-color: var(--brand-500);
-    box-shadow: 0 0 0 2px rgba(0,210,173,0.12);
+    box-shadow: 0 0 0 2px rgba(13,107,116,0.20);
     background: var(--bg-elevated);
     outline: none;
   }
@@ -133,13 +174,13 @@
     letter-spacing: -0.01em;
   }
   .btn-primary {
-    @apply btn text-zinc-950 font-semibold;
+    @apply btn text-white font-semibold;
     background: var(--brand-500);
     box-shadow: 0 1px 2px rgba(0,0,0,0.3);
   }
   .btn-primary:hover:not(:disabled) {
-    background: var(--brand-400);
-    box-shadow: 0 2px 8px rgba(0,210,173,0.25);
+    background: var(--brand-600);
+    box-shadow: 0 2px 8px rgba(13,107,116,0.30);
   }
   .btn-secondary {
     @apply btn;
@@ -320,8 +361,8 @@
   }
   .nav-item.active {
     background: var(--bg-active);
-    color: var(--brand-400);
-    border-color: rgba(0,210,173,0.12);
+    color: var(--text-brand);
+    border-color: var(--border-brand);
   }
   .nav-item-icon {
     display: flex;
@@ -334,7 +375,7 @@
     transition: all 0.12s;
   }
   .nav-item-icon:hover { background: var(--bg-hover); color: var(--text-secondary); }
-  .nav-item-icon.active { background: var(--bg-active); color: var(--brand-400); }
+  .nav-item-icon.active { background: var(--bg-active); color: var(--text-brand); }
 
   /* ── BADGES ──────────────────────────────────────────────── */
   .badge {
@@ -348,12 +389,12 @@
     padding: 1px 8px;
     font-family: 'Inter', sans-serif;
   }
-  .badge-success { background:rgba(34,197,94,0.08);  color:#4ade80; border-color:rgba(34,197,94,0.15); }
-  .badge-warning { background:rgba(245,158,11,0.08); color:#fbbf24; border-color:rgba(245,158,11,0.15); }
-  .badge-danger  { background:rgba(239,68,68,0.08);  color:#f87171; border-color:rgba(239,68,68,0.15); }
-  .badge-info    { background:rgba(59,130,246,0.08); color:#60a5fa; border-color:rgba(59,130,246,0.15); }
-  .badge-brand   { background:rgba(0,210,173,0.08);  color:var(--brand-400); border-color:var(--border-brand); }
-  .badge-neutral { background:var(--bg-elevated);    color:var(--text-muted); border-color:var(--border-subtle); }
+  .badge-success { background:var(--status-success-bg);  color:var(--status-success-text); border-color:var(--status-success-border); }
+  .badge-warning { background:var(--status-warning-bg);  color:var(--status-warning-text); border-color:var(--status-warning-border); }
+  .badge-danger  { background:var(--status-critical-bg); color:var(--status-critical-text); border-color:var(--status-critical-border); }
+  .badge-info    { background:var(--status-info-bg);     color:var(--status-info-text);     border-color:var(--status-info-border); }
+  .badge-brand   { background:var(--status-info-bg);     color:var(--text-brand);           border-color:var(--border-brand); }
+  .badge-neutral { background:var(--bg-elevated);        color:var(--text-muted);           border-color:var(--border-subtle); }
 
   /* ── PROGRESS ────────────────────────────────────────────── */
   .progress-track {
@@ -420,15 +461,15 @@
     transition: color 0.15s;
     border-radius: 0.5rem;
   }
-  .mobile-nav-item.active { color: var(--brand-400); }
+  .mobile-nav-item.active { color: var(--text-brand); }
   .mobile-fab {
     display: flex; align-items: center; justify-content: center;
     width: 44px; height: 44px;
     border-radius: 0.75rem;
     background: var(--brand-500);
-    color: #09090b;
+    color: #ffffff;
     transform: translateY(-8px);
-    box-shadow: 0 4px 14px rgba(0,210,173,0.3);
+    box-shadow: 0 4px 14px rgba(13,107,116,0.35);
     transition: transform 0.2s ease, filter 0.15s ease;
   }
   .mobile-fab:hover { transform: translateY(-10px); filter: brightness(1.08); }
@@ -439,7 +480,7 @@
    ══════════════════════════════════════════════════════════ */
 @layer utilities {
   .text-gradient {
-    background: linear-gradient(135deg, var(--brand-300), var(--brand-500));
+    background: linear-gradient(135deg, #5EEAD4, #0D6B74);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
   }
   .glass {
@@ -874,23 +915,23 @@
   --kpi-crossSelling: #8b5cf6;
   --kpi-fallback:     #a1a1aa;
 
-  /* Traffic-light semantic (mirrors TRAFFIC_COLORS in engine) */
-  --traffic-excellent: #22c55e;
-  --traffic-good:      #00d2ad;
-  --traffic-warning:   #f59e0b;
-  --traffic-critical:  #ef4444;
+  /* Traffic-light semantic — calmer 2.0 palette */
+  --traffic-excellent: #2D7D5A;
+  --traffic-good:      #0D9BAA;
+  --traffic-warning:   #D4840A;
+  --traffic-critical:  #B92B2B;
 
-  /* Risk colors */
-  --risk-low:      #22c55e;
-  --risk-medium:   #f59e0b;
-  --risk-high:     #ef4444;
-  --risk-critical: #dc2626;
+  /* Risk colors — 2.0 */
+  --risk-low:      #2D7D5A;
+  --risk-medium:   #D4840A;
+  --risk-high:     #B92B2B;
+  --risk-critical: #991B1B;
 
-  /* Executive palette */
-  --exec-momentum:  #22c55e;
-  --exec-declining: #ef4444;
-  --exec-stable:    #00d2ad;
-  --exec-benchmark: #6366f1;
+  /* Executive palette — 2.0 */
+  --exec-momentum:  #2D7D5A;
+  --exec-declining: #B92B2B;
+  --exec-stable:    #0D9BAA;
+  --exec-benchmark: #6366F1;
 
   /* Spacing tokens */
   --space-1: 4px;
@@ -907,11 +948,56 @@
   --radius-card: 12px;
   --radius-full: 9999px;
 
+  /* ── Theme Engine T1 — safe baseline defaults ───────────────
+     Real values are set on document.documentElement by
+     theme/ThemeProvider.jsx (src/design/themeEngine.ts) once it
+     mounts. These :root defaults exist purely so nothing is
+     "missing" before JS runs (SSR / first paint) — they mirror the
+     Corporate preset, the engine's default theme. */
+  --color-primary:     #1D4E89;
+  --color-secondary:   #3B82C4;
+  --color-background:  var(--bg-canvas);
+  --color-surface:     var(--bg-surface);
+  --color-card:        var(--bg-elevated);
+  --color-border:      var(--border-subtle);
+  --color-text:        var(--text-primary);
+  --color-muted-text:  var(--text-muted);
+  --color-success:     var(--status-success);
+  --color-warning:     var(--status-warning);
+  --color-danger:      var(--status-critical);
+  --color-info:        var(--status-info);
+  --radius-button:           8px;
+  --density-card-padding:    16px;
+  --density-row-height:      40px;
+  --chart-1: #1D4E89;
+  --chart-2: #3B82C4;
+  --chart-3: #1E8E5A;
+  --chart-4: #C77700;
+  --chart-5: #8E44AD;
+  --chart-6: #C0392B;
+
   /* Shadow tokens */
-  --shadow-card:  0 0 0 1px rgba(255,255,255,0.04), 0 2px 4px rgba(0,0,0,0.3);
+  /* Shadow tokens — minimal, executive (no neon glows) */
+  --shadow-card:  0 1px 2px rgba(15,23,42,0.04);
   --shadow-inner: inset 0 1px 0 rgba(255,255,255,0.04);
-  --shadow-float: 0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
-  --shadow-focus: 0 0 0 2px rgba(0,210,173,0.12);
+  --shadow-float: 0 8px 24px rgba(15,23,42,0.12), 0 0 0 1px rgba(255,255,255,0.05);
+  --shadow-focus: 0 0 0 2px rgba(13,107,116,0.25);
+
+  /* ── Theme Engine T3 — premium polish baseline defaults ─────
+     Mirrors the Corporate preset (the engine default), same as
+     the T1 baseline block above. Real values are written onto
+     document.documentElement by theme/ThemeProvider.jsx
+     (src/design/themeEffects.ts, backgroundLayers.ts,
+     glassTokens.ts, themeMotion.ts) once it mounts. */
+  --border-width-card: 1px;
+  --bg-ambient-layer:  none;
+  --glass-blur:    0px;
+  --glass-opacity: 1;
+  --glass-enabled: false;
+  --theme-motion-duration:   150ms;
+  --theme-motion-transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+  --transition-surface: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  --ambient-accent-overlay: transparent;
 }
 
 /* ── Typography utilities (additive) ─────────────────────── */
@@ -1013,4 +1099,586 @@ input[type="number"],
 @media print {
   .mobile-nav, .sidebar, .topbar, .btn, [data-print-hide] { display: none !important; }
   body { background: white; color: black; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   PharmaPulse 2.0 — Pharma Theme Blocks
+   Applied by applyTheme('pharma') / applyTheme('pharma-light')
+   ══════════════════════════════════════════════════════════ */
+
+/* Pharma Dark — the primary 2.0 experience */
+[data-theme="pharma"] {
+  --bg-canvas:    #0F1623;
+  --bg-surface:   #1A2235;
+  --bg-elevated:  #232E44;
+  --bg-overlay:   #2A3550;
+  --bg-hover:     rgba(255,255,255,0.04);
+  --bg-active:    rgba(13,107,116,0.12);
+  --bg-base:      #0F1623;
+  --bg-card:      #1A2235;
+
+  --border-subtle:  #2A3550;
+  --border-default: rgba(255,255,255,0.09);
+  --border-strong:  rgba(255,255,255,0.15);
+  --border-brand:   rgba(13,107,116,0.35);
+  --border:         #2A3550;
+  --border-hover:   rgba(255,255,255,0.09);
+
+  --text-primary:    #F1F5F9;
+  --text-secondary:  #94A3B8;
+  --text-muted:      #64748B;
+  --text-brand:      #0D9BAA;
+
+  --brand-300:  #5EEAD4;
+  --brand-400:  #2DD4BF;
+  --brand-500:  #0D6B74;
+  --brand-600:  #0A5560;
+
+  --sidebar-bg: #1E2A3A;
+  --topbar-bg:  rgba(15,22,35,0.92);
+  --input-bg:   rgba(26,34,53,0.8);
+  --modal-bg:   rgba(15,22,35,0.99);
+
+  --shadow-card:  0 1px 2px rgba(15,23,42,0.04);
+  --shadow-inner: inset 0 1px 0 rgba(255,255,255,0.04);
+  --shadow-float: 0 8px 24px rgba(15,23,42,0.12), 0 0 0 1px rgba(255,255,255,0.05);
+  --shadow-focus: 0 0 0 2px rgba(13,107,116,0.25);
+
+  color-scheme: dark;
+}
+
+/* Pharma Light — calm executive light mode */
+[data-theme="pharma-light"] {
+  --bg-canvas:    #F7F8FA;
+  --bg-surface:   #FFFFFF;
+  --bg-elevated:  #F0F2F5;
+  --bg-overlay:   #E8EBF0;
+  --bg-hover:     rgba(0,0,0,0.04);
+  --bg-active:    rgba(13,107,116,0.08);
+  --bg-base:      #F7F8FA;
+  --bg-card:      #FFFFFF;
+
+  --border-subtle:  #E2E6EC;
+  --border-default: rgba(0,0,0,0.10);
+  --border-strong:  rgba(0,0,0,0.16);
+  --border-brand:   rgba(13,107,116,0.30);
+  --border:         #E2E6EC;
+  --border-hover:   rgba(0,0,0,0.10);
+
+  --text-primary:    #1E2A3A;
+  --text-secondary:  #475569;
+  --text-muted:      #94A3B8;
+  --text-brand:      #0D6B74;
+
+  --brand-300:  #0D9BAA;
+  --brand-400:  #0D8090;
+  --brand-500:  #0D6B74;
+  --brand-600:  #0A5560;
+
+  --sidebar-bg: #1E2A3A;
+  --topbar-bg:  rgba(247,248,250,0.94);
+  --input-bg:   rgba(255,255,255,0.9);
+  --modal-bg:   rgba(255,255,255,0.99);
+
+  --shadow-card:  0 1px 2px rgba(15,23,42,0.06);
+  --shadow-inner: inset 0 1px 0 rgba(0,0,0,0.04);
+  --shadow-float: 0 8px 24px rgba(15,23,42,0.10), 0 0 0 1px rgba(0,0,0,0.06);
+  --shadow-focus: 0 0 0 2px rgba(13,107,116,0.20);
+
+  color-scheme: light;
+}
+
+/* ── Arabic content: prefer IBM Plex Sans Arabic ─────────────
+   Applied to content elements that render Arabic text.
+   html[dir="rtl"] ensures this targets the RTL layout only. */
+html[dir="rtl"] body,
+html[dir="rtl"] .nav-item,
+html[dir="rtl"] .section-title,
+html[dir="rtl"] .page-title,
+html[dir="rtl"] .metric-label,
+html[dir="rtl"] .badge {
+  font-family: 'IBM Plex Sans Arabic', 'Inter', 'Cairo', system-ui, sans-serif;
+}
+
+/* ── Typography scale — PharmaPulse 2.0 ─────────────────────
+   Additive classes: use in new components, gradually replace
+   existing inline font-size usages. */
+
+/* Display: page titles */
+.pp-text-display {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Heading: section titles */
+.pp-text-heading {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Card title */
+.pp-text-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Body */
+.pp-text-body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Label: uppercase field labels, column headers */
+.pp-text-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+}
+
+/* KPI primary number */
+.pp-text-kpi {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* KPI secondary number */
+.pp-text-kpi-sm {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-secondary);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Code / IDs / pharmacy codes */
+.pp-text-code {
+  font-size: 13px;
+  font-weight: 400;
+  font-family: 'JetBrains Mono', 'ui-monospace', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* ── 2.0 Card variants ───────────────────────────────────────
+   Additive — do not replace existing .card class */
+.pp-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  transition: border-color 0.15s;
+}
+.pp-card:hover {
+  border-color: var(--border-default);
+}
+.pp-card-elevated {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  box-shadow: var(--shadow-float);
+}
+/* Interactive card — shows teal left accent on hover */
+.pp-card-hover {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  border-left: 3px solid transparent;
+  transition: border-color 0.15s, border-left-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.pp-card-hover:hover {
+  border-color: var(--border-default);
+  border-left-color: var(--brand-500);
+  box-shadow: var(--shadow-card);
+}
+
+/* ── 2.0 Status badge tokens ─────────────────────────────────
+   Companion to existing .badge-* — uses 2.0 semantic vars */
+.pp-badge-success  { background:var(--status-success-bg);  color:var(--status-success-text);  border:1px solid var(--status-success-border);  border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-warning  { background:var(--status-warning-bg);  color:var(--status-warning-text);  border:1px solid var(--status-warning-border);  border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-critical { background:var(--status-critical-bg); color:var(--status-critical-text); border:1px solid var(--status-critical-border); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-info     { background:var(--status-info-bg);     color:var(--status-info-text);     border:1px solid var(--status-info-border);     border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+/* Momentum variants */
+.pp-badge-improving { background:rgba(45,125,90,0.10);  color:#4ADE80; border:1px solid rgba(45,125,90,0.25); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-stable    { background:rgba(13,155,170,0.10); color:var(--status-info-text); border:1px solid rgba(13,155,170,0.25); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-declining { background:rgba(185,43,43,0.10);  color:var(--status-critical-text); border:1px solid rgba(185,43,43,0.25); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+/* Risk variants */
+.pp-badge-risk-low      { background:rgba(45,125,90,0.08);   color:#4ADE80; border:1px solid rgba(45,125,90,0.20); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-risk-medium   { background:rgba(212,132,10,0.08);  color:var(--status-warning-text); border:1px solid rgba(212,132,10,0.20); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-risk-high     { background:rgba(185,43,43,0.08);   color:var(--status-critical-text); border:1px solid rgba(185,43,43,0.20); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.pp-badge-risk-critical { background:rgba(153,27,27,0.10);   color:#FCA5A5; border:1px solid rgba(153,27,27,0.28); border-radius:var(--radius-full); padding:2px 8px; font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+
+/* ── 2.0 Button companions ────────────────────────────────────
+   pp-btn-* mirrors the existing btn-* but uses 2.0 tokens.
+   Use pp-btn-primary etc. in new 2.0 components.
+   Do not delete btn-* — legacy pages depend on them. */
+.pp-btn-primary {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; height: 36px; padding: 0 16px;
+  background: var(--brand-500); color: #FFFFFF;
+  border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif;
+  letter-spacing: -0.01em; cursor: pointer; user-select: none;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.pp-btn-primary:hover:not(:disabled) {
+  background: var(--brand-600);
+  box-shadow: 0 2px 8px rgba(13,107,116,0.32);
+}
+.pp-btn-primary:active:not(:disabled) { transform: scale(0.98); }
+.pp-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.pp-btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; height: 36px; padding: 0 16px;
+  background: var(--bg-elevated); color: var(--text-secondary);
+  border: 1px solid var(--border-default); border-radius: 8px;
+  font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif;
+  letter-spacing: -0.01em; cursor: pointer; user-select: none;
+  transition: all 0.15s;
+}
+.pp-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.pp-btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.pp-btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; height: 36px; padding: 0 12px;
+  background: transparent; color: var(--text-muted);
+  border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif;
+  cursor: pointer; user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.pp-btn-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.pp-btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.pp-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0;
+  background: var(--bg-elevated); color: var(--text-muted);
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+  cursor: pointer; user-select: none;
+  transition: all 0.15s;
+}
+.pp-btn-icon:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+.pp-btn-icon:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Size modifiers */
+.pp-btn-sm { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+.pp-btn-lg { height: 44px; padding: 0 22px; font-size: 14px; border-radius: 10px; }
+
+/* ── 2.0 Focus ring ──────────────────────────────────────────*/
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PharmaPulse Futuristic Theme
+   Key: pharmapulse-futuristic
+   Palette: Deep navy canvas · Cyan primary · Emerald accent
+   Applied via data-theme attribute by settingsStore.applyTheme()
+   ══════════════════════════════════════════════════════════════ */
+
+[data-theme="pharmapulse-futuristic"] {
+  /* ── Backgrounds ──────────────────────────────────────────── */
+  --bg-canvas:    #020617;
+  --bg-surface:   #071426;
+  --bg-elevated:  #0B1F33;
+  --bg-overlay:   #102A44;
+  --bg-hover:     rgba(6,182,212,0.06);
+  --bg-active:    rgba(6,182,212,0.14);
+  --bg-base:      #020617;
+  --bg-card:      #071426;
+
+  /* ── Borders — cyan glow system ──────────────────────────── */
+  --border-subtle:  rgba(56,189,248,0.22);
+  --border-default: rgba(56,189,248,0.32);
+  --border-strong:  rgba(6,182,212,0.55);
+  --border-brand:   #06B6D4;
+  --border:         rgba(56,189,248,0.22);
+  --border-hover:   rgba(6,182,212,0.45);
+
+  /* ── Text ─────────────────────────────────────────────────── */
+  --text-primary:   #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted:     #64748B;
+  --text-brand:     #06B6D4;
+
+  /* ── Brand — cyan primary, emerald accent ─────────────────── */
+  --brand-300:  #00F5A0;   /* emerald accent — used for success/positive */
+  --brand-400:  #22D3EE;   /* bright cyan */
+  --brand-500:  #06B6D4;   /* primary cyan */
+  --brand-600:  #0EA5E9;   /* blue-cyan */
+
+  /* ── Chrome ───────────────────────────────────────────────── */
+  --sidebar-bg: rgba(2,6,23,0.98);
+  --topbar-bg:  rgba(2,6,23,0.92);
+  --input-bg:   rgba(7,20,38,0.85);
+  --modal-bg:   rgba(2,6,23,0.99);
+
+  /* ── Semantic status — futuristic variants ────────────────── */
+  --status-success:        #00F5A0;
+  --status-success-bg:     rgba(0,245,160,0.08);
+  --status-success-border: rgba(0,245,160,0.25);
+  --status-success-text:   #00F5A0;
+
+  --status-warning:        #F59E0B;
+  --status-warning-bg:     rgba(245,158,11,0.09);
+  --status-warning-border: rgba(245,158,11,0.28);
+  --status-warning-text:   #FCD34D;
+
+  --status-critical:        #EF4444;
+  --status-critical-bg:     rgba(239,68,68,0.09);
+  --status-critical-border: rgba(239,68,68,0.28);
+  --status-critical-text:   #FCA5A5;
+
+  --status-info:        #06B6D4;
+  --status-info-bg:     rgba(6,182,212,0.09);
+  --status-info-border: rgba(6,182,212,0.28);
+  --status-info-text:   #22D3EE;
+
+  /* ── KPI traffic — maps to futuristic palette ─────────────── */
+  --traffic-excellent: #00F5A0;
+  --traffic-good:      #06B6D4;
+  --traffic-warning:   #F59E0B;
+  --traffic-critical:  #EF4444;
+
+  /* ── Risk ─────────────────────────────────────────────────── */
+  --risk-low:      #00F5A0;
+  --risk-medium:   #F59E0B;
+  --risk-high:     #EF4444;
+  --risk-critical: #DC2626;
+
+  /* ── Shadows — no heavy glows, minimal elevation ─────────── */
+  --shadow-card:  0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(56,189,248,0.12);
+  --shadow-inner: inset 0 1px 0 rgba(56,189,248,0.08);
+  --shadow-float: 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(56,189,248,0.16);
+  --shadow-focus: 0 0 0 2px rgba(6,182,212,0.35);
+
+  color-scheme: dark;
+}
+
+/* ── Glass card override for futuristic theme ─────────────────
+   Cards get a subtle cyan border + very slight backdrop.
+   No heavy glow — just a premium glass look. */
+[data-theme="pharmapulse-futuristic"] .card,
+[data-theme="pharmapulse-futuristic"] .pp-card,
+[data-theme="pharmapulse-futuristic"] .kpi-tile {
+  background:  rgba(7,20,38,0.82);
+  border-color: rgba(56,189,248,0.22);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+[data-theme="pharmapulse-futuristic"] .pp-card-elevated {
+  background:  rgba(11,31,51,0.88);
+  border-color: rgba(56,189,248,0.32);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(56,189,248,0.18);
+}
+[data-theme="pharmapulse-futuristic"] .pp-card-hover:hover {
+  border-left-color: #06B6D4;
+  box-shadow: 0 0 0 1px rgba(6,182,212,0.20);
+}
+
+/* ── Navigation active state — cyan left accent ───────────────
+   Calm: only the left border and text change, no heavy glow. */
+[data-theme="pharmapulse-futuristic"] .nav-item.active {
+  background:      rgba(6,182,212,0.10);
+  color:           #22D3EE;
+  border-color:    rgba(6,182,212,0.20);
+}
+[data-theme="pharmapulse-futuristic"] .nav-item.active .nav-label {
+  color: #22D3EE;
+}
+
+/* ── Primary button — cyan→emerald gradient ───────────────────
+   Applied to both .btn-primary and .pp-btn-primary. */
+[data-theme="pharmapulse-futuristic"] .btn-primary,
+[data-theme="pharmapulse-futuristic"] .pp-btn-primary {
+  background: linear-gradient(135deg, #06B6D4 0%, #00F5A0 100%);
+  color: #020617;   /* dark text on bright gradient — better contrast */
+  box-shadow: 0 2px 12px rgba(6,182,212,0.28);
+}
+[data-theme="pharmapulse-futuristic"] .btn-primary:hover:not(:disabled),
+[data-theme="pharmapulse-futuristic"] .pp-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0EA5E9 0%, #00F5A0 100%);
+  box-shadow: 0 4px 16px rgba(6,182,212,0.38);
+}
+
+/* ── Badge readability — ensure contrast on dark navy ─────────
+   Override only backgrounds; keep text bright. */
+[data-theme="pharmapulse-futuristic"] .pp-badge-success,
+[data-theme="pharmapulse-futuristic"] .badge-success {
+  background: rgba(0,245,160,0.10);
+  color: #00F5A0;
+  border-color: rgba(0,245,160,0.28);
+}
+[data-theme="pharmapulse-futuristic"] .pp-badge-info,
+[data-theme="pharmapulse-futuristic"] .badge-info {
+  background: rgba(6,182,212,0.10);
+  color: #22D3EE;
+  border-color: rgba(6,182,212,0.28);
+}
+
+/* ── Input / form controls ────────────────────────────────────
+   Slightly more visible border in this dark theme. */
+[data-theme="pharmapulse-futuristic"] input,
+[data-theme="pharmapulse-futuristic"] select,
+[data-theme="pharmapulse-futuristic"] textarea {
+  background: var(--input-bg);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+[data-theme="pharmapulse-futuristic"] input:focus,
+[data-theme="pharmapulse-futuristic"] select:focus,
+[data-theme="pharmapulse-futuristic"] textarea:focus {
+  border-color: #06B6D4;
+  box-shadow: 0 0 0 3px rgba(6,182,212,0.18);
+}
+
+/* ── Sidebar bottom data wave (login panel-inspired) ──────────
+   Only applies to the sidebar's decorative bottom area if present. */
+[data-theme="pharmapulse-futuristic"] .sidebar-bottom-wave {
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(6,182,212,0.05) 60%,
+    rgba(0,245,160,0.04) 100%
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Theme Engine T3 — Premium Theme Polish & Surface Refinement
+   Driven by data-theme-t1 (themeEngine.applyThemeToDocument) —
+   the SEPARATE, additive Theme Engine from the legacy data-theme
+   blocks above. CSS-only: no canvas, no particles, no JS animation.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── T3-D: theme-switch transition — 150ms, CSS-only ──────────
+   Limited to background-color/color/opacity. No layout movement,
+   no scale, no framer-motion. Scoped to the surfaces that actually
+   change look across themes (not a blanket `*` selector). */
+[data-theme-t1] body,
+[data-theme-t1] .card,
+[data-theme-t1] .pp-card,
+[data-theme-t1] .pp-card-elevated,
+[data-theme-t1] .kpi-card,
+[data-theme-t1] .kpi-tile,
+[data-theme-t1] .stat-card,
+[data-theme-t1] .nav-item,
+[data-theme-t1] .badge,
+[data-theme-t1] .status-pill {
+  transition: var(--theme-motion-transition);
+}
+
+/* ── T3-A/T3-B: premium surface shadows + ambient background layer ──
+   Each block overrides only --shadow-card/--shadow-float/
+   --bg-ambient-layer for that theme; every surface already
+   consuming var(--shadow-card) etc. picks this up automatically. */
+[data-theme-t1] body {
+  background-image: var(--bg-ambient-layer), radial-gradient(ellipse 80% 40% at 50% 0%, rgba(13,107,116,0.06) 0%, transparent 70%);
+}
+[data-theme-t1] .card,
+[data-theme-t1] .pp-card,
+[data-theme-t1] .kpi-card,
+[data-theme-t1] .kpi-tile,
+[data-theme-t1] .stat-card {
+  box-shadow: var(--shadow-card);
+  border-width: var(--border-width-card);
+}
+[data-theme-t1] .pp-card-elevated {
+  box-shadow: var(--shadow-float);
+}
+
+/* ── T3-C: glassmorphism — Apple & Executive only ──────────────
+   Chrome surfaces (header/sidebar/dropdown/modal) already render
+   from var(--topbar-bg)/var(--sidebar-bg)/var(--modal-bg) — see
+   AppLayout.jsx, Sidebar.jsx, Toast.jsx — and the header/sidebar
+   already carry backdrop-filter: blur(24px) unconditionally. Here
+   we only adjust the underlying color's alpha channel for the 2
+   glass themes; every other theme keeps a fully opaque chrome.
+   Cards are NEVER touched — --bg-card stays 100% opaque always. */
+[data-theme-t1="apple"] {
+  --topbar-bg: rgba(255,255,255,0.78);
+  --sidebar-bg: rgba(255,255,255,0.78);
+  --modal-bg:  rgba(255,255,255,0.82);
+  --input-bg:  rgba(255,255,255,0.78);
+}
+[data-theme-t1="executive"] {
+  --topbar-bg: rgba(15,22,35,0.82);
+  --sidebar-bg: rgba(26,34,53,0.82);
+  --modal-bg:  rgba(15,22,35,0.86);
+  --input-bg:  rgba(26,34,53,0.82);
+}
+
+/* ── T3-E: premium typography per theme — header/body font stacks ──
+   Additive font-family overrides only; sizes/floors remain owned
+   by Theme T2's FontSizeSelector (--font-body/--font-title/etc). */
+[data-theme-t1="executive"] .pp-text-heading,
+[data-theme-t1="executive"] .page-title,
+[data-theme-t1="executive"] .pp-text-display {
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  font-weight: 600;
+}
+[data-theme-t1="apple"] body {
+  font-family: -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+}
+[data-theme-t1="cyber"] body,
+[data-theme-t1="cyber"] .pp-text-kpi,
+[data-theme-t1="cyber"] .pp-text-code,
+[data-theme-t1="cyber"] .metric-value {
+  font-family: 'JetBrains Mono', 'ui-monospace', monospace;
+}
+
+/* ── T3-H: ambient accent overlay — opt-in, background-only ────
+   Disabled by default (--ambient-accent-overlay: transparent).
+   Never applied automatically to any surface in this bundle —
+   intentionally infra-only (see src/design/ambientAccent.ts).
+   A future surface may opt in via this utility class. */
+.ambient-overlay {
+  position: relative;
+}
+.ambient-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--ambient-accent-overlay);
+  border-radius: inherit;
 }

@@ -64,10 +64,10 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
     <div className="tbl-wrap" style={{ overflowX:'auto' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
         <colgroup>
-          <col style={{ width:'130px' }} />   {/* Key */}
-          <col style={{ width:'140px' }} />   {/* Label */}
-          <col style={{ width:'110px' }} />   {/* Category */}
-          <col style={{ width:'110px' }} />   {/* Status */}
+          <col style={{ width:'110px' }} />   {/* Key */}
+          <col style={{ width:'120px' }} />   {/* Label */}
+          <col style={{ width:'120px' }} />   {/* Lifecycle Stage */}
+          <col style={{ width:'90px'  }} />   {/* Status */}
           <col style={{ width:'50px'  }} />   {/* Core */}
           <col style={{ width:'60px'  }} />   {/* Weight */}
           <col style={{ width:'44px'  }} />   {/* Target */}
@@ -79,7 +79,7 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
         </colgroup>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--border-subtle)' }}>
-            {['Key','Label','Category','Status','Core','Weight','Target','Dash','Team','Exec','Reg',''].map((h) => (
+            {['Key','Label','Lifecycle Stage','Status','Core','Weight','Target','Dash','Team','Exec','Reg',''].map((h) => (
               <th key={h} style={COL}>{h}</th>
             ))}
           </tr>
@@ -118,9 +118,25 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                   <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>{kpi.labelAr}</div>
                 </td>
 
-                {/* Category */}
-                <td style={{ ...CELL, fontSize:'12px', color:'var(--text-secondary)' }}>
-                  {kpi.category}
+                {/* Lifecycle Stage */}
+                <td style={CELL}>
+                  {(() => {
+                    const stage = kpi.lifecycleStage ?? 'production_evaluation'
+                    const cfg = {
+                      production_evaluation: { label:'Production', color:'#22c55e', bg:'rgba(34,197,94,0.10)' },
+                      pilot_tracking:        { label:'Pilot',      color:'#f59e0b', bg:'rgba(245,158,11,0.10)' },
+                      shadow_evaluation:     { label:'Shadow',     color:'#60a5fa', bg:'rgba(96,165,250,0.10)' },
+                      draft:                 { label:'Draft',      color:'#a1a1aa', bg:'rgba(161,161,170,0.10)' },
+                      archived:              { label:'Archived',   color:'#6b7280', bg:'rgba(107,114,128,0.10)' },
+                    }[stage] ?? { label: stage, color:'#a1a1aa', bg:'rgba(161,161,170,0.10)' }
+                    return (
+                      <span style={{
+                        display:'inline-flex', alignItems:'center', padding:'2px 7px',
+                        borderRadius:'99px', fontSize:'10px', fontWeight:600,
+                        color:cfg.color, background:cfg.bg, whiteSpace:'nowrap',
+                      }}>{cfg.label}</span>
+                    )
+                  })()}
                 </td>
 
                 {/* Status */}

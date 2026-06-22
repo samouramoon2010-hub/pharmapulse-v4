@@ -5,10 +5,20 @@
 // ============================================================
 
 import { format, subDays } from 'date-fns'
-import { KPI_KEYS, KPI_META } from '../kpiAnalyticsEngine'
+import { KPI_KEYS, getProductionEngineKeys, getKpiMetaForKey, getKpiWeightForKey } from '../kpiAnalyticsEngine'
 import type { LiveAnalyticsInput } from './liveAnalyticsTypes'
 import type { KpiMomentumSignal, BranchMomentum, MomentumDirection } from './liveAnalyticsTypes'
 import type { KpiKey } from '../kpiAnalyticsEngine'
+
+// Protected Engines Migration Phase D — Live Analytics (Momentum).
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. Per-day actual reads are routed
+// through the Dynamic Reader only where proven parity holds against a
+// real sample; otherwise they fall back to the exact pre-migration
+// computation. Momentum formulas are completely untouched. No call site
+// passes a registry yet.
+import { buildPilotPolicy, sumPilotActual, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Direction mapping ─────────────────────────────────────────
 function toDirection(pct: number): MomentumDirection {
@@ -88,11 +98,15 @@ function getDailyValues(
   kpiKey:     KpiKey,
   now:        Date,
   n:          number,
+  registry?:  KpiRegistry,
+  policy?:    PilotPolicy,
 ): number[] {
   return Array.from({ length: n }, (_, i) => {
     const d = format(subDays(now, n - 1 - i), 'yyyy-MM-dd')
-    return mtdEntries.filter((e) => e.date === d)
-      .reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+    const dayEntries = mtdEntries.filter((e) => e.date === d)
+    return registry && policy
+      ? sumPilotActual(dayEntries as Record<string, unknown>[], kpiKey, registry, policy)
+      : dayEntries.reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
   })
 }
 
@@ -101,13 +115,15 @@ function computeKpiMomentum(
   kpiKey:     KpiKey,
   mtdEntries: LiveAnalyticsInput['mtdEntries'],
   now:        Date,
+  registry?:  KpiRegistry,
+  policy?:    PilotPolicy,
 ): KpiMomentumSignal {
-  const daily14 = getDailyValues(mtdEntries, kpiKey, now, 14)
+  const daily14 = getDailyValues(mtdEntries, kpiKey, now, 14, registry, policy)
   const daily7  = daily14.slice(7)
   const prev7   = daily14.slice(0, 7)
 
   // Raw today vs yesterday
-  const todayVal = getDailyValues(mtdEntries, kpiKey, now, 1)[0] || 0
+  const todayVal = getDailyValues(mtdEntries, kpiKey, now, 1, registry, policy)[0] || 0
   const yestVal  = daily14[12] || 0
   const todayVsYesterday = yestVal > 0
     ? Math.round(((todayVal - yestVal) / yestVal) * 100)
@@ -139,7 +155,7 @@ function computeKpiMomentum(
 
   return {
     kpiKey,
-    label:              KPI_META[kpiKey].en,
+    label:              getKpiMetaForKey(kpiKey, registry).en,
     direction,
     todayVsYesterday:   todayIsAnomaly ? 0 : todayVsYesterday,  // suppress anomaly
     weekVsPrevWeek:     smoothedDelta,
@@ -153,25 +169,48 @@ function computeKpiMomentum(
 }
 
 // ── Branch-level momentum summary ────────────────────────────
-export function computeLiveMomentum(input: LiveAnalyticsInput): BranchMomentum {
+export function computeLiveMomentum(input: LiveAnalyticsInput, registry?: KpiRegistry): BranchMomentum {
   const { mtdEntries, pharmacyId, now } = input
 
-  const kpiMomentum = KPI_KEYS.map((k) =>
-    computeKpiMomentum(k, mtdEntries, now)
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(mtdEntries[0] ?? null, input.target ?? null, registry, 'liveAnalytics')
+    : undefined
+
+  // Core KPI Dependency Removal — Stage F: kpiMomentum widens to every
+  // active production_evaluation KPI for display when a registry is
+  // supplied. The aggregate fields below (overallDirection/overallDelta/
+  // dominantKpi) are weight-gated — only KPIs with registry weight > 0
+  // contribute — so they stay byte-identical with the live
+  // DEFAULT_KPI_REGISTRY today (every non-Core KPI there has weight 0).
+  const momentumKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  const kpiMomentum = momentumKeys.map((k) =>
+    computeKpiMomentum(k, mtdEntries, now, registry, policy)
   )
+  const weightedMomentum = registry
+    ? kpiMomentum.filter((m) => getKpiWeightForKey(m.kpiKey, registry) > 0)
+    : kpiMomentum
 
   // Weight average by confidence (low-confidence KPIs contribute less)
-  const totalWeight = kpiMomentum.reduce((s, m) => s + m.momentumConfidence, 0) || 1
-  const weightedDelta = kpiMomentum.reduce(
+  const totalWeight = weightedMomentum.reduce((s, m) => s + m.momentumConfidence, 0) || 1
+  const weightedDelta = weightedMomentum.reduce(
     (s, m) => s + m.smoothedDelta * m.momentumConfidence, 0
   ) / totalWeight
 
   const overallDirection = toDirection(Math.round(weightedDelta))
 
-  const dominantKpi = kpiMomentum.reduce((best, m) =>
-    Math.abs(m.smoothedDelta) > Math.abs(best.smoothedDelta) ? m : best,
-    kpiMomentum[0],
-  ).kpiKey
+  // A malformed/empty registry can legitimately produce an empty
+  // momentumKeys list (getProductionEngineKeys' deliberate contract for
+  // {} — see Stage F Phase 3) — guard against reducing over no elements.
+  const dominantPool = weightedMomentum.length ? weightedMomentum : kpiMomentum
+  const dominantKpi = dominantPool.length
+    ? dominantPool.reduce((best, m) =>
+        Math.abs(m.smoothedDelta) > Math.abs(best.smoothedDelta) ? m : best,
+        dominantPool[0],
+      ).kpiKey
+    : 'wasfaty'
 
   return {
     pharmacyId,

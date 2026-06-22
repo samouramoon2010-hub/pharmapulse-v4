@@ -25,6 +25,16 @@ import {
 import type { KpiDefinition, KpiRegistry, KpiVisibility } from './kpiRegistryTypes'
 import type { EngineTarget, RegistryTarget } from './kpiRegistryAdapter'
 
+import {
+  getKpiLabel,
+  getKpiLabelAr,
+  getKpiColor,
+  getKpiIcon,
+  getKpiUnit,
+  getKpiCategory,
+  DEFAULT_KPI_COLOR,
+} from './kpiMetaResolver'
+
 // ══════════════════════════════════════════════════════════════
 // SECTION 1 — KPI STATUS MODEL
 // ══════════════════════════════════════════════════════════════
@@ -58,12 +68,12 @@ export type KpiUiStatus = 'ACTIVE' | 'ARCHIVED' | 'HIDDEN_FROM_INPUT'
  * This can be overridden per-KPI in a future admin UI.
  */
 function isTargetInputEnabled(kpi: KpiDefinition): boolean {
-  // Core KPIs always appear in target forms
-  if (kpi.isCore) return true
-  // Non-core KPIs: check the explicit targetInputEnabled flag on visibility
-  // Allows admin to enable target input for custom non-core KPIs via KpiEditorModal
-  if (kpi.visibility.targetInputEnabled === true) return true
-  return false
+  // Core KPI Dependency Removal — Stage G: target-input visibility is now
+  // ordinary registry data (visibility.targetInputEnabled), not an isCore
+  // special case. The 5 Core KPIs carry targetInputEnabled: true via
+  // ALL_SURFACES in defaultKpiRegistry.ts, so this is byte-identical to
+  // the prior isCore-gated behavior.
+  return kpi.visibility.targetInputEnabled === true
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -95,10 +105,38 @@ const TARGET_FIELD_MAP: Record<string, string> = {
 
 /**
  * Get the Firestore target field name for a registry key.
- * Falls back to `${engineKey}Target` if not in the explicit map.
+ *
+ * Resolution order:
+ *   1. Registry-first: kpi.targetField when registry is provided
+ *   2. TARGET_FIELD_MAP static fallback
+ *   3. Final: `${engineKey}Target`
+ *
+ * Preserves existing behavior when registry is not provided.
+ * crossSelling always resolves to 'crossSellTarget' (NOT 'crossSellingTarget').
  */
-export function getTargetFieldName(registryKey: string): string {
+export function getTargetFieldName(registryKey: string, registry?: KpiRegistry): string {
+  if (registry) {
+    const kpi = registry[registryKey]
+    if (kpi?.targetField) return kpi.targetField
+  }
   return TARGET_FIELD_MAP[registryKey] ?? `${toEngineKey(registryKey)}Target`
+}
+
+/**
+ * Get the Firestore actual field name for a registry key.
+ *
+ * Resolution order:
+ *   1. Registry-first: kpi.actualField when registry is provided
+ *   2. Engine key fallback (resolves aliases: omnihealth→omni, wellnessCard→wellness)
+ *
+ * No consuming surface migration yet — function added for parity completeness.
+ */
+export function getActualFieldName(registryKey: string, registry?: KpiRegistry): string {
+  if (registry) {
+    const kpi = registry[registryKey]
+    if (kpi?.actualField) return kpi.actualField
+  }
+  return toEngineKey(registryKey)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -463,6 +501,47 @@ export function buildFormInitialState(
     state[cfg.targetFieldName] = isNaN(Number(raw)) ? 0 : Number(raw)
   }
   return state
+}
+
+// ══════════════════════════════════════════════════════════════
+// SECTION 10 — DISPLAY METADATA API
+// ══════════════════════════════════════════════════════════════
+
+export {
+  getKpiLabel,
+  getKpiLabelAr,
+  getKpiColor,
+  getKpiIcon,
+  getKpiUnit,
+  getKpiCategory,
+  DEFAULT_KPI_COLOR,
+}
+
+/**
+ * Get all display metadata for a KPI in one call.
+ * Registry-first with safe fallbacks for all fields.
+ * Combines KpiUiConfig (when available) with kpiMetaResolver fallbacks.
+ */
+export function getKpiMetaForDisplay(
+  engineKey: string,
+  registry: KpiRegistry = DEFAULT_KPI_REGISTRY,
+): {
+  label:    string
+  labelAr:  string
+  color:    string
+  icon:     string
+  unit:     string
+  category: string
+} {
+  const cfg = getKpiUiConfig(engineKey, registry)
+  return {
+    label:    cfg?.label       ?? getKpiLabel(engineKey),
+    labelAr:  cfg?.labelAr     ?? getKpiLabelAr(engineKey),
+    color:    cfg?.defaultColor ?? getKpiColor(engineKey),
+    icon:     getKpiIcon(engineKey),
+    unit:     cfg?.unit        ?? getKpiUnit(engineKey),
+    category: cfg?.category    ?? getKpiCategory(engineKey),
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

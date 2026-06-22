@@ -8,7 +8,8 @@ import {
   KPI_KEYS, KPI_META,
   computeKpiStats, computePace, computeForecast,
   computeRiskLevel, getTrafficLight,
-  sumKpi, extractDailyValues, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
+  sumKpi, extractDailyValues, getDayProgress, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey, getKpiWeightForKey } from '../kpiAnalyticsEngine'
 
 import type { BranchInput } from './executiveTypes'
 import type {
@@ -18,6 +19,17 @@ import type {
 } from './executiveTypes'
 
 import { RISK_WEIGHTS } from './executiveTypes'
+
+// Protected Engines Migration Phase C — Risk Engine.
+// registry is optional: when omitted (every current production call site),
+// behavior is byte-identical to before. Actual/target reads used to build
+// risk flags and the traffic-light risk level are routed through the
+// Dynamic Reader only where proven parity holds against a real sample;
+// otherwise they fall back to the exact pre-migration computation. Risk
+// thresholds and formulas below are completely untouched. No call site
+// passes a registry yet.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget, readPilotActual, type PilotPolicy } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 // ── Threshold constants ───────────────────────────────────────
 const THRESHOLDS = {
@@ -32,23 +44,40 @@ const THRESHOLDS = {
 } as const
 
 // ── Build risk flags for one branch ──────────────────────────
-function buildRiskFlags(branch: BranchInput): RiskFlag[] {
+function buildRiskFlags(branch: BranchInput, registry?: KpiRegistry, policy?: PilotPolicy): RiskFlag[] {
   const flags: RiskFlag[] = []
   const dp = getDayProgress()
 
-  for (const kpiKey of KPI_KEYS) {
-    const label   = KPI_META[kpiKey].en
-    const actual  = sumKpi(branch.mtdEntries, kpiKey)
-    const target  = branch.target
-      ? safeReadTarget(branch.target as any, KPI_META[kpiKey].targetField)
+  // Core KPI Dependency Removal — Stage F: risk flags are weight-gated —
+  // only KPIs actually promoted into the weighted composite (weight > 0)
+  // generate risk flags. Every current production KPI besides the 5 Core
+  // keys has weight 0 in the registry, so this is byte-identical to the
+  // pre-Stage-F behavior today; a KPI only starts contributing risk flags
+  // once it is genuinely promoted, mirroring computeOverallAchievement's
+  // promotion gate.
+  const riskKeys = registry
+    ? getProductionEngineKeys(registry).filter((k) => getKpiWeightForKey(k, registry) > 0)
+    : KPI_KEYS
+  for (const kpiKey of riskKeys) {
+    const label   = getKpiMetaForKey(kpiKey, registry).en
+    const actual  = registry && policy
+      ? sumPilotActual(branch.mtdEntries as Record<string, unknown>[], kpiKey, registry, policy)
+      : sumKpi(branch.mtdEntries, kpiKey)
+    const legacyTarget = () => branch.target
+      ? safeReadTarget(branch.target as any, getKpiMetaForKey(kpiKey, registry).targetField)
       : 0
+    const target  = registry && policy
+      ? readPilotTarget(branch.target as Record<string, unknown> | null | undefined, kpiKey, registry, policy, legacyTarget)
+      : legacyTarget()
 
     if (!target) continue  // skip KPIs with no target
 
     const stats    = computeKpiStats(actual, target, dp, kpiKey)
     const pace     = computePace(actual, target, dp)
     const hist     = branch.historicalEntries
-      ? extractDailyValues(branch.historicalEntries, kpiKey)
+      ? (registry && policy
+          ? branch.historicalEntries.map((e) => readPilotActual(e as Record<string, unknown>, kpiKey, registry, policy))
+          : extractDailyValues(branch.historicalEntries, kpiKey))
       : undefined
     const forecast = computeForecast(actual, target, dp, hist)
 
@@ -158,16 +187,33 @@ function flagsToScore(flags: RiskFlag[]): number {
 }
 
 // ── Main function ─────────────────────────────────────────────
-export function computeBranchRiskProfile(branch: BranchInput): BranchRiskProfile {
+export function computeBranchRiskProfile(branch: BranchInput, registry?: KpiRegistry): BranchRiskProfile {
   const dp     = getDayProgress()
-  const flags  = buildRiskFlags(branch)
 
-  // Use engine V1 traffic-light based risk level (consistent)
-  const statuses = KPI_KEYS.map((k) => {
-    const actual = sumKpi(branch.mtdEntries, k)
-    const target = branch.target
-      ? safeReadTarget(branch.target as any, KPI_META[k].targetField)
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (never fabricated). Omitted entirely when no registry is passed —
+  // every call site today omits it, so behavior is unchanged in production.
+  const policy: PilotPolicy | undefined = registry
+    ? buildPilotPolicy(branch.mtdEntries[0] ?? null, branch.target ?? null, registry, 'riskEngine')
+    : undefined
+
+  const flags  = buildRiskFlags(branch, registry, policy)
+
+  // Use engine V1 traffic-light based risk level (consistent).
+  // Weight-gated for the same reason as buildRiskFlags above.
+  const statusKeys = registry
+    ? getProductionEngineKeys(registry).filter((k) => getKpiWeightForKey(k, registry) > 0)
+    : KPI_KEYS
+  const statuses = statusKeys.map((k) => {
+    const actual = registry && policy
+      ? sumPilotActual(branch.mtdEntries as Record<string, unknown>[], k, registry, policy)
+      : sumKpi(branch.mtdEntries, k)
+    const legacyTarget = () => branch.target
+      ? safeReadTarget(branch.target as any, getKpiMetaForKey(k, registry).targetField)
       : 0
+    const target = registry && policy
+      ? readPilotTarget(branch.target as Record<string, unknown> | null | undefined, k, registry, policy, legacyTarget)
+      : legacyTarget()
     const stats  = computeKpiStats(actual, target, dp, k)
     return stats.status
   })

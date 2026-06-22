@@ -17,12 +17,21 @@
 // SECTION 1 — TYPE DEFINITIONS
 // ══════════════════════════════════════════════════════════════
 
-export type KpiKey =
-  | 'wasfaty'
-  | 'omni'
-  | 'wellness'
-  | 'basket'
-  | 'crossSelling'
+// ── KpiKey — broadened for dynamic KPI support ────────────────
+//
+// Root unlock (Dynamic KPI Analytics, Phase 1A):
+//   KpiKey was a 5-value union type that prevented any dynamic KPI
+//   from being passed to engine functions typed as (kpiKey: KpiKey).
+//   Broadened to string to remove the compile-time gate while keeping
+//   the exported type name stable for all existing importers.
+//
+// Backward compat: all existing call sites still compile. The 5 legacy
+// engine keys are still valid KpiKey values — the type now accepts
+// additional keys too.
+//
+// Historical union (for reference / documentation):
+//   'wasfaty' | 'omni' | 'wellness' | 'basket' | 'crossSelling'
+export type KpiKey = string
 
 export type TrafficLightStatus =
   | 'excellent'
@@ -65,23 +74,47 @@ export type MissionDifficulty =
 // ── Raw data shapes (mirrors Firestore documents) ─────────────
 
 export interface KpiEntry {
+  // ── Dynamic field access ──────────────────────────────────
+  // Index signature added for dynamic KPI support (Phase 1C).
+  // Allows engines to read `entry[dynamicKey]` without TypeScript errors.
+  // Existing typed fields below take precedence over the index signature
+  // for the 5 legacy engine keys.
+  [key: string]: unknown
+
+  // ── Identity fields ──────────────────────────────────────
   id?:           string
   userId:        string
   pharmacyId:    string
   date:          string          // "yyyy-MM-dd"
+
+  // ── Legacy production KPI fields (flat engine keys) ──────
+  // These fields are always written by kpiService.saveKpiEntry.
+  // Dynamic KPIs are written under their own engine key as well.
   wasfaty:       number
   omni:          number
   wellness:      number
   basket:        number
   crossSelling:  number
+
+  // ── Metadata ─────────────────────────────────────────────
   notes?:        string
   createdAt?:    unknown
   updatedAt?:    unknown
 }
 
 export interface MonthlyTarget {
+  // ── Dynamic field access ──────────────────────────────────
+  // Index signature added for dynamic KPI support (Phase 1D).
+  // Allows engines to read `target[dynamicTargetField]` for any
+  // registry-derived target field name (e.g. 'insuranceConversionTarget').
+  // Existing typed fields take precedence.
+  [key: string]: unknown
+
+  // ── Identity ─────────────────────────────────────────────
   pharmacyId:       string
   month:            string       // "yyyy-MM"
+
+  // ── Legacy production target fields ──────────────────────
   wasfatyTarget:    number
   omniTarget:       number
   wellnessTarget:   number
@@ -182,11 +215,45 @@ export interface PharmacistProfile {
   mission:       DailyMission | null
 }
 
+// ── KpiRegistryShape — structural type for dynamic key resolution ──
+//
+// A minimal structural type that mirrors KpiRegistry from kpiRegistryTypes.ts.
+// We use a structural type here rather than importing KpiRegistry directly
+// to avoid creating a circular dependency:
+//   kpiAnalyticsEngine → kpiRegistry → (no kpiAnalyticsEngine import) ✓
+//
+// All KpiRegistry objects satisfy this shape — no import needed.
+type KpiRegistryShape = Record<string, {
+  key:             string
+  isActive:        boolean
+  lifecycleStage?: string
+  aliasFor?:       string
+  sortOrder:       number
+  label:           string
+  labelAr:         string
+  unit:            string
+  weight:          number
+  // Phase 4B additions
+  actualField?:    string
+  targetField?:    string
+  thresholds?:     { healthy: number; watch: number; risk: number; critical: number }
+  coachingAction?: string
+}>
+
 // ══════════════════════════════════════════════════════════════
 // SECTION 2 — CONSTANTS
 // ══════════════════════════════════════════════════════════════
 
-export const KPI_KEYS: KpiKey[] = [
+// ── DEFAULT_KPI_KEYS — the 5 legacy production engine keys ───
+//
+// Root unlock (Phase 1B): renamed from the internal constant to
+// DEFAULT_KPI_KEYS. KPI_KEYS is preserved as a stable alias so
+// every existing importer continues to work without change.
+//
+// Use DEFAULT_KPI_KEYS when you need the legacy 5-key list explicitly.
+// Use getProductionEngineKeys(registry) when you want registry-aware
+// dynamic keys (returns DEFAULT_KPI_KEYS when no registry is given).
+export const DEFAULT_KPI_KEYS: string[] = [
   'wasfaty',
   'omni',
   'wellness',
@@ -194,7 +261,90 @@ export const KPI_KEYS: KpiKey[] = [
   'crossSelling',
 ]
 
-export const KPI_META: Record<KpiKey, { en: string; ar: string; unit: string; targetField: string }> = {
+/**
+ * Compatibility-layer artifact (Multi-Surface Controlled Cutover, Part B).
+ *
+ * KPI_KEYS is intentionally retained as a stable backward-compat alias —
+ * NOT deleted, NOT deprecated for removal. All existing `import { KPI_KEYS }`
+ * sites continue to work unchanged, including every Evaluation Engine,
+ * Ranking, Executive BI, Team Intelligence, and Live Analytics call site
+ * (protected areas this bundle does not touch). It exists specifically so
+ * those protected engines never need to know whether a Dynamic Reader is
+ * active anywhere else in the platform.
+ *
+ * New / migrated call sites should prefer getProductionEngineKeys(registry)
+ * directly. See KPI_DEPENDENCY_AUDIT in dynamicKpiFoundation.ts for the
+ * full, file-by-file migration status of every known call site.
+ */
+export const KPI_KEYS: string[] = DEFAULT_KPI_KEYS
+
+/**
+ * getProductionEngineKeys
+ *
+ * Returns the ordered list of engine keys for all production_evaluation
+ * KPIs in the provided registry. When no registry is provided, returns
+ * DEFAULT_KPI_KEYS (the legacy 5-key list) for backward compatibility.
+ *
+ * Engine key = kpi.aliasFor ?? kpi.key
+ *   omnihealth  → aliasFor:'omni'       → engine key 'omni'
+ *   wellnessCard → aliasFor:'wellness'  → engine key 'wellness'
+ *   wasfaty     → no alias              → engine key 'wasfaty'
+ *   insuranceConversion (pilot) → excluded (not production_evaluation)
+ *
+ * This is the primary entry point for analytics engines that want to
+ * iterate dynamically over all active production KPIs.
+ *
+ * @param registry - Live KpiRegistry from subscribeKpiRegistry.
+ *                   Pass undefined / omit to use the legacy 5-key list.
+ * @returns Ordered string[] of engine keys for production evaluation KPIs.
+ */
+export function getProductionEngineKeys(registry?: KpiRegistryShape): string[] {
+  if (!registry) return DEFAULT_KPI_KEYS
+  const keys: string[] = []
+  for (const kpi of Object.values(registry)) {
+    const stage = (kpi as any).lifecycleStage ?? 'production_evaluation'
+    if (stage !== 'production_evaluation') continue
+    if (!(kpi as any).isActive) continue
+    keys.push((kpi as any).aliasFor ?? (kpi as any).key)
+  }
+  // Sort by sortOrder for stable output
+  return keys.sort((a, b) => {
+    const ra = Object.values(registry).find((k: any) => (k.aliasFor ?? k.key) === a) as any
+    const rb = Object.values(registry).find((k: any) => (k.aliasFor ?? k.key) === b) as any
+    return (ra?.sortOrder ?? 999) - (rb?.sortOrder ?? 999)
+  })
+}
+
+/**
+ * getCoreEngineKeys
+ *
+ * Like getProductionEngineKeys but restricted to isCore === true entries.
+ * Use this on surfaces that must not yet display non-core production KPIs
+ * (sales, sl, ndf, inbody, liberation) — those surfaces are migrated in
+ * Phase 4F when non-core display is intentionally enabled.
+ *
+ * Falls back to DEFAULT_KPI_KEYS when no registry is provided (all 5 legacy
+ * keys are isCore, so the fallback is always correct).
+ */
+export function getCoreEngineKeys(registry?: KpiRegistryShape): string[] {
+  if (!registry) return DEFAULT_KPI_KEYS
+  const keys: string[] = []
+  for (const kpi of Object.values(registry)) {
+    const stage = (kpi as any).lifecycleStage ?? 'production_evaluation'
+    if (stage !== 'production_evaluation') continue
+    if (!(kpi as any).isActive) continue
+    if (!(kpi as any).isCore) continue
+    keys.push((kpi as any).aliasFor ?? (kpi as any).key)
+  }
+  if (keys.length === 0) return DEFAULT_KPI_KEYS
+  return keys.sort((a, b) => {
+    const ra = Object.values(registry).find((k: any) => (k.aliasFor ?? k.key) === a) as any
+    const rb = Object.values(registry).find((k: any) => (k.aliasFor ?? k.key) === b) as any
+    return (ra?.sortOrder ?? 999) - (rb?.sortOrder ?? 999)
+  })
+}
+
+export const KPI_META: Record<string, { en: string; ar: string; unit: string; targetField: string }> = {
   wasfaty:      { en: 'Wasfaty',       ar: 'وصفتي',          unit: 'prescriptions', targetField: 'wasfatyTarget'   },
   omni:         { en: 'OmniHealth',    ar: 'أومني هيلث',     unit: 'units',         targetField: 'omniTarget'      },
   wellness:     { en: 'Wellness',      ar: 'ويلنس',          unit: 'units',         targetField: 'wellnessTarget'  },
@@ -204,12 +354,218 @@ export const KPI_META: Record<KpiKey, { en: string; ar: string; unit: string; ta
 
 // KPI business weights — normalised to sum 1.0
 // wasfaty:25, omni:20, wellness:20, basket:20, crossSell:15 → total 100
-export const KPI_WEIGHTS: Record<KpiKey, number> = {
+export const KPI_WEIGHTS: Record<string, number> = {
   wasfaty:      0.25,
   omni:         0.20,
   wellness:     0.20,
   basket:       0.20,
   crossSelling: 0.15,
+}
+
+/**
+ * getKpiMetaForKey
+ *
+ * Returns label, unit, and targetField for any engine key.
+ * For the 5 legacy keys: reads from the hardcoded KPI_META (exact compat).
+ * For dynamic keys: derives from the registry if provided, falls back
+ * to a sensible default built from the key itself.
+ *
+ * @param engineKey - Engine key (e.g. 'omni', 'insuranceConversion')
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ */
+export function getKpiMetaForKey(
+  engineKey: string,
+  registry?: KpiRegistryShape,
+): { en: string; ar: string; unit: string; targetField: string } {
+  // Legacy core keys — exact compat, no registry needed
+  if (engineKey in KPI_META) return KPI_META[engineKey]
+
+  // Dynamic key — derive from registry if available
+  if (registry) {
+    const kpi = Object.values(registry).find(
+      (k: any) => (k.aliasFor ?? k.key) === engineKey
+    ) as any
+    if (kpi) {
+      return {
+        en:          kpi.label    ?? engineKey,
+        ar:          kpi.labelAr  ?? engineKey,
+        unit:        kpi.unit     ?? '',
+        targetField: `${engineKey}Target`,
+      }
+    }
+  }
+
+  // Ultimate fallback
+  return { en: engineKey, ar: engineKey, unit: '', targetField: `${engineKey}Target` }
+}
+
+/**
+ * getKpiWeightForKey
+ *
+ * Returns the portfolio weight for any engine key.
+ * For the 5 legacy keys: reads from KPI_WEIGHTS (exact compat).
+ * For dynamic keys: reads kpi.weight from registry, or 0 as fallback.
+ *
+ * @param engineKey - Engine key
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ */
+export function getKpiWeightForKey(engineKey: string, registry?: KpiRegistryShape): number {
+  if (engineKey in KPI_WEIGHTS) return KPI_WEIGHTS[engineKey]
+  if (!registry) return 0
+  const kpi = Object.values(registry).find(
+    (k: any) => (k.aliasFor ?? k.key) === engineKey
+  ) as any
+  return kpi?.weight ?? 0
+}
+
+// ── Phase 4B — Field resolution layer ────────────────────────
+//
+// Registry-first resolvers for all KPI metadata that previously lived
+// only in hardcoded maps. Each function accepts an optional registry;
+// when absent, it falls back to the hardcoded map below.
+// No existing callers are changed — this is purely additive.
+
+const KPI_ACTUAL_FIELDS: Record<string, string> = {
+  wasfaty:      'wasfaty',
+  omni:         'omni',
+  wellness:     'wellness',
+  basket:       'basket',
+  crossSelling: 'crossSelling',
+}
+
+const KPI_TARGET_FIELDS: Record<string, string> = {
+  wasfaty:      'wasfatyTarget',
+  omni:         'omniTarget',
+  wellness:     'wellnessTarget',
+  basket:       'basketTarget',
+  crossSelling: 'crossSellTarget',
+}
+
+// Mirrors the threshold presets in defaultKpiRegistry.ts.
+const KPI_THRESHOLDS: Record<string, { healthy: number; watch: number; risk: number; critical: number }> = {
+  wasfaty:      { healthy: 95, watch: 80, risk: 65, critical: 45 },
+  omni:         { healthy: 95, watch: 80, risk: 60, critical: 40 },
+  wellness:     { healthy: 95, watch: 80, risk: 60, critical: 40 },
+  basket:       { healthy: 95, watch: 85, risk: 70, critical: 50 },
+  crossSelling: { healthy: 95, watch: 80, risk: 60, critical: 40 },
+}
+
+/**
+ * normalizeArabicNumerals
+ *
+ * Converts Arabic-Indic digit characters (٠١٢٣٤٥٦٧٨٩) to ASCII digits (0–9).
+ * Also converts the Arabic decimal separator (٫ U+066B) to a period.
+ * ASCII input passes through unchanged — no behavior change for standard numerals.
+ */
+export function normalizeArabicNumerals(value: string): string {
+  return value
+    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/٫/g, '.')
+}
+
+/**
+ * getKpiActualField
+ *
+ * Returns the Firestore document field name for the KPI's actual (measured) value.
+ * Registry-first: uses kpi.actualField when a matching registry entry is found.
+ * Falls back to KPI_ACTUAL_FIELDS for the 5 legacy engine keys.
+ * Final fallback: returns the engine key itself (engine key IS the actual field by convention).
+ *
+ * @param engineKey - Engine key (e.g. 'omni', 'basket', 'insuranceConversion')
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ * @param strict    - When true, throws for keys not found in registry or fallback map
+ */
+export function getKpiActualField(
+  engineKey: string,
+  registry?: KpiRegistryShape,
+  strict?: boolean,
+): string {
+  if (registry) {
+    const kpi = Object.values(registry).find(
+      (k: any) => (k.aliasFor ?? k.key) === engineKey,
+    ) as any
+    if (kpi?.actualField) return kpi.actualField as string
+  }
+  if (engineKey in KPI_ACTUAL_FIELDS) return KPI_ACTUAL_FIELDS[engineKey]
+  if (strict) throw new Error(`getKpiActualField: unknown engine key '${engineKey}'`)
+  return engineKey
+}
+
+/**
+ * getKpiTargetField
+ *
+ * Returns the Firestore document field name for the KPI's monthly target.
+ * Registry-first: uses kpi.targetField when a matching registry entry is found.
+ * Falls back to KPI_TARGET_FIELDS for the 5 legacy engine keys.
+ * Final fallback: returns `${engineKey}Target` by convention.
+ *
+ * @param engineKey - Engine key (e.g. 'omni', 'basket', 'insuranceConversion')
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ * @param strict    - When true, throws for keys not found in registry or fallback map
+ */
+export function getKpiTargetField(
+  engineKey: string,
+  registry?: KpiRegistryShape,
+  strict?: boolean,
+): string {
+  if (registry) {
+    const kpi = Object.values(registry).find(
+      (k: any) => (k.aliasFor ?? k.key) === engineKey,
+    ) as any
+    if (kpi?.targetField) return kpi.targetField as string
+  }
+  if (engineKey in KPI_TARGET_FIELDS) return KPI_TARGET_FIELDS[engineKey]
+  if (strict) throw new Error(`getKpiTargetField: unknown engine key '${engineKey}'`)
+  return `${engineKey}Target`
+}
+
+/**
+ * getKpiThresholds
+ *
+ * Returns the achievement-percentage thresholds for any engine key.
+ * Registry-first: reads kpi.thresholds when a matching registry entry is found.
+ * Falls back to KPI_THRESHOLDS for the 5 legacy engine keys.
+ * Final fallback: returns STANDARD thresholds { healthy:95, watch:80, risk:60, critical:40 }.
+ *
+ * @param engineKey - Engine key
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ */
+export function getKpiThresholds(
+  engineKey: string,
+  registry?: KpiRegistryShape,
+): { healthy: number; watch: number; risk: number; critical: number } {
+  if (registry) {
+    const kpi = Object.values(registry).find(
+      (k: any) => (k.aliasFor ?? k.key) === engineKey,
+    ) as any
+    if (kpi?.thresholds) return kpi.thresholds as { healthy: number; watch: number; risk: number; critical: number }
+  }
+  if (engineKey in KPI_THRESHOLDS) return KPI_THRESHOLDS[engineKey]
+  return { healthy: 95, watch: 80, risk: 60, critical: 40 }
+}
+
+/**
+ * getCoachingActionForKey
+ *
+ * Returns the English coaching guidance for any engine key.
+ * Registry-first: reads kpi.coachingAction when a matching registry entry is found.
+ * Falls back to the hardcoded ACTIONS map for the 5 legacy engine keys.
+ * Final fallback: returns an empty string.
+ *
+ * @param engineKey - Engine key
+ * @param registry  - Live KpiRegistry for dynamic key resolution
+ */
+export function getCoachingActionForKey(
+  engineKey: string,
+  registry?: KpiRegistryShape,
+): string {
+  if (registry) {
+    const kpi = Object.values(registry).find(
+      (k: any) => (k.aliasFor ?? k.key) === engineKey,
+    ) as any
+    if (kpi?.coachingAction) return kpi.coachingAction as string
+  }
+  return (ACTIONS as Record<string, string>)[engineKey] ?? ''
 }
 
 /** Maximum achievement % to accept per KPI (caps unrealistic ratios) */
@@ -239,6 +595,139 @@ const MOTIVATIONAL: string[] = [
   'Consistency beats intensity every day.',
   'The best time to improve was yesterday. The next best time is now.',
 ]
+
+// ══════════════════════════════════════════════════════════════
+// SECTION 2B — DYNAMIC READERS (promoted to production, Phase 4E-1)
+//
+// Registry-driven helpers that read KPI values from any document.
+// Registry-first: resolves field names via the live registry when
+// provided. Falls back to Phase 4B hardcoded maps for the 5 core
+// engine keys. Final fallback: engine key itself / `${key}Target`.
+//
+// Promoted from shadow to production in Phase 4E-1 after parity
+// certification confirmed zero regressions across all 5 core KPIs.
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * readKpiActual
+ *
+ * Reads the actual (measured) value for an engine key from any document.
+ * Resolves the field name via getKpiActualField (registry-first).
+ * Normalises Arabic-Indic digits before parsing.
+ * Returns 0 for missing, null, NaN, Infinity, or negative values.
+ */
+export function readKpiActual(
+  entry: Record<string, unknown>,
+  engineKey: string,
+  registry?: KpiRegistryShape,
+): number {
+  if (!entry) return 0
+  const field = getKpiActualField(engineKey, registry)
+  const raw   = entry[field]
+  if (raw === null || raw === undefined) return 0
+  if (typeof raw === 'number') return isFinite(raw) && !isNaN(raw) ? Math.max(0, raw) : 0
+  const normalized = normalizeArabicNumerals(String(raw))
+  const parsed     = parseFloat(normalized)
+  if (isNaN(parsed) || !isFinite(parsed)) return 0
+  return Math.max(0, parsed)
+}
+
+/**
+ * readKpiTarget
+ *
+ * Reads the monthly target value for an engine key from any document.
+ * Resolves the field name via getKpiTargetField (registry-first).
+ * Normalises Arabic-Indic digits before parsing.
+ * Returns 0 for missing, null, NaN, Infinity, or negative values.
+ */
+export function readKpiTarget(
+  targetDoc: Record<string, unknown>,
+  engineKey: string,
+  registry?: KpiRegistryShape,
+): number {
+  if (!targetDoc) return 0
+  const field = getKpiTargetField(engineKey, registry)
+  const raw   = targetDoc[field]
+  if (raw === null || raw === undefined) return 0
+  if (typeof raw === 'number') return isFinite(raw) && !isNaN(raw) ? Math.max(0, raw) : 0
+  const normalized = normalizeArabicNumerals(String(raw))
+  const parsed     = parseFloat(normalized)
+  if (isNaN(parsed) || !isFinite(parsed)) return 0
+  return Math.max(0, parsed)
+}
+
+/**
+ * computeKpiStatsDynamic
+ *
+ * Computes a full KpiStats result using dynamic field resolution.
+ *
+ * Reads actual + target via readKpiActual / readKpiTarget, then delegates
+ * to computeKpiStats() for all calculation logic. The output shape is
+ * identical to KpiStats. Use when the caller has a raw document and an
+ * engine key but does not want to pre-extract values manually.
+ */
+export function computeKpiStatsDynamic(
+  entry:       Record<string, unknown>,
+  targetDoc:   Record<string, unknown>,
+  engineKey:   string,
+  dayProgress: DayProgress,
+  registry?:   KpiRegistryShape,
+): KpiStats {
+  const actual = readKpiActual(entry, engineKey, registry)
+  const target = readKpiTarget(targetDoc, engineKey, registry)
+  return computeKpiStats(actual, target, dayProgress, engineKey)
+}
+
+/**
+ * compareStaticVsDynamicKpi
+ *
+ * Parity helper — runs both the static (no-registry fallback) and
+ * dynamic (registry-first) read paths for a single engine key and
+ * returns a diff object.
+ *
+ * actualMatches / targetMatches / achievementMatches are true when
+ * both paths produce identical numeric results — the expected outcome
+ * for all 5 core KPIs and all 11 DEFAULT_KPI_REGISTRY entries.
+ *
+ * Use in tests and shadow evaluation; not intended for production.
+ */
+export function compareStaticVsDynamicKpi(
+  entry:       Record<string, unknown>,
+  targetDoc:   Record<string, unknown>,
+  engineKey:   string,
+  registry?:   KpiRegistryShape,
+): {
+  key:                  string
+  staticActual:         number
+  dynamicActual:        number
+  staticTarget:         number
+  dynamicTarget:        number
+  staticAchievement:    number
+  dynamicAchievement:   number
+  actualMatches:        boolean
+  targetMatches:        boolean
+  achievementMatches:   boolean
+} {
+  const staticActual      = readKpiActual(entry,     engineKey)
+  const dynamicActual     = readKpiActual(entry,     engineKey, registry)
+  const staticTarget      = readKpiTarget(targetDoc, engineKey)
+  const dynamicTarget     = readKpiTarget(targetDoc, engineKey, registry)
+  const staticAchievement  = computeAchievementPct(staticActual,  staticTarget)
+  const dynamicAchievement = computeAchievementPct(dynamicActual, dynamicTarget)
+
+  return {
+    key:                  engineKey,
+    staticActual,
+    dynamicActual,
+    staticTarget,
+    dynamicTarget,
+    staticAchievement,
+    dynamicAchievement,
+    actualMatches:       staticActual      === dynamicActual,
+    targetMatches:       staticTarget      === dynamicTarget,
+    achievementMatches:  staticAchievement === dynamicAchievement,
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // SECTION 3 — DAY PROGRESS
@@ -719,11 +1208,23 @@ export function computeRiskLevel(statuses: TrafficLightStatus[]): RiskLevel {
  */
 export function findWeakestKpi(
   kpiStatsMap: Partial<Record<KpiKey, KpiStats>>,
+  registry?:   KpiRegistryShape,
 ): KpiKey {
   let weakest: KpiKey = 'wasfaty'
   let minAch  = Infinity
 
-  for (const key of KPI_KEYS) {
+  // Core KPI Dependency Removal — Stage F: weight-gated, like risk/trend
+  // above — only KPIs actually promoted into the weighted composite
+  // (weight > 0) are eligible to become the Focus/weakest KPI. Without
+  // this gate, every current non-Core production KPI (weight 0, usually
+  // no data) would dominate "weakest" purely by having achievementPct 0.
+  // Every current production KPI besides the 5 Core keys has weight 0, so
+  // this is byte-identical to the pre-Stage-F behavior today.
+  const keys = registry
+    ? getProductionEngineKeys(registry).filter((k) => getKpiWeightForKey(k, registry) > 0)
+    : KPI_KEYS
+
+  for (const key of keys) {
     const stat = kpiStatsMap[key]
     if (!stat) continue
     if (stat.achievementPct < minAch) {
@@ -739,11 +1240,17 @@ export function findWeakestKpi(
  */
 export function findStrongestKpi(
   kpiStatsMap: Partial<Record<KpiKey, KpiStats>>,
+  registry?:   KpiRegistryShape,
 ): KpiKey {
   let strongest: KpiKey = 'wasfaty'
   let maxAch   = -Infinity
 
-  for (const key of KPI_KEYS) {
+  // Weight-gated for the same reason as findWeakestKpi above.
+  const keys = registry
+    ? getProductionEngineKeys(registry).filter((k) => getKpiWeightForKey(k, registry) > 0)
+    : KPI_KEYS
+
+  for (const key of keys) {
     const stat = kpiStatsMap[key]
     if (!stat) continue
     if (stat.achievementPct > maxAch) {
@@ -792,11 +1299,22 @@ export function computeOverallAchievement(
   kpiStatsMap: Partial<Record<KpiKey, KpiStats>>,
   weights:     Record<KpiKey, number> = KPI_WEIGHTS,
   diagnostics: boolean = false,
+  registry?:   KpiRegistryShape,
 ): number {
   let weightedSum  = 0
   let totalWeight  = 0
 
-  for (const key of KPI_KEYS) {
+  // Core KPI Dependency Removal — Stage F: when a registry is supplied,
+  // sum over every key actually present in kpiStatsMap (registry-driven,
+  // open-ended) instead of the fixed KPI_KEYS list, so non-Core KPIs can
+  // contribute. Weight resolution prefers the registry's own per-KPI
+  // `weight` field (Stage G: weights are ordinary registry data, not a
+  // Core-only privilege), falling back to the legacy KPI_WEIGHTS map,
+  // then 0 — identical fallback chain to the no-registry path below.
+  // Without a registry, behavior is byte-identical to before this bundle.
+  const iterationKeys = registry ? Object.keys(kpiStatsMap) : KPI_KEYS
+
+  for (const key of iterationKeys) {
     const stat = kpiStatsMap[key]
 
     // Exclude KPI with missing stat
@@ -816,7 +1334,10 @@ export function computeOverallAchievement(
       isNaN(stat.achievementPct) || !isFinite(stat.achievementPct) ? 0 : stat.achievementPct,
       ACHIEVEMENT_CAP
     )
-    const w = weights[key] ?? 0
+    const registryEntry = registry
+      ? Object.values(registry).find((k: any) => (k.aliasFor ?? k.key) === key) as any
+      : undefined
+    const w = registryEntry?.weight ?? weights[key] ?? 0
 
     if (diagnostics) {
       console.debug(
@@ -903,19 +1424,26 @@ export function buildDailyMission(
 /**
  * Extract daily values array for a single KPI key from an entries array.
  * Ordered oldest → newest (assumes entries sorted by date asc).
+ * Uses readKpiActual for registry-first field resolution and Arabic numeral safety.
  */
 export function extractDailyValues(
-  entries: KpiEntry[],
-  kpiKey:  KpiKey,
+  entries:   KpiEntry[],
+  kpiKey:    KpiKey,
+  registry?: KpiRegistryShape,
 ): number[] {
-  return entries.map((e) => Number(e[kpiKey]) || 0)
+  return entries.map((e) => readKpiActual(e as Record<string, unknown>, kpiKey, registry))
 }
 
 /**
  * Sum a KPI across all entries in an array.
+ * Uses readKpiActual for registry-first field resolution and Arabic numeral safety.
  */
-export function sumKpi(entries: KpiEntry[], kpiKey: KpiKey): number {
-  return entries.reduce((s, e) => s + (Number(e[kpiKey]) || 0), 0)
+export function sumKpi(
+  entries:   KpiEntry[],
+  kpiKey:    KpiKey,
+  registry?: KpiRegistryShape,
+): number {
+  return entries.reduce((s, e) => s + readKpiActual(e as Record<string, unknown>, kpiKey, registry), 0)
 }
 
 /**
@@ -953,26 +1481,18 @@ export function filterToDate(entries: KpiEntry[], date: string): KpiEntry[] {
 }
 
 /**
- * Get target value for a KPI key from a MonthlyTarget document.
+ * Safely extract target value for a KPI from a MonthlyTarget document.
+ * Registry-first: delegates to readKpiTarget for field resolution and normalization.
+ * Returns 0 if target is missing, null, NaN, Infinity, or negative.
+ * Preserves exact backward-compat behavior for the 5 legacy core KPIs.
  */
-/**
- * Safely extract target value for a KPI.
- * Returns 0 if target is missing, null, NaN, Infinity, or <= 0.
- * Parses string values from Firestore gracefully.
- */
-export function getTargetForKpi(target: MonthlyTarget | null | undefined, kpiKey: KpiKey): number {
+export function getTargetForKpi(
+  target:    MonthlyTarget | null | undefined,
+  kpiKey:    KpiKey,
+  registry?: KpiRegistryShape,
+): number {
   if (!target) return 0
-  const map: Record<KpiKey, keyof MonthlyTarget> = {
-    wasfaty:      'wasfatyTarget',
-    omni:         'omniTarget',
-    wellness:     'wellnessTarget',
-    basket:       'basketTarget',
-    crossSelling: 'crossSellTarget',
-  }
-  const raw = target[map[kpiKey]]
-  const n   = typeof raw === 'string' ? parseFloat(raw) : Number(raw ?? 0)
-  if (isNaN(n) || !isFinite(n) || n <= 0) return 0
-  return n
+  return readKpiTarget(target as Record<string, unknown>, kpiKey, registry)
 }
 
 /**
@@ -1094,6 +1614,7 @@ export function buildBranchSummary(
   allEntries:  KpiEntry[],
   target:      MonthlyTarget | null,
   referenceDate?: Date,
+  registry?:   KpiRegistryShape,
 ): {
   pharmacyId:    string
   dayProgress:   DayProgress
@@ -1109,15 +1630,20 @@ export function buildBranchSummary(
   const mtd   = filterToCurrentMonth(allEntries, referenceDate)
   const kpiStatsMap: Partial<Record<KpiKey, KpiStats>> = {}
 
-  for (const key of KPI_KEYS) {
-    const actual = sumKpi(mtd, key)
-    const tgt    = target ? getTargetForKpi(target, key) : 0
+  // Core KPI Dependency Removal — Stage F: registry-driven key list when a
+  // registry is supplied (any active production_evaluation KPI, not just
+  // the 5 Core ones); identical to before (KPI_KEYS only) when absent.
+  const summaryKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+
+  for (const key of summaryKeys) {
+    const actual = sumKpi(mtd, key, registry)
+    const tgt    = target ? getTargetForKpi(target, key, registry) : 0
     kpiStatsMap[key] = computeKpiStats(actual, tgt, dp, key)
   }
 
-  const overallAch    = computeOverallAchievement(kpiStatsMap)
+  const overallAch    = computeOverallAchievement(kpiStatsMap, KPI_WEIGHTS, false, registry)
   const overallStatus = getTrafficLight(overallAch, dp.ratio)
-  const allStatuses   = KPI_KEYS.map((k) => kpiStatsMap[k]?.status ?? 'critical')
+  const allStatuses   = summaryKeys.map((k) => kpiStatsMap[k]?.status ?? 'critical')
   const riskLevel     = computeRiskLevel(allStatuses)
 
   return {

@@ -6,11 +6,13 @@
 // No business logic here — all analytics in the engine layer.
 // ============================================================
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { useKpiStore }      from '../store/kpiStore'
 import { usePharmacyStore } from '../store/pharmacyStore'
 import { useAuthStore }     from '../store/authStore'
+import { useScopeProfile }         from './useScopeProfile'
+import { filterAllowedPharmacies } from '../services/scopeResolver'
 
 import {
   filterToCurrentMonth,
@@ -27,6 +29,13 @@ import type {
 } from '../engine/executive'
 
 import type { KpiEntry, MonthlyTarget } from '../engine'
+
+// Core KPI Dependency Removal — No Silent Core Fallback Closure:
+// resolve the live registry at this orchestrator boundary so the
+// Executive Dashboard's BI/Trend/Risk computation includes dynamic
+// production KPIs instead of silently falling back to Core only.
+import { DEFAULT_KPI_REGISTRY } from '../engine/kpiRegistry'
+import { subscribeKpiRegistry } from '../services/kpiRegistryService'
 
 // ── Date helpers ──────────────────────────────────────────────
 function todayStr(): string {
@@ -56,20 +65,44 @@ export function useExecutiveReport(): UseExecutiveReportResult {
   const { entries, targets, loading: kpiLoading }       = useKpiStore()
   const { pharmacies, loading: pharmacyLoading }         = usePharmacyStore()
   const { userProfile }                                  = useAuthStore()
+  const { scope, loading: scopeLoading }                 = useScopeProfile()
 
-  const loading = kpiLoading || pharmacyLoading
+  // ── Live KPI registry — subscribe once, default to
+  // DEFAULT_KPI_REGISTRY on error/loading (same pattern as
+  // useBranchIntelligenceData.js / useRegionalIntelligence.ts).
+  const [liveRegistry, setLiveRegistry] = useState(DEFAULT_KPI_REGISTRY)
+  useEffect(() => {
+    return subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      ()    => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+  }, [])
+
+  const loading = kpiLoading || pharmacyLoading || scopeLoading
+
+  // ── Phase 2G-2: scope-driven pharmacy list ────────────────
+  // Replaces the legacy manager/branch_manager role check.
+  // scope null (still loading) → [] so no branches are shown until resolved.
+  // all  → all pharmacies (admin / GM)
+  // single → own pharmacy only (manager / branch_manager)
+  // list   → assigned pharmacies only (district_supervisor / regional_manager)
+  // none   → [] (no access)
+  const scopedPharmacies = useMemo(() => {
+    if (!scope) return []
+    return filterAllowedPharmacies(scope, pharmacies)
+  }, [scope, pharmacies])
 
   // ── Assemble BranchInput[] from store data ────────────────
   // Memoized — only re-runs when store data changes.
   // All transformation logic uses engine utilities only.
   const branches = useMemo<BranchInput[]>(() => {
-    if (loading || !pharmacies.length) return []
+    if (loading || !scopedPharmacies.length) return []
 
     const today         = todayStr()
     const historyStart  = sixtyDaysAgoStr()
     const currentMonth  = currentMonthStr()
 
-    return pharmacies
+    return scopedPharmacies
       .filter((p) => p.active !== false)
       .map((pharmacy): BranchInput => {
         // All entries for this pharmacy
@@ -109,7 +142,7 @@ export function useExecutiveReport(): UseExecutiveReportResult {
           // to distinct submitters as a safe proxy (see executiveScore.ts)
         }
       })
-  }, [entries, targets, pharmacies, loading])
+  }, [entries, targets, scopedPharmacies, loading])
 
   // ── Generate full portfolio report ────────────────────────
   const report = useMemo<ExecutiveReport | null>(() => {
@@ -120,8 +153,8 @@ export function useExecutiveReport(): UseExecutiveReportResult {
       reportDate:  todayStr(),
       reportMonth: currentMonthStr(),
       generatedBy: userProfile?.id ?? 'system',
-    })
-  }, [branches, userProfile?.id])
+    }, liveRegistry)
+  }, [branches, userProfile?.id, liveRegistry])
 
   const empty = !loading && !report
 

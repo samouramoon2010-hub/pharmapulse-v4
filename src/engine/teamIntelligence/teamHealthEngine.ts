@@ -7,7 +7,15 @@
 import { format } from 'date-fns'
 import {
   KPI_KEYS, KPI_META, KPI_WEIGHTS,
-  sumKpi, computeAchievementPct, getTrafficLight, getDayProgress, safeReadTarget } from '../kpiAnalyticsEngine'
+  sumKpi, computeAchievementPct, getTrafficLight, getDayProgress, safeReadTarget,
+  getProductionEngineKeys, getKpiMetaForKey } from '../kpiAnalyticsEngine'
+
+// Protected Engines Migration Phase A — Team Intelligence Engine
+// (Team Health). registry optional; omitted at every current call site,
+// so behavior is unchanged today. See pharmacistPerformanceEngine.ts for
+// the full rationale.
+import { buildPilotPolicy, sumPilotActual, readPilotTarget } from '../kpiRegistry/dynamicReaderPilot'
+import type { KpiRegistry } from '../kpiRegistry'
 
 import type {
   TeamHealthSummary,
@@ -49,20 +57,41 @@ function teamMomentum(summaries: PharmacistPerformanceSummary[]): MomentumDirect
 function buildTeamKpiSnapshot(
   input:     TeamIntelligenceInput,
   now:       Date,
+  registry?: KpiRegistry,
 ): KpiSnapshot[] {
   const dp = getDayProgress(now)
-  return KPI_KEYS.map(k => {
+
+  // Pilot policy built once from a real entry+target sample already on
+  // hand (first pharmacist with at least one MTD entry and a target).
+  const sampleHolder = input.pharmacists.find(p => p.mtdEntries.length > 0 && p.target)
+  const policy = registry
+    ? buildPilotPolicy(sampleHolder?.mtdEntries[0] ?? null, sampleHolder?.target ?? null, registry, 'branchIntelligence')
+    : undefined
+
+  // Core KPI Dependency Removal — Stage F: widen to every active
+  // production_evaluation KPI when a registry is supplied; identical to
+  // before (5 Core keys only) when absent.
+  const keys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+  return keys.map(k => {
     // Sum all pharmacist MTD entries for this KPI
-    const totalActual = input.pharmacists.reduce(
-      (s, p) => s + sumKpi(p.mtdEntries, k), 0)
+    const totalActual = input.pharmacists.reduce((s, p) => {
+      if (registry && policy) {
+        return s + sumPilotActual(p.mtdEntries as Record<string, unknown>[], k, registry, policy)
+      }
+      return s + sumKpi(p.mtdEntries, k)
+    }, 0)
     // Sum targets
     const totalTarget = input.pharmacists.reduce((s, p) => {
-      const t = p.target ? safeReadTarget(p.target as any, KPI_META[k].targetField) : 0
+      if (!p.target) return s
+      const legacyRead = () => safeReadTarget(p.target as any, getKpiMetaForKey(k, registry).targetField)
+      const t = registry && policy
+        ? readPilotTarget(p.target as Record<string, unknown>, k, registry, policy, legacyRead)
+        : legacyRead()
       return s + t
     }, 0)
     const achievementPct = computeAchievementPct(totalActual, totalTarget)
     const status = getTrafficLight(achievementPct, dp.ratio)
-    return { kpiKey: k, label: KPI_META[k].en, actual: totalActual, target: totalTarget, achievementPct, status }
+    return { kpiKey: k, label: getKpiMetaForKey(k, registry).en, actual: totalActual, target: totalTarget, achievementPct, status }
   })
 }
 
@@ -152,6 +181,7 @@ export function computeTeamHealth(
   input:     TeamIntelligenceInput,
   summaries: PharmacistPerformanceSummary[],
   now:       Date = new Date(),
+  registry?: KpiRegistry,
 ): TeamHealthSummary {
   const memberCount = summaries.length
 
@@ -191,7 +221,7 @@ export function computeTeamHealth(
   ).map(s => s.userId)
 
   // KPI snapshot
-  const teamKpiSnapshot = buildTeamKpiSnapshot(input, now)
+  const teamKpiSnapshot = buildTeamKpiSnapshot(input, now, registry)
 
   // Signals
   const { strengths, weaknesses, unstable } = buildTeamSignals(summaries, teamKpiSnapshot)

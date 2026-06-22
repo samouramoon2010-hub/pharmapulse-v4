@@ -8,7 +8,7 @@
 // ============================================================
 
 import {
-  KPI_KEYS, KPI_META, KPI_WEIGHTS,
+  KPI_KEYS, getProductionEngineKeys, getKpiWeightForKey,
   computeKpiStats,
   computeOverallAchievement,
   computeRiskLevel,
@@ -21,7 +21,20 @@ import {
 
 import { computeExecutiveScore } from '../executive/executiveScore'
 
+// Controlled Cutover Phase 3 — Multi-Surface Production Reader Pilot.
+// Dynamic Reader becomes the source for a pilot KPI only when parity is
+// proven against a real sample; otherwise sumPilotActual/readPilotTarget
+// transparently fall back to the exact pre-pilot legacy computation
+// (sumKpi/getTargetForKpi without a registry). Legacy stays authoritative
+// everywhere parity is unproven — see dynamicReaderPilot.ts.
+import {
+  buildPilotPolicy,
+  sumPilotActual,
+  readPilotTarget,
+} from '../kpiRegistry/dynamicReaderPilot'
+
 import type { KpiStats } from '../kpiAnalyticsEngine'
+import type { KpiRegistry } from '../kpiRegistry'
 
 import type {
   BranchRollupInput,
@@ -45,8 +58,9 @@ const INSUFFICIENT_HISTORY_DAYS  = 14  // < 14 days → trend unreliable
 
 /** Build all data quality flags for a branch input. */
 function buildDataQualityFlags(
-  input:   BranchRollupInput,
-  period:  RegionalPeriod,
+  input:       BranchRollupInput,
+  period:      RegionalPeriod,
+  engineKeys:  string[],
 ): DataQualityFlag[] {
   const flags: DataQualityFlag[] = []
 
@@ -77,8 +91,8 @@ function buildDataQualityFlags(
     })
   } else {
     // ── PARTIAL_TARGET ─────────────────────────────────────
-    const zeroTargetKpis = KPI_KEYS.filter((k) => getTargetForKpi(input.target, k) === 0)
-    if (zeroTargetKpis.length > 0 && zeroTargetKpis.length < KPI_KEYS.length) {
+    const zeroTargetKpis = engineKeys.filter((k) => getTargetForKpi(input.target, k) === 0)
+    if (zeroTargetKpis.length > 0 && zeroTargetKpis.length < engineKeys.length) {
       flags.push({
         code:        'PARTIAL_TARGET',
         severity:    'WARNING',
@@ -154,17 +168,30 @@ function sortFlags(flags: DataQualityFlag[]): DataQualityFlag[] {
 
 /** Compute per-KPI rollup summaries for a branch. */
 function buildKpiRollupSummaries(
-  input:   BranchRollupInput,
-  period:  RegionalPeriod,
+  input:       BranchRollupInput,
+  period:      RegionalPeriod,
+  engineKeys:  string[],
+  registry?:   KpiRegistry,
 ): KpiRollupSummary[] {
   // Use a DayProgress anchored to the period's dayRatio for pace/status
   const dp = getDayProgress()
   // Override ratio with period's pre-computed ratio for test determinism
   const dpForPeriod = { ...dp, ratio: period.dayRatio }
 
-  return KPI_KEYS.map((kpiKey): KpiRollupSummary => {
-    const actual  = sumKpi(input.entries, kpiKey)
-    const target  = getTargetForKpi(input.target, kpiKey)
+  // Pilot policy built once from a single real entry+target sample already
+  // on hand (never fabricated). When no registry/sample is available every
+  // KPI safely defaults to the Legacy Reader (parity unverified).
+  const pilotPolicy = registry
+    ? buildPilotPolicy(input.entries[0] ?? null, input.target, registry, 'regionalIntelligence')
+    : buildPilotPolicy(null, null, {})
+
+  return engineKeys.map((kpiKey): KpiRollupSummary => {
+    const actual  = registry
+      ? sumPilotActual(input.entries, kpiKey, registry, pilotPolicy)
+      : sumKpi(input.entries, kpiKey)
+    const target  = registry
+      ? readPilotTarget(input.target, kpiKey, registry, pilotPolicy, () => getTargetForKpi(input.target, kpiKey))
+      : getTargetForKpi(input.target, kpiKey)
     const stats   = computeKpiStats(actual, target, dpForPeriod, kpiKey)
 
     return {
@@ -275,7 +302,7 @@ function computeSubmissionRatePct(input: BranchRollupInput): number {
  * Reuse the executive score engine for consistency.
  * Adapts BranchRollupInput → BranchInput (duck-typed compatible).
  */
-function computeBranchScore(input: BranchRollupInput): number {
+function computeBranchScore(input: BranchRollupInput, registry?: KpiRegistry): number {
   if (!input.entries.length) return 0
 
   // Build the duck-typed BranchInput the executive engine expects
@@ -291,7 +318,7 @@ function computeBranchScore(input: BranchRollupInput): number {
     submittedToday:     input.submittedToday,
   }
 
-  return computeExecutiveScore(executiveBranchInput as any).adjusted
+  return computeExecutiveScore(executiveBranchInput as any, registry).adjusted
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -301,8 +328,12 @@ function computeBranchScore(input: BranchRollupInput): number {
 /**
  * Compute weighted overall achievement % from KPI rollup summaries.
  * Excludes KPIs with no target (hasTarget = false) from the weighted average.
+ * Uses registry-aware weights when registry is provided.
  */
-function computeOverallAchPct(kpiSummaries: KpiRollupSummary[]): number {
+function computeOverallAchPct(
+  kpiSummaries: KpiRollupSummary[],
+  registry?: KpiRegistry,
+): number {
   // Build a partial KpiStats map from rollup summaries for the existing utility
   const kpiStatsMap: Partial<Record<string, KpiStats>> = {}
 
@@ -321,7 +352,14 @@ function computeOverallAchPct(kpiSummaries: KpiRollupSummary[]): number {
     }
   }
 
-  return computeOverallAchievement(kpiStatsMap as any, KPI_WEIGHTS)
+  // Build a weight map from the KPI summaries, using registry weights for
+  // dynamic KPIs and KPI_WEIGHTS for legacy core KPIs.
+  const weightMap: Record<string, number> = {}
+  for (const k of kpiSummaries) {
+    weightMap[k.kpiKey] = getKpiWeightForKey(k.kpiKey, registry)
+  }
+
+  return computeOverallAchievement(kpiStatsMap as any, weightMap)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -341,15 +379,28 @@ function computeOverallAchPct(kpiSummaries: KpiRollupSummary[]): number {
  * // → summary.riskLevel  ('ON_TRACK' | 'LOW_RISK' | ...)
  * // → summary.dataQualityFlags  ([{ code: 'NO_TARGET', ... }])
  */
+// registry is optional at this pure-function layer for backward
+// compatibility with its large existing test suite (no test may be
+// weakened). Core KPI Dependency Removal — No Silent Core Fallback
+// Closure: every ACTIVE PRODUCTION caller resolves and passes the live
+// registry at the orchestrator/hook boundary (see requireLiveRegistry()
+// in engine/kpiRegistry/registryGuard.ts) — this optional parameter is
+// exercised with `undefined` only by historical-compatibility tests.
 export function generateBranchRollup(
-  input:  BranchRollupInput,
-  period: RegionalPeriod,
+  input:     BranchRollupInput,
+  period:    RegionalPeriod,
+  registry?: KpiRegistry,
 ): BranchRollupSummary {
+  // Resolve production KPI engine keys from the live registry; falls back
+  // to the fixed Core list only for historical-compatibility test callers
+  // that omit registry — every active production caller passes one.
+  const engineKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
+
   // Compute in dependency order
-  const dataQualityFlags     = buildDataQualityFlags(input, period)
-  const kpiAchievementSummary = buildKpiRollupSummaries(input, period)
-  const overallAchievementPct = computeOverallAchPct(kpiAchievementSummary)
-  const branchScore           = computeBranchScore(input)
+  const dataQualityFlags      = buildDataQualityFlags(input, period, engineKeys)
+  const kpiAchievementSummary = buildKpiRollupSummaries(input, period, engineKeys, registry)
+  const overallAchievementPct = computeOverallAchPct(kpiAchievementSummary, registry)
+  const branchScore           = computeBranchScore(input, registry)
   const riskLevel             = deriveRiskLevel(kpiAchievementSummary)
   const momentumDirection     = deriveMomentumDirection(input)
   const operationalStatus     = deriveOperationalStatus(input, dataQualityFlags)

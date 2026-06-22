@@ -77,8 +77,14 @@ function defaultForm() {
     direction:'higher_is_better', targetType:'absolute',
     weight:0, isActive:true, isCore:false,
     thresholds:{ healthy:90, watch:75, risk:55, critical:35 },
-    visibility:{ dashboardEnabled:true, teamEnabled:false, executiveEnabled:false, regionalEnabled:false, targetInputEnabled:false },
+    visibility:{ dashboardEnabled:true, teamEnabled:false, executiveEnabled:false, regionalEnabled:false, targetInputEnabled:true },
     uiStatus:'ACTIVE',
+    // Phase 1A / Milestone 3 fields
+    lifecycleStage: 'draft',
+    isPrimary:      false,
+    coachingAction:   '',
+    coachingActionAr: '',
+    description:      '',
   }
 }
 
@@ -109,6 +115,12 @@ export default function KpiEditorModal({ open, onClose, onSave, editingKpi, exis
         thresholds: { ...editingKpi.thresholds },
         visibility: { targetInputEnabled: false, ...editingKpi.visibility },
         uiStatus:  editingKpi.isActive ? 'ACTIVE' : 'ARCHIVED',
+        // Phase 1A / Milestone 3 fields
+        lifecycleStage:   editingKpi.lifecycleStage   ?? 'production_evaluation',
+        isPrimary:        editingKpi.isPrimary         ?? false,
+        coachingAction:   editingKpi.coachingAction    ?? '',
+        coachingActionAr: editingKpi.coachingActionAr  ?? '',
+        description:      editingKpi.description       ?? '',
       })
     } else {
       setForm(defaultForm())
@@ -152,11 +164,16 @@ export default function KpiEditorModal({ open, onClose, onSave, editingKpi, exis
       targetType: form.targetType,
       weight:     Number(form.weight),
       isActive:   form.uiStatus !== 'ARCHIVED',
-      isCore:     editingKpi ? editingKpi.isCore : false,  // isCore immutable after creation
+      isCore:     editingKpi ? editingKpi.isCore : false,
       thresholds: { ...form.thresholds },
       visibility: { ...form.visibility },
       sortOrder:  editingKpi?.sortOrder ?? 999,
-      description: editingKpi?.description ?? '',
+      description: form.description?.trim() ?? '',
+      // Lifecycle + governance fields (Milestone 3)
+      lifecycleStage:   form.lifecycleStage   ?? 'draft',
+      isPrimary:        Boolean(form.isPrimary),
+      coachingAction:   form.coachingAction?.trim()   ?? '',
+      coachingActionAr: form.coachingActionAr?.trim() ?? '',
     }, form.uiStatus)
   }
 
@@ -332,6 +349,48 @@ export default function KpiEditorModal({ open, onClose, onSave, editingKpi, exis
                 onChange={(v) => svf('regionalEnabled', v)} />
             </div>
           </div>
+        </div>
+
+        {/* ── Lifecycle & Governance ─────────────────────────────── */}
+        <div style={{ borderTop:'1px solid var(--border-subtle)', padding:'12px 16px', display:'flex', flexDirection:'column', gap:'10px' }}>
+          <div style={{ fontSize:'10px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text-muted)', marginBottom:'2px' }}>
+            Lifecycle &amp; Governance
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+            <FL label="Lifecycle Stage">
+              <select value={form.lifecycleStage ?? 'draft'} onChange={(e) => sf('lifecycleStage', e.target.value)}
+                style={{ height:'32px', fontSize:'13px', borderRadius:'6px', border:'1px solid var(--border-default)', background:'var(--bg-elevated)', color:'var(--text-primary)', padding:'0 8px', width:'100%' }}>
+                <option value="draft">Draft</option>
+                <option value="pilot_tracking">Pilot Tracking</option>
+                <option value="shadow_evaluation">Shadow Evaluation</option>
+                <option value="production_evaluation" disabled={!editingKpi}>Production Evaluation</option>
+                <option value="archived">Archived</option>
+              </select>
+            </FL>
+            <FL label="Primary KPI" hint="Only one production KPI may be primary">
+              <ToggleRow label="Is Primary KPI"
+                checked={Boolean(form.isPrimary)}
+                onChange={(v) => sf('isPrimary', v)}
+                disabled={form.lifecycleStage !== 'production_evaluation'}
+                hint={form.lifecycleStage !== 'production_evaluation' ? 'Only production KPIs can be primary' : undefined} />
+            </FL>
+          </div>
+          <FL label="Coaching Action (English)" hint="Shown when pharmacist is behind pace on this KPI">
+            <input value={form.coachingAction ?? ''} onChange={(e) => sf('coachingAction', e.target.value)}
+              placeholder="e.g. Focus on prescription conversion opportunities."
+              style={{ height:'32px', fontSize:'13px', borderRadius:'6px', border:'1px solid var(--border-default)', background:'var(--bg-elevated)', color:'var(--text-primary)', padding:'0 10px', width:'100%', boxSizing:'border-box' }} />
+          </FL>
+          <FL label="Coaching Action (Arabic)" hint="للعرض عند التأخر عن الهدف">
+            <input value={form.coachingActionAr ?? ''} onChange={(e) => sf('coachingActionAr', e.target.value)}
+              placeholder="مثال: ركز على فرص تحويل الوصفات."
+              dir="rtl"
+              style={{ height:'32px', fontSize:'13px', borderRadius:'6px', border:'1px solid var(--border-default)', background:'var(--bg-elevated)', color:'var(--text-primary)', padding:'0 10px', width:'100%', boxSizing:'border-box' }} />
+          </FL>
+          <FL label="Description (optional)">
+            <input value={form.description ?? ''} onChange={(e) => sf('description', e.target.value)}
+              placeholder="Brief description of what this KPI measures"
+              style={{ height:'32px', fontSize:'13px', borderRadius:'6px', border:'1px solid var(--border-default)', background:'var(--bg-elevated)', color:'var(--text-primary)', padding:'0 10px', width:'100%', boxSizing:'border-box' }} />
+          </FL>
         </div>
 
         {/* Footer */}

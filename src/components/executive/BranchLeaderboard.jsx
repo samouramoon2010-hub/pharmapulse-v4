@@ -5,12 +5,16 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronUp, Minus } from 'lucide-react'
 import { GRADE_COLORS, GRADE_BG, GRADE_BORDER } from '../../engine/executive'
+import { RISK_LEVEL_COLORS } from '../../design/tokens'
 
+// Same colors as RISK_LEVEL_COLORS (shared with BranchDrilldown /
+// RegionalIntelligencePanel / RiskDistributionPanel) — "Med Risk" kept
+// short here only because this column is 80px wide in the table grid.
 const RISK_CFG = {
-  ON_TRACK:    { label: 'On Track',  color: '#22c55e' },
-  LOW_RISK:    { label: 'Low Risk',  color: '#00d2ad' },
-  MEDIUM_RISK: { label: 'Med Risk',  color: '#f59e0b' },
-  HIGH_RISK:   { label: 'High Risk', color: '#ef4444' },
+  ON_TRACK:    { label: 'On Track',  color: RISK_LEVEL_COLORS.ON_TRACK.color },
+  LOW_RISK:    { label: 'Low Risk',  color: RISK_LEVEL_COLORS.LOW_RISK.color },
+  MEDIUM_RISK: { label: 'Med Risk',  color: RISK_LEVEL_COLORS.MEDIUM_RISK.color },
+  HIGH_RISK:   { label: 'High Risk', color: RISK_LEVEL_COLORS.HIGH_RISK.color },
 }
 
 const TREND_CFG = {
@@ -21,18 +25,23 @@ const TREND_CFG = {
   DETERIORATING: { color: '#ef4444', label: '↓↓' },
 }
 
-export default function BranchLeaderboard({ report, onSelectBranch, selectedId }) {
+export default function BranchLeaderboard({ report, onSelectBranch, selectedId, scopeType }) {
   const [showAll, setShowAll] = useState(false)
 
   const branches  = report.allBranches
   const displayed = showAll ? branches : branches.slice(0, 8)
 
+  const leaderboardTitle    = scopeType === 'single' ? 'Branch Performance Summary' : 'Branch Rankings'
+  const leaderboardSubtitle = scopeType === 'single' ? null
+    : scopeType === 'list' ? 'My Assigned Branches Ranked'
+    : 'All Branches Ranked'
+
   return (
     <div className="card" style={{ padding: '20px', background: 'var(--bg-surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
-          <div className="section-title">Branch Rankings</div>
-          <div className="section-subtitle">{branches.length} branches · ranked by executive score</div>
+          <div className="section-title">{leaderboardTitle}</div>
+          {leaderboardSubtitle && <div className="section-subtitle">{leaderboardSubtitle}</div>}
         </div>
       </div>
 

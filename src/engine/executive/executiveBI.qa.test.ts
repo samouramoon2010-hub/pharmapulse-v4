@@ -5,7 +5,7 @@
 //         and all identified bug scenarios.
 // ============================================================
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import {
   generateExecutiveReport,
   generateBranchSummary,
@@ -91,7 +91,8 @@ function makeReport(branches: BranchInput[]): ExecutiveReport {
 // ─────────────────────────────────────────────────────────────
 
 describe('Route protection — role logic', () => {
-  const ADMIN       = ['admin']
+  // Phase A correction: EXEC_ROLES = ['admin', 'manager'] (production roles)
+  const EXEC_ROLES  = ['admin', 'manager']
   const ALL_ROLES   = ['admin', 'manager', 'pharmacist']
 
   function canAccess(userRole: string, allowedRoles: string[]): boolean {
@@ -99,19 +100,31 @@ describe('Route protection — role logic', () => {
   }
 
   it('admin can access /executive', () => {
-    expect(canAccess('admin', ADMIN)).toBe(true)
+    expect(canAccess('admin', EXEC_ROLES)).toBe(true)
   })
 
-  it('manager cannot access /executive', () => {
-    expect(canAccess('manager', ADMIN)).toBe(false)
+  it('manager can access /executive (Phase A — active production role)', () => {
+    expect(canAccess('manager', EXEC_ROLES)).toBe(true)
+  })
+
+  it('branch_manager cannot access /executive (not active production role)', () => {
+    expect(canAccess('branch_manager', EXEC_ROLES)).toBe(false)
   })
 
   it('pharmacist cannot access /executive', () => {
-    expect(canAccess('pharmacist', ADMIN)).toBe(false)
+    expect(canAccess('pharmacist', EXEC_ROLES)).toBe(false)
+  })
+
+  it('district_supervisor cannot access /executive (Phase B, not yet)', () => {
+    expect(canAccess('district_supervisor', EXEC_ROLES)).toBe(false)
+  })
+
+  it('regional_manager cannot access /executive (Phase C, not yet)', () => {
+    expect(canAccess('regional_manager', EXEC_ROLES)).toBe(false)
   })
 
   it('unknown role cannot access /executive', () => {
-    expect(canAccess('unknown', ADMIN)).toBe(false)
+    expect(canAccess('unknown', EXEC_ROLES)).toBe(false)
   })
 
   it('admin can access dashboard (ALL roles)', () => {
@@ -121,9 +134,10 @@ describe('Route protection — role logic', () => {
   it('fallback to NAV_CONFIG.pharmacist for unknown role', () => {
     // resolveNav logic: NAV_CONFIG[role] || NAV_CONFIG.pharmacist
     const NAV_CONFIG: Record<string, string[]> = {
-      admin:       ['/dashboard', '/reports', '/executive'],
-      manager:     ['/dashboard', '/reports'],
-      pharmacist:  ['/dashboard', '/entry'],
+      admin:         ['/dashboard', '/reports', '/executive'],
+      manager:       ['/dashboard', '/reports', '/executive'],  // Phase A: manager has Executive BI
+      branch_manager:['/dashboard', '/reports', '/executive'],  // alias of manager
+      pharmacist:    ['/dashboard', '/entry'],
     }
     const resolveNav = (role: string) => NAV_CONFIG[role] || NAV_CONFIG.pharmacist
     const unknownNav = resolveNav('hacker')
@@ -541,5 +555,234 @@ describe('Multi-branch portfolio', () => {
     const b2 = makeBranch({ pharmacyId: 'p1' })
     const report = makeReport([b1, b2])
     expect(report.totalBranches).toBe(2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// Phase A — Executive BI Rollout (Branch Manager)
+// Source-text audits. Pattern used throughout this project.
+// ─────────────────────────────────────────────────────────────
+
+describe('Phase A — Route registration (App.jsx)', () => {
+  let appSrc: string
+  beforeAll(async () => {
+    appSrc = (await import('../../App.jsx?raw')).default
+  })
+
+  it('defines EXEC_ROLES constant containing admin and manager (Phase 1A: expanded to hierarchy roles)', () => {
+    // Phase 1A expanded EXEC_ROLES to include hierarchy roles — verify the constant exists
+    // and still includes the original admin + manager entries.
+    const idx   = appSrc.indexOf('const EXEC_ROLES')
+    const block = appSrc.slice(idx, idx + 600)
+    expect(block).toContain("'admin'")
+    expect(block).toContain("'manager'")
+  })
+
+  it('/executive route uses EXEC_ROLES (not ADMIN)', () => {
+    const idx = appSrc.indexOf('path="/executive"')
+    const line = appSrc.slice(idx - 10, idx + 80)
+    expect(line).toContain('roles={EXEC_ROLES}')
+    expect(line).not.toContain('roles={ADMIN}')
+  })
+
+  it('manager IS in EXEC_ROLES (active production role)', () => {
+    const idx = appSrc.indexOf('const EXEC_ROLES')
+    const line = appSrc.slice(idx, idx + 100)
+    expect(line).toContain("'manager'")
+  })
+
+  it('branch_manager is in EXEC_ROLES (Phase 1A: hierarchy roles added)', () => {
+    // Phase 1A added branch_manager, district_supervisor, regional_manager, general_manager
+    // to EXEC_ROLES so hierarchy users can reach Executive BI.
+    const idx  = appSrc.indexOf('const EXEC_ROLES')
+    const block = appSrc.slice(idx, idx + 600)
+    expect(block).toContain("'branch_manager'")
+  })
+
+  it('pharmacist is not in EXEC_ROLES', () => {
+    const idx = appSrc.indexOf('const EXEC_ROLES')
+    const line = appSrc.slice(idx, idx + 100)
+    expect(line).not.toContain("'pharmacist'")
+  })
+
+  it('district_supervisor and regional_manager are in EXEC_ROLES (Phase 1A: route access granted)', () => {
+    // Phase 1A adds hierarchy roles to EXEC_ROLES so they can reach the page.
+    // Data scoping (seeing only allowed branches) is Phase 2.
+    const idx   = appSrc.indexOf('const EXEC_ROLES')
+    const block = appSrc.slice(idx, idx + 600)
+    expect(block).toContain('district_supervisor')
+    expect(block).toContain('regional_manager')
+  })
+
+  it('all admin-only routes still use ADMIN, not EXEC_ROLES', () => {
+    // /pharmacies, /audit, /admin/* must remain ADMIN-only.
+    // /users was intentionally moved to USERS_ROLES in Phase 3A-1B to allow
+    // territory roles read-only access — it is excluded from this check.
+    const adminRoutes = ['/pharmacies', '/audit', '/admin/kpis',
+                         '/admin/evaluation-registry', '/admin/regions']
+    for (const route of adminRoutes) {
+      const idx = appSrc.indexOf(`path="${route}"`)
+      const line = appSrc.slice(idx - 10, idx + 80)
+      expect(line, `${route} should remain ADMIN-only`).toContain('roles={ADMIN}')
+    }
+  })
+
+  it('/users uses USERS_ROLES (territory read-only access — Phase 3A-1B)', () => {
+    const idx = appSrc.indexOf('path="/users"')
+    expect(idx).toBeGreaterThan(-1)
+    const line = appSrc.slice(idx - 10, idx + 80)
+    expect(line).toContain('roles={USERS_ROLES}')
+  })
+})
+
+describe('Phase A — Sidebar (branch_manager nav)', () => {
+  let sidebarSrc: string
+  beforeAll(async () => {
+    sidebarSrc = (await import('../../components/layout/Sidebar.jsx?raw')).default
+  })
+
+  it('branch_manager is re-aliased to manager nav (forward-compat, not active production role)', () => {
+    expect(sidebarSrc).toContain('NAV_CONFIG.branch_manager = NAV_CONFIG.manager')
+  })
+
+  it('branch_manager inherits Executive BI transitively via manager alias', () => {
+    // branch_manager = NAV_CONFIG.manager reference, so it inherits the
+    // Executive BI entry without needing its own config block.
+    expect(sidebarSrc).toContain('NAV_CONFIG.branch_manager = NAV_CONFIG.manager')
+  })
+
+  it('manager nav HAS Executive BI (Phase A correction)', () => {
+    const idx = sidebarSrc.indexOf("manager: [")
+    const endIdx = sidebarSrc.indexOf('pharmacist: [', idx)
+    const managerBlock = sidebarSrc.slice(idx, endIdx)
+    expect(managerBlock).toContain("path: '/executive'")
+    expect(managerBlock).toContain("'Executive BI'")
+  })
+
+  it('admin nav still contains Executive BI (unchanged)', () => {
+    const idx = sidebarSrc.indexOf("admin: [")
+    const endIdx = sidebarSrc.indexOf('manager: [', idx)
+    const adminBlock = sidebarSrc.slice(idx, endIdx)
+    expect(adminBlock).toContain("path: '/executive'")
+  })
+
+  it('pharmacist nav does NOT contain Executive BI', () => {
+    const idx = sidebarSrc.indexOf("pharmacist: [")
+    const block = sidebarSrc.slice(idx, idx + 600)
+    expect(block).not.toContain("path: '/executive'")
+  })
+})
+
+describe('Phase A — Hook scoping (useExecutiveReport)', () => {
+  let hookSrc: string
+  beforeAll(async () => {
+    hookSrc = (await import('../../hooks/useExecutiveReport.ts?raw')).default
+  })
+
+  it('imports useAuthStore', () => {
+    expect(hookSrc).toContain("import { useAuthStore }")
+  })
+
+  it('derives scopedPharmacies via scope resolver (Phase 2G-2: replaces legacy role check)', () => {
+    // Phase 2G-2 replaced manager/branch_manager role check with filterAllowedPharmacies(scope)
+    expect(hookSrc).toContain("const scopedPharmacies = useMemo(")
+    expect(hookSrc).toContain("filterAllowedPharmacies(scope, pharmacies)")
+    expect(hookSrc).toContain("if (!scope) return []")
+  })
+
+  it('scope null returns [] — never falls through to all pharmacies (Phase 2G-2)', () => {
+    const idx = hookSrc.indexOf('const scopedPharmacies = useMemo(')
+    const block = hookSrc.slice(idx, idx + 200)
+    expect(block).toContain('if (!scope) return []')
+    // The old fallthrough `return pharmacies` is gone
+    expect(block).not.toContain('return pharmacies')
+  })
+
+  it('imports useScopeProfile and filterAllowedPharmacies (Phase 2G-2)', () => {
+    expect(hookSrc).toContain("from './useScopeProfile'")
+    expect(hookSrc).toContain("from '../services/scopeResolver'")
+  })
+
+  it('branches memo uses scopedPharmacies not raw pharmacies', () => {
+    const idx = hookSrc.indexOf('const branches = useMemo')
+    const block = hookSrc.slice(idx, idx + 2000)
+    expect(block).toContain('scopedPharmacies.length')
+    expect(block).toContain('return scopedPharmacies')
+    expect(block).toContain('[entries, targets, scopedPharmacies, loading]')
+    expect(block).not.toContain('pharmacies.length')
+    expect(block).not.toContain('return pharmacies')
+  })
+})
+
+describe('Phase A — Hook scoping (useRegionalIntelligence)', () => {
+  let hookSrc: string
+  beforeAll(async () => {
+    hookSrc = (await import('../../hooks/useRegionalIntelligence.ts?raw')).default
+  })
+
+  it('useAuthStore removed — useScopeProfile replaces direct role check (Phase 2G-2)', () => {
+    // useRegionalIntelligence no longer needs userProfile directly
+    expect(hookSrc).not.toContain("import { useAuthStore }")
+    expect(hookSrc).toContain("from './useScopeProfile'")
+  })
+
+  it('derives scopedPharmacies via scope resolver (Phase 2G-2: mirrors useExecutiveReport)', () => {
+    expect(hookSrc).toContain("const scopedPharmacies = useMemo(")
+    expect(hookSrc).toContain("filterAllowedPharmacies(scope, pharmacies)")
+    expect(hookSrc).toContain("if (!scope) return []")
+  })
+
+  it('branchInputs memo uses scopedPharmacies not raw pharmacies', () => {
+    const idx = hookSrc.indexOf('const branchInputs = useMemo')
+    const block = hookSrc.slice(idx, idx + 2000)
+    expect(block).toContain('scopedPharmacies.length')
+    expect(block).toContain('return scopedPharmacies')
+    expect(block).toContain('scopedPharmacies, loading')
+    expect(block).not.toContain('pharmacies.length')
+    expect(block).not.toContain('return pharmacies')
+  })
+})
+
+describe('Phase A — Security: no cross-branch leakage', () => {
+  it('scoping is applied BEFORE BranchInput assembly in useExecutiveReport', async () => {
+    const src = (await import('../../hooks/useExecutiveReport.ts?raw')).default
+    const scopeIdx   = src.indexOf('const scopedPharmacies = useMemo(')
+    const branchIdx  = src.indexOf('const branches = useMemo')
+    // scopedPharmacies must be defined before branches memo
+    expect(scopeIdx).toBeGreaterThan(-1)
+    expect(branchIdx).toBeGreaterThan(-1)
+    expect(scopeIdx).toBeLessThan(branchIdx)
+  })
+
+  it('scoping is applied BEFORE BranchRollupInput assembly in useRegionalIntelligence', async () => {
+    const src = (await import('../../hooks/useRegionalIntelligence.ts?raw')).default
+    const scopeIdx  = src.indexOf('const scopedPharmacies = useMemo(')
+    const inputIdx  = src.indexOf('const branchInputs = useMemo')
+    expect(scopeIdx).toBeGreaterThan(-1)
+    expect(inputIdx).toBeGreaterThan(-1)
+    expect(scopeIdx).toBeLessThan(inputIdx)
+  })
+
+  it('scoping delegates to filterAllowedPharmacies — no hardcoded pharmacyId equality (Phase 2G-2)', async () => {
+    const execSrc = (await import('../../hooks/useExecutiveReport.ts?raw')).default
+    const regSrc  = (await import('../../hooks/useRegionalIntelligence.ts?raw')).default
+    // Phase 2G-2: scope resolver handles all role types — no inline identity checks needed
+    expect(execSrc).toContain('filterAllowedPharmacies(scope, pharmacies)')
+    expect(regSrc).toContain('filterAllowedPharmacies(scope, pharmacies)')
+    // Neither hook hardcodes pharmacyId equality anymore
+    expect(execSrc).not.toContain('p.id === userProfile.pharmacyId')
+    expect(regSrc).not.toContain('p.id === userProfile.pharmacyId')
+  })
+
+  it('scope null guard prevents any fallthrough to full portfolio (Phase 2G-2)', async () => {
+    const src = (await import('../../hooks/useExecutiveReport.ts?raw')).default
+    const idx = src.indexOf("const scopedPharmacies = useMemo(")
+    const block = src.slice(idx, idx + 200)
+    // Null scope → [] — never falls through to return pharmacies (which was the leak)
+    expect(block).toContain('if (!scope) return []')
+    expect(block).not.toContain('return pharmacies')
+    // No hardcoded role check of any kind in scopedPharmacies
+    expect(block).not.toContain("userProfile?.role === 'admin'")
+    expect(block).not.toContain("userProfile?.role === 'manager'")
   })
 })

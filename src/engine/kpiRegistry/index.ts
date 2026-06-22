@@ -80,3 +80,7 @@ export {
   buildFormInitialState,
   shadowComparePayloads,
 } from './kpiUiAdapter'
+
+// ── Registry Guard (Core KPI Dependency Removal — No Silent
+//    Core Fallback Closure) ─────────────────────────────────────
+export { requireLiveRegistry } from './registryGuard'

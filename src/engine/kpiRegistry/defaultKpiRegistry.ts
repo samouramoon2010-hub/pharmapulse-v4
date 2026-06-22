@@ -32,7 +32,11 @@ const SERVICE_THRESHOLDS      = { healthy: 98, watch: 95, risk: 90, critical: 85
 
 // ── Visibility presets ────────────────────────────────────────
 
-const ALL_SURFACES    = { dashboardEnabled: true,  teamEnabled: true,  executiveEnabled: true,  regionalEnabled: true  } as const
+// Core KPI Dependency Removal — Stage G: targetInputEnabled is now explicit
+// registry data instead of being implied by isCore. ALL_SURFACES is used
+// only by the 5 Core KPIs, so this makes their existing target-input
+// visibility explicit without changing any other KPI's behavior.
+const ALL_SURFACES    = { dashboardEnabled: true,  teamEnabled: true,  executiveEnabled: true,  regionalEnabled: true,  targetInputEnabled: true } as const
 const BRANCH_ONLY     = { dashboardEnabled: true,  teamEnabled: true,  executiveEnabled: false, regionalEnabled: false } as const
 const DASHBOARD_ONLY  = { dashboardEnabled: true,  teamEnabled: false, executiveEnabled: false, regionalEnabled: false } as const
 
@@ -72,6 +76,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: PRESCRIPTION_THRESHOLDS,
     visibility: ALL_SURFACES,
     sortOrder:  10,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        true,  // wasfaty is the primary operational KPI
+    coachingAction:   'Review pending e-prescriptions and process them before midday to close the gap.',
+    coachingActionAr: 'راجع الوصفات الإلكترونية المعلقة وقم بمعالجتها قبل الظهر لتقليص الفجوة.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'wasfaty',
+    targetField:    'wasfatyTarget',
     description: 'Wasfaty e-prescription fulfilment — count of digital prescriptions processed per month.',
   },
 
@@ -80,8 +91,6 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     label:      'OmniHealth',
     shortLabel: 'Omni',
     labelAr:    'أومني هيلث',
-    // aliasFor: 'omni' — engine reads/writes the 'omni' Firestore field;
-    // the platform uses 'omnihealth' as the business-facing key.
     aliasFor:   'omni',
     category:   'digital',
     valueType:  'count',
@@ -95,6 +104,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: STANDARD_THRESHOLDS,
     visibility: ALL_SURFACES,
     sortOrder:  20,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Proactively offer OmniHealth enrollment to every customer managing a chronic condition.',
+    coachingActionAr: 'اعرض الانضمام إلى برنامج أومني هيلث بشكل استباقي على كل عميل يعاني من حالة مزمنة.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'omni',
+    targetField:    'omniTarget',
     description: 'OmniHealth digital health programme — units dispensed or enrolled per month. Engine field: omni.',
   },
 
@@ -103,8 +119,6 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     label:      'Wellness Card',
     shortLabel: 'Wellness',
     labelAr:    'بطاقة ويلنس',
-    // aliasFor: 'wellness' — engine reads/writes the 'wellness' Firestore field;
-    // the platform uses 'wellnessCard' as the business-facing key.
     aliasFor:   'wellness',
     category:   'wellness',
     valueType:  'count',
@@ -118,6 +132,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: STANDARD_THRESHOLDS,
     visibility: ALL_SURFACES,
     sortOrder:  30,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Display wellness products prominently at the counter and mention them to every customer.',
+    coachingActionAr: 'اعرض منتجات ويلنس بشكل بارز عند المنضدة وأذكرها لكل عميل.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'wellness',
+    targetField:    'wellnessTarget',
     description: 'Wellness product sales and wellness card activations. Engine field: wellness.',
   },
 
@@ -139,6 +160,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: REVENUE_THRESHOLDS,
     visibility: ALL_SURFACES,
     sortOrder:  40,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Suggest complementary items — vitamins, supplements, or related products — with every purchase to grow the basket.',
+    coachingActionAr: 'اقترح منتجات مكملة — فيتامينات أو مكملات أو منتجات ذات صلة — مع كل عملية شراء لزيادة متوسط السلة.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'basket',
+    targetField:    'basketTarget',
     description: 'Average transaction basket size in SAR — measures upsell and product mix effectiveness.',
   },
 
@@ -160,6 +188,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: STANDARD_THRESHOLDS,
     visibility: ALL_SURFACES,
     sortOrder:  50,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Identify at least one cross-sell opportunity in every transaction — look for complementary needs.',
+    coachingActionAr: 'حدد فرصة بيع متقاطع واحدة على الأقل في كل معاملة — ابحث عن احتياجات مكملة.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'crossSelling',
+    targetField:    'crossSellTarget',
     description: 'Cross-selling transactions — count of transactions where a complementary product was added.',
   },
 
@@ -186,6 +221,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: REVENUE_THRESHOLDS,
     visibility: BRANCH_ONLY,
     sortOrder:  60,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Focus on high-value categories and prioritise customers with larger purchase intent to grow daily revenue.',
+    coachingActionAr: 'ركز على الفئات ذات القيمة العالية وأعطِ الأولوية للعملاء ذوي نية الشراء الأكبر لزيادة الإيرادات اليومية.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'sales',
+    targetField:    'salesTarget',
     description: 'Total sales revenue in SAR — overall monthly pharmacy revenue target.',
   },
 
@@ -206,6 +248,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: SERVICE_THRESHOLDS,
     visibility: BRANCH_ONLY,
     sortOrder:  70,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Review stock levels daily and flag any out-of-stock items immediately to maintain high service levels.',
+    coachingActionAr: 'راجع مستويات المخزون يومياً وأبلغ فوراً عن أي نقص في المنتجات للحفاظ على مستوى خدمة عالٍ.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'sl',
+    targetField:    'slTarget',
     description: 'Service level — percentage of customer requests fulfilled without stock-outs or delays.',
   },
 
@@ -226,6 +275,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: PROGRAMME_THRESHOLDS,
     visibility: BRANCH_ONLY,
     sortOrder:  80,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Identify diabetic patients in your daily traffic and guide them through the NDF enrolment steps.',
+    coachingActionAr: 'حدد مرضى السكري في حركة العملاء اليومية وأرشدهم خلال خطوات الانضمام إلى برنامج السكري.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'ndf',
+    targetField:    'ndfTarget',
     description: 'National Diabetes Framework — patients enrolled or followed up under the NDF programme.',
   },
 
@@ -246,6 +302,13 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: PROGRAMME_THRESHOLDS,
     visibility: DASHBOARD_ONLY,
     sortOrder:  90,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Offer InBody assessments to customers visiting the wellness section — it takes only a few minutes and adds measurable value.',
+    coachingActionAr: 'اعرض فحص إن بودي على العملاء الذين يزورون قسم ويلنس — يستغرق بضع دقائق فقط ويضيف قيمة ملموسة.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'inbody',
+    targetField:    'inbodyTarget',
     description: 'InBody body composition scans — number of InBody assessments conducted per month.',
   },
 
@@ -266,7 +329,57 @@ export const DEFAULT_KPI_REGISTRY: KpiRegistry = {
     thresholds: PRESCRIPTION_THRESHOLDS,
     visibility: BRANCH_ONLY,
     sortOrder:  100,
+    // ── Phase 1A additions ────────────────────────────────────
+    isPrimary:        false,
+    coachingAction:   'Process all pending Liberation e-prescriptions and ensure follow-up with patients on the Liberation programme.',
+    coachingActionAr: 'عالج جميع وصفات ليبريشن الإلكترونية المعلقة وتأكد من المتابعة مع المرضى المشاركين في برنامج ليبريشن.',
+    lifecycleStage: 'production_evaluation',
+    actualField:    'liberation',
+    targetField:    'liberationTarget',
     description: 'Liberation — branded e-prescription programme fulfilment count.',
+  },
+
+  // ════════════════════════════════════════════════════════
+  // SECTION C — PILOT KPIs (lifecycleStage: 'pilot_tracking')
+  // These KPIs are collected and displayed but contribute 0%
+  // to evaluation, ranking, executive score, and portfolio score.
+  // The Legacy Adapter strips them from all engine inputs.
+  // UI surfaces display the "Tracking Only" badge.
+  // ════════════════════════════════════════════════════════
+
+  insuranceConversion: {
+    key:        'insuranceConversion',
+    label:      'Insurance Conversion',
+    shortLabel: 'Insurance',
+    labelAr:    'تحويل التأمين',
+    // No aliasFor — registry key IS the engine key for pilot KPIs
+    category:   'commercial',
+    valueType:  'count',
+    unit:       'conversions',
+    unitAr:     'تحويل',
+    direction:  'higher_is_better',
+    targetType: 'absolute',
+    weight:     0,       // Never contributes to composite score
+    isActive:   true,
+    isCore:     false,   // Pilot KPIs are never core
+    thresholds: { healthy: 90, watch: 70, risk: 50, critical: 30 },
+    // Pilot KPIs visible on entry/dashboard/targets/reports.
+    // Explicitly excluded from executive and regional surfaces.
+    visibility: {
+      dashboardEnabled:   true,
+      teamEnabled:        true,
+      executiveEnabled:   false,  // Never in Executive BI
+      regionalEnabled:    false,  // Never in regional heatmap
+      targetInputEnabled: true,
+    },
+    sortOrder:  110,
+    isPrimary:        false,
+    coachingAction:   'Identify patients eligible for insurance programme conversion and guide them through the enrolment process.',
+    coachingActionAr: 'حدد المرضى المؤهلين لتحويل التأمين وأرشدهم خلال عملية التسجيل.',
+    lifecycleStage: 'pilot_tracking',
+    actualField:    'insuranceConversion',
+    targetField:    'insuranceConversionTarget',
+    description: 'Insurance Conversion — count of patients converted to insurance coverage per month. Pilot tracking only — does not affect evaluation or ranking.',
   },
 
 } satisfies KpiRegistry

@@ -8,7 +8,8 @@
 // ============================================================
 
 import {
-  KPI_KEYS, KPI_META,
+  KPI_KEYS, getProductionEngineKeys,
+  KPI_META,
   getTrafficLight,
   computeAchievementPct,
 } from '../kpiAnalyticsEngine'
@@ -17,6 +18,8 @@ import type {
   KpiKey,
   TrafficLightStatus,
 } from '../kpiAnalyticsEngine'
+
+import type { KpiRegistry } from '../kpiRegistry'
 
 import type {
   BranchRollupSummary,
@@ -93,11 +96,14 @@ function computeRegionalScore(branches: BranchRollupSummary[]): number {
  * to that KPI's mean achievement. This avoids diluting the average
  * with branches that have no targets set.
  */
-function computeKpiAverages(branches: BranchRollupSummary[]): RegionalKpiAverage[] {
+function computeKpiAverages(
+  branches:   BranchRollupSummary[],
+  engineKeys: string[],
+): RegionalKpiAverage[] {
   // Only active branches (those with at least some entries) contribute
   const contributing = branches.filter((b) => b.operationalStatus !== 'NO_DATA')
 
-  return KPI_KEYS.map((kpiKey): RegionalKpiAverage => {
+  return engineKeys.map((kpiKey): RegionalKpiAverage => {
     // Gather the per-branch KpiRollupSummary for this KPI
     const kpiEntries = contributing
       .map((b) => b.kpiAchievementSummary.find((k) => k.kpiKey === kpiKey))
@@ -373,11 +379,12 @@ function countNoTargetBranches(branches: BranchRollupSummary[]): number {
 // ══════════════════════════════════════════════════════════════
 
 function aggregateRegion(
-  regionName: string,
-  branches:   BranchRollupSummary[],
+  regionName:  string,
+  branches:    BranchRollupSummary[],
+  engineKeys:  string[],
 ): RegionalRollupSummary {
   const riskConcentration  = computeRiskConcentration(branches)
-  const kpiAverages        = computeKpiAverages(branches)
+  const kpiAverages        = computeKpiAverages(branches, engineKeys)
   const regionalScore      = computeRegionalScore(branches)
   const regionalRiskLevel  = deriveRegionalRiskLevel(riskConcentration, branches.length)
   const weakestKpis        = findWeakestRegionalKpis(kpiAverages)
@@ -410,12 +417,22 @@ function aggregateRegion(
 /**
  * Aggregate branch rollup summaries into per-region intelligence.
  *
+ * registry is optional at this pure-function layer for backward
+ * compatibility with its large existing test suite (no test may be
+ * weakened). Core KPI Dependency Removal — No Silent Core Fallback
+ * Closure: every ACTIVE PRODUCTION caller resolves and passes the live
+ * registry at the orchestrator/hook boundary (see requireLiveRegistry()
+ * in engine/kpiRegistry/registryGuard.ts) — this optional parameter is
+ * exercised with `undefined` only by historical-compatibility tests.
+ *
  * @param branchRollups - Array of BranchRollupSummary (one per branch)
+ * @param registry      - Live KpiRegistry. All production_evaluation
+ *                        KPIs are included in regional averages automatically.
  * @returns Array of RegionalRollupSummary sorted by regionName.
  *          Returns [] when input is empty — never throws.
  *
  * @example
- * const regions = generateRegionalRollups(branchRollups)
+ * const regions = generateRegionalRollups(branchRollups, liveRegistry)
  * // → regions[0].regionName       ('Central')
  * // → regions[0].regionalScore    (74)
  * // → regions[0].weakestKpis      (['crossSelling', 'omni'])
@@ -423,12 +440,18 @@ function aggregateRegion(
  */
 export function generateRegionalRollups(
   branchRollups: BranchRollupSummary[],
+  registry?:     KpiRegistry,
 ): RegionalRollupSummary[] {
   if (!branchRollups.length) return []
+
+  // Resolve production KPI engine keys from the live registry; falls back
+  // to the fixed Core list only for historical-compatibility test callers
+  // that omit registry — every active production caller passes one.
+  const engineKeys = registry ? getProductionEngineKeys(registry) : KPI_KEYS
 
   const grouped = groupByRegion(branchRollups)
 
   return Array.from(grouped.entries())
-    .map(([regionName, branches]) => aggregateRegion(regionName, branches))
+    .map(([regionName, branches]) => aggregateRegion(regionName, branches, engineKeys))
     .sort((a, b) => a.regionName.localeCompare(b.regionName))
 }

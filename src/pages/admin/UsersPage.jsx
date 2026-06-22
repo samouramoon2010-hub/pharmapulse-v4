@@ -5,7 +5,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import {
   Users, Plus, Search, Pencil, UserCheck, UserX,
   Save, X, Loader2, Eye, EyeOff, AlertCircle,
-  Mail, Phone, Hash, Shield, Crown, Building2, Download,
+  Mail, Phone, Hash, Shield, Crown, Building2, Download, ArrowRightLeft,
 } from 'lucide-react'
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
@@ -13,16 +13,23 @@ import { useAuthStore } from '../../store/authStore'
 import { usePharmacyStore } from '../../store/pharmacyStore'
 import {
   createUser, updateUserProfile, toggleUserStatus,
-  employeeIdExists,
+  employeeIdExists, transferUser, promoteBranchManager,
 } from '../../services/userService'
 import { useToastStore } from '../../components/ui/Toast'
+import { useScopeProfile } from '../../hooks/useScopeProfile'
+import { isPharmacyAllowed, filterAllowedPharmacies } from '../../services/scopeResolver'
 import ConfirmModal from '../../components/ui/ConfirmModal'
 import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
 
 const ROLES = [
-  { value:'admin',      label:'Admin',    icon:'👑', needsPharmacy:false },
-  { value:'manager',    label:'Manager',  icon:'🏪', needsPharmacy:true  },
-  { value:'pharmacist', label:'Pharmacist',icon:'💊', needsPharmacy:true  },
+  { value:'admin',               label:'Admin',               icon:'👑', needsPharmacy:false },
+  { value:'manager',             label:'Manager (legacy)',     icon:'🏪', needsPharmacy:true  },
+  { value:'branch_manager',      label:'Branch Manager',       icon:'🏪', needsPharmacy:true  },
+  // Phase 0: district_supervisor and regional_manager are selectable
+  // but have no dedicated UI yet — they use the pharmacist dashboard as fallback.
+  { value:'district_supervisor', label:'District Supervisor',  icon:'🗺️', needsPharmacy:false },
+  { value:'regional_manager',    label:'Regional Manager',     icon:'📊', needsPharmacy:false },
+  { value:'pharmacist',          label:'Pharmacist',           icon:'💊', needsPharmacy:true  },
 ]
 
 function pwStrength(pw) {
@@ -64,6 +71,24 @@ export default function UsersPage() {
   const { userProfile } = useAuthStore()
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
   const toast = useToastStore()
+  const { scope, loading: scopeLoading, error: scopeError } = useScopeProfile()
+  // Phase 3A-1B: territory roles identified via list scope.
+  const isReadOnly = scope?.type === 'list'
+  const isTerritoryRole = isReadOnly
+  // Phase 3A-1C1: roles territory actors are allowed to create.
+  const SUPERVISOR_CREATABLE_ROLES = ['pharmacist', 'manager', 'branch_manager']
+  // Territory roles gain create access in 3A-1C1.
+  // GM excluded: Firestore create rule not yet extended for general_manager.
+  const canCreate = userProfile?.role === 'admin' || isTerritoryRole
+  // 3A-1C2: territory roles can edit basic info (displayName/phone/employeeId).
+  const canEdit = userProfile?.role === 'admin' || isTerritoryRole
+  // 3A-1C3: roles territory actors are allowed to toggle active/inactive.
+  const SUPERVISOR_TOGGLEABLE_ROLES = ['pharmacist', 'manager', 'branch_manager']
+  // 3A-1C4: roles territory actors are allowed to transfer between branches.
+  const SUPERVISOR_TRANSFERABLE_ROLES = ['pharmacist', 'manager', 'branch_manager']
+  const canTransfer = userProfile?.role === 'admin' || isTerritoryRole
+  // 3A-1C5: roles that can be promoted or demoted (pharmacist ↔ branch_manager only).
+  const SUPERVISOR_PROMOTABLE_ROLES = ['pharmacist', 'branch_manager']
 
   const [users,        setUsers]        = useState([])
   const [loading,      setLoading]      = useState(true)
@@ -78,6 +103,10 @@ export default function UsersPage() {
   const [step,         setStep]         = useState('form')
   const [created,      setCreated]      = useState(null)
   const [confirmToggle,setConfirmToggle]= useState(null)
+  const [transferTarget, setTransferTarget] = useState(null)
+  const [transferDest,   setTransferDest]   = useState('')
+  const [transferring,   setTransferring]   = useState(false)
+  const [promotionTarget, setPromotionTarget] = useState(null)
 
   useEffect(() => {
     const u1 = subPh()
@@ -90,28 +119,42 @@ export default function UsersPage() {
   }, [])
 
   const isNew = !editUser
+
+  // Scope-filtered user list: territory roles see only users assigned to their pharmacies.
+  const scopedUsers = useMemo(() => {
+    if (!scope) return []
+    if (scope.type === 'all') return users
+    if (scope.type === 'list') return users.filter(u => u.pharmacyId && isPharmacyAllowed(scope, u.pharmacyId))
+    if (scope.type === 'single') return users.filter(u => u.pharmacyId === scope.id)
+    return []
+  }, [users, scope])
+
   const stats = useMemo(() => ({
-    total:  users.length,
-    active: users.filter((u) => u.active !== false).length,
-    counts: users.reduce((a,u)=>{ a[u.role]=(a[u.role]||0)+1; return a }, {}),
-  }), [users])
+    total:  scopedUsers.length,
+    active: scopedUsers.filter((u) => u.active !== false).length,
+    counts: scopedUsers.reduce((a,u)=>{ a[u.role]=(a[u.role]||0)+1; return a }, {}),
+  }), [scopedUsers])
 
   const filtered = useMemo(() =>
-    users.filter((u) => {
+    scopedUsers.filter((u) => {
       const q = search.toLowerCase()
       const ms = !q || u.displayName?.toLowerCase().includes(q) ||
                        u.email?.toLowerCase().includes(q) ||
                        u.employeeId?.toLowerCase().includes(q)
       const mr = filterRole==='all' || u.role===filterRole
       return ms && mr
-    }), [users, search, filterRole])
+    }), [scopedUsers, search, filterRole])
 
   const getPharmacyName = (id) => pharmacies.find((p) => p.id===id)?.name || '—'
   const sf = (f,v) => { setForm((p)=>({...p,[f]:v})); setErrors((e)=>({...e,[f]:undefined})) }
   const selectedRole = ROLES.find((r) => r.value === form.role)
 
-  const openCreate = () => { setForm(EMPTY); setEditUser(null); setErrors({}); setStep('form'); setCreated(null); setShowModal(true) }
+  const openCreate = () => {
+    if (!canCreate) return
+    setForm(EMPTY); setEditUser(null); setErrors({}); setStep('form'); setCreated(null); setShowModal(true)
+  }
   const openEdit   = (u)  => {
+    if (!canEdit) return
     setForm({ displayName:u.displayName||'', email:u.email||'', password:'',
               role:u.role||'pharmacist', pharmacyId:u.pharmacyId||'',
               phone:u.phone||'', employeeId:u.employeeId||'',
@@ -119,6 +162,26 @@ export default function UsersPage() {
     setEditUser(u); setErrors({}); setStep('form'); setCreated(null); setShowModal(true)
   }
   const closeModal = () => { setShowModal(false); setEditUser(null) }
+
+  // 3A-1C3: whether a row should show the Suspend/Activate action.
+  // Territory roles: target must be in scope AND have an allowed role.
+  const canToggleRow = (row) => {
+    if (!isReadOnly) return true
+    return SUPERVISOR_TOGGLEABLE_ROLES.includes(row.role)
+      && isPharmacyAllowed(scope, row.pharmacyId)
+  }
+  // 3A-1C3: pre-confirm guard — runs before the confirm modal opens (Task 2 / defense layer 1).
+  const requestToggle = (row) => {
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, row.pharmacyId)) {
+        toast.error('User not in your assigned territory'); return
+      }
+      if (!SUPERVISOR_TOGGLEABLE_ROLES.includes(row.role)) {
+        toast.error('Cannot modify this role'); return
+      }
+    }
+    setConfirmToggle({...row, uid:row.uid||row.id, active:row.active!==false})
+  }
 
   const validate = async () => {
     const e = {}
@@ -141,6 +204,25 @@ export default function UsersPage() {
   }
 
   const handleSave = async () => {
+    if (!isNew && !canEdit) return
+    // 3A-1C1: territory create guards — defense-in-depth before createUser()
+    if (isNew && isTerritoryRole) {
+      if (!SUPERVISOR_CREATABLE_ROLES.includes(form.role)) {
+        toast.error('Role not permitted for your account')
+        return
+      }
+      if (!isPharmacyAllowed(scope, form.pharmacyId)) {
+        toast.error('Branch not in your assigned territory')
+        return
+      }
+    }
+    // 3A-1C2: territory edit guard — verify target user is in assignedPharmacyIds
+    if (!isNew && isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, editUser.pharmacyId)) {
+        toast.error('User not in your assigned territory')
+        return
+      }
+    }
     const errs = await validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
     setSaving(true)
@@ -155,11 +237,15 @@ export default function UsersPage() {
         })
         setCreated(result); setStep('success')
       } else {
+        // 3A-1C2: territory roles may only touch displayName/phone/employeeId.
+        const updateData = isTerritoryRole
+          ? { displayName:form.displayName.trim(), phone:form.phone, employeeId:form.employeeId }
+          : { displayName:form.displayName.trim(), role:form.role,
+              status:form.status, active:form.status==='active',
+              pharmacyId:form.pharmacyId||null, phone:form.phone, employeeId:form.employeeId }
         await updateUserProfile(
           editUser.uid||editUser.id,
-          { displayName:form.displayName.trim(), role:form.role,
-            status:form.status, active:form.status==='active',
-            pharmacyId:form.pharmacyId||null, phone:form.phone, employeeId:form.employeeId },
+          updateData,
           userProfile?.uid, userProfile?.role,
         )
         toast.success('User updated')
@@ -175,6 +261,19 @@ export default function UsersPage() {
 
   const handleToggle = async () => {
     if (!confirmToggle) return
+    // 3A-1C3: territory toggle guard — defense-in-depth before toggleUserStatus (Task 3 / defense layer 2).
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, confirmToggle.pharmacyId)) {
+        toast.error('User not in your assigned territory')
+        setConfirmToggle(null)
+        return
+      }
+      if (!SUPERVISOR_TOGGLEABLE_ROLES.includes(confirmToggle.role)) {
+        toast.error('Cannot modify this role')
+        setConfirmToggle(null)
+        return
+      }
+    }
     try {
       await toggleUserStatus(confirmToggle.uid||confirmToggle.id, userProfile?.uid, userProfile?.role)
       toast.success(`Account ${confirmToggle.active!==false?'suspended':'activated'}`)
@@ -182,7 +281,123 @@ export default function UsersPage() {
     setConfirmToggle(null)
   }
 
+  const canTransferRow = (row) => {
+    if (!isTerritoryRole) return userProfile?.role === 'admin'
+    return SUPERVISOR_TRANSFERABLE_ROLES.includes(row.role)
+      && isPharmacyAllowed(scope, row.pharmacyId)
+  }
+  const requestTransfer = (row) => {
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, row.pharmacyId)) {
+        toast.error('User not in your assigned territory'); return
+      }
+      if (!SUPERVISOR_TRANSFERABLE_ROLES.includes(row.role)) {
+        toast.error('Cannot transfer this role'); return
+      }
+    }
+    setTransferTarget(row)
+    setTransferDest('')
+  }
+  const handleTransfer = async () => {
+    if (!transferTarget || !transferDest) return
+    // 3A-1C4: territory transfer guard — defense-in-depth before transferUser (defense layer 2).
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, transferTarget.pharmacyId)) {
+        toast.error('User not in your assigned territory')
+        setTransferTarget(null)
+        return
+      }
+      if (!SUPERVISOR_TRANSFERABLE_ROLES.includes(transferTarget.role)) {
+        toast.error('Cannot transfer this role')
+        setTransferTarget(null)
+        return
+      }
+      if (!isPharmacyAllowed(scope, transferDest)) {
+        toast.error('Destination branch not in your assigned territory')
+        setTransferTarget(null)
+        return
+      }
+    }
+    if (transferDest === transferTarget.pharmacyId) {
+      toast.error('User is already assigned to this branch')
+      return
+    }
+    setTransferring(true)
+    try {
+      await transferUser(transferTarget.uid || transferTarget.id, transferDest, userProfile?.uid, userProfile?.role)
+      toast.success('User transferred successfully')
+      setTransferTarget(null)
+    } catch (e) { toast.error(e.message) }
+    finally { setTransferring(false) }
+  }
+
+  const canPromoteRow = (row) => {
+    if (!SUPERVISOR_PROMOTABLE_ROLES.includes(row.role)) return false
+    if (isTerritoryRole) return isPharmacyAllowed(scope, row.pharmacyId)
+    return userProfile?.role === 'admin'
+  }
+  const requestPromotion = (row) => {
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, row.pharmacyId)) {
+        toast.error('User not in your assigned territory'); return
+      }
+      if (!SUPERVISOR_PROMOTABLE_ROLES.includes(row.role)) {
+        toast.error('Cannot promote/demote this role'); return
+      }
+    }
+    setPromotionTarget({
+      ...row,
+      uid: row.uid || row.id,
+      newRole: row.role === 'pharmacist' ? 'branch_manager' : 'pharmacist',
+    })
+  }
+  const handlePromotion = async () => {
+    if (!promotionTarget) return
+    // 3A-1C5: territory promotion guard — defense-in-depth before promoteBranchManager (defense layer 2).
+    if (isTerritoryRole) {
+      if (!isPharmacyAllowed(scope, promotionTarget.pharmacyId)) {
+        toast.error('User not in your assigned territory')
+        setPromotionTarget(null)
+        return
+      }
+      if (!SUPERVISOR_PROMOTABLE_ROLES.includes(promotionTarget.role)) {
+        toast.error('Cannot promote/demote this role')
+        setPromotionTarget(null)
+        return
+      }
+    }
+    try {
+      await promoteBranchManager(promotionTarget.uid, promotionTarget.newRole, userProfile?.uid, userProfile?.role)
+      const label = promotionTarget.newRole === 'branch_manager' ? 'promoted to Branch Manager' : 'demoted to Pharmacist'
+      toast.success(`${promotionTarget.displayName} ${label}`)
+    } catch (e) { toast.error(e.message) }
+    setPromotionTarget(null)
+  }
+
   const pw = pwStrength(form.password)
+
+  // 3A-1C1: scope-aware pharmacy list and role list for create modal
+  const allowedPharmacies = scope ? filterAllowedPharmacies(scope, pharmacies) : []
+  const pickablePharmacies = isTerritoryRole ? allowedPharmacies : pharmacies
+  const visibleRoles = isTerritoryRole
+    ? ROLES.filter(r => SUPERVISOR_CREATABLE_ROLES.includes(r.value))
+    : ROLES
+
+  if (scopeLoading) return (
+    <div className="max-w-6xl mx-auto space-y-5">
+      <div style={{ color:'var(--text-muted)', fontSize:'13px', textAlign:'center', paddingTop:'60px' }}>
+        Loading users...
+      </div>
+    </div>
+  )
+
+  if (scopeError || scope?.type === 'none') return (
+    <div className="max-w-6xl mx-auto space-y-5">
+      <div style={{ color:'#f87171', fontSize:'13px', textAlign:'center', paddingTop:'60px' }}>
+        Access denied
+      </div>
+    </div>
+  )
 
   // DataTable columns
   const columns = [
@@ -211,7 +426,7 @@ export default function UsersPage() {
     },
     {
       key:'role', label:'Role', sortable:true,
-      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',pharmacist:'Pharmacist'}[val]||val} />,
+      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',branch_manager:'Branch Manager',district_supervisor:'District Supervisor',regional_manager:'Regional Manager',pharmacist:'Pharmacist'}[val]||val} />,
     },
     {
       key:'pharmacyId', label:'Branch',
@@ -228,10 +443,12 @@ export default function UsersPage() {
       key:'_actions', label:'', align:'center', width:'100px',
       render:(_, row)=>(
         <RowActions actions={[
-          { label:'Edit', onClick:()=>openEdit(row) },
-          { label: row.active!==false?'Suspend':'Activate',
-            onClick:()=>setConfirmToggle({...row, uid:row.uid||row.id, active:row.active!==false}),
-            secondary:true, danger:row.active!==false },
+          ...(canEdit ? [{ label:'Edit', onClick:()=>openEdit(row) }] : []),
+          ...(canToggleRow(row) ? [{ label: row.active!==false?'Suspend':'Activate',
+            onClick:()=>requestToggle(row),
+            secondary:true, danger:row.active!==false }] : []),
+          ...(canTransferRow(row) ? [{ label:'Transfer', onClick:()=>requestTransfer(row) }] : []),
+          ...(canPromoteRow(row) ? [{ label: row.role==='pharmacist'?'Promote':'Demote', onClick:()=>requestPromotion(row) }] : []),
         ]} />
       ),
     },
@@ -250,9 +467,11 @@ export default function UsersPage() {
           </p>
         </div>
         <div style={{ display:'flex', gap:'8px' }}>
-          <button onClick={openCreate} className="btn btn-primary btn-sm" style={{ gap:'6px' }}>
-            <Plus style={{ width:13, height:13 }} /> Add User
-          </button>
+          {canCreate && (
+            <button onClick={openCreate} className="btn btn-primary btn-sm" style={{ gap:'6px' }}>
+              <Plus style={{ width:13, height:13 }} /> Add User
+            </button>
+          )}
         </div>
       </div>
 
@@ -260,9 +479,12 @@ export default function UsersPage() {
       <div style={{ display:'flex', gap:'2px' }}>
         {[
           { role:'all',       label:'All',         count:stats.total,              color:'var(--text-muted)' },
-          { role:'admin',     label:'Admin',        count:stats.counts.admin||0,    color:'#f87171' },
-          { role:'manager',   label:'Manager',      count:stats.counts.manager||0,  color:'#fbbf24' },
-          { role:'pharmacist',label:'Pharmacist',   count:stats.counts.pharmacist||0,color:'var(--brand-400)' },
+          { role:'admin',               label:'Admin',               count:stats.counts.admin||0,               color:'#f87171' },
+          { role:'manager',             label:'Manager',             count:stats.counts.manager||0,             color:'#fbbf24' },
+          { role:'branch_manager',      label:'Branch Mgr',          count:stats.counts.branch_manager||0,      color:'#fbbf24' },
+          { role:'district_supervisor', label:'District Sup',        count:stats.counts.district_supervisor||0, color:'#fb923c' },
+          { role:'regional_manager',    label:'Regional Mgr',        count:stats.counts.regional_manager||0,    color:'#a78bfa' },
+          { role:'pharmacist',          label:'Pharmacist',          count:stats.counts.pharmacist||0,          color:'var(--brand-400)' },
         ].map((s) => (
           <button key={s.role}
             onClick={() => setFilterRole(s.role)}
@@ -436,9 +658,10 @@ export default function UsersPage() {
                   </F>
                 )}
 
+                {(!isTerritoryRole || isNew) && (
                 <F label="Role" required error={errors.role}>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'6px' }}>
-                    {ROLES.map((r)=>(
+                    {visibleRoles.map((r)=>(
                       <button key={r.value} type="button" onClick={()=>sf('role',r.value)}
                         style={{
                           padding:'7px 8px', borderRadius:'8px', fontSize:'12px',
@@ -454,16 +677,17 @@ export default function UsersPage() {
                     ))}
                   </div>
                 </F>
+                )}
 
-                {selectedRole?.needsPharmacy && (
+                {selectedRole?.needsPharmacy && (!isTerritoryRole || isNew) && (
                   <F label="Branch" required={selectedRole.needsPharmacy} error={errors.pharmacyId}>
                     <select value={form.pharmacyId} onChange={(e)=>sf('pharmacyId',e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
                       <option value="">Select branch...</option>
-                      {pharmacies.filter((p)=>p.active!==false).map((p)=>(
+                      {pickablePharmacies.filter((p)=>p.active!==false).map((p)=>(
                         <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                       ))}
                     </select>
-                    {pharmacies.length===0 && (
+                    {pickablePharmacies.length===0 && (
                       <p style={{ fontSize:'11px', color:'#fbbf24', marginTop:'4px' }}>
                         ⚠ No branches available — add branches first
                       </p>
@@ -486,6 +710,7 @@ export default function UsersPage() {
                   </F>
                 </div>
 
+                {(!isTerritoryRole || isNew) && (
                 <F label="Status">
                   <div style={{ display:'flex', gap:'6px' }}>
                     {[{v:'active',l:'Active'},{v:'inactive',l:'Inactive'}].map((s)=>(
@@ -502,6 +727,7 @@ export default function UsersPage() {
                     ))}
                   </div>
                 </F>
+                )}
 
                 <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
                   <button onClick={closeModal} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
@@ -525,6 +751,63 @@ export default function UsersPage() {
         message={`${confirmToggle?.active!==false?'Suspend':'Activate'} account for "${confirmToggle?.displayName}"?`}
         confirmLabel={confirmToggle?.active!==false?'Suspend':'Activate'}
         danger={confirmToggle?.active!==false} />
+
+      <ConfirmModal open={!!promotionTarget} onClose={()=>setPromotionTarget(null)} onConfirm={handlePromotion}
+        title={promotionTarget?.newRole==='branch_manager'?'Branch Manager Promotion':'Demote to Pharmacist'}
+        message={promotionTarget?.newRole==='branch_manager'
+          ? `Promote "${promotionTarget?.displayName}" from Pharmacist to Branch Manager?`
+          : `Demote "${promotionTarget?.displayName}" from Branch Manager to Pharmacist?`}
+        confirmLabel={promotionTarget?.newRole==='branch_manager'?'Promote':'Demote'} />
+
+      {/* Transfer Modal */}
+      {transferTarget && (
+        <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }} onClick={()=>setTransferTarget(null)} />
+          <div style={{
+            position:'relative', width:'100%', maxWidth:'400px',
+            background:'var(--bg-elevated)', border:'1px solid var(--border-strong)',
+            borderRadius:'12px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)',
+            padding:'20px', animation:'scaleIn 0.2s ease-out both',
+          }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <ArrowRightLeft style={{ width:16, height:16, color:'var(--brand-400)' }} />
+                <span style={{ fontSize:'14px', fontWeight:600, color:'var(--text-primary)' }}>Transfer User</span>
+              </div>
+              <button onClick={()=>setTransferTarget(null)} className="btn btn-ghost btn-icon" style={{ width:28, height:28 }}>
+                <X style={{ width:14, height:14 }} />
+              </button>
+            </div>
+            <F label="User">
+              <input value={transferTarget.displayName} disabled style={{ height:'34px', fontSize:'13px' }} />
+            </F>
+            <F label="Current Branch">
+              <input value={transferTarget.pharmacyId ? getPharmacyName(transferTarget.pharmacyId) : '—'} disabled style={{ height:'34px', fontSize:'13px' }} />
+            </F>
+            <F label="Destination Branch" required>
+              <select value={transferDest} onChange={(e)=>setTransferDest(e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
+                <option value="">Select destination branch...</option>
+                {allowedPharmacies
+                  .filter((p) => p.active !== false && p.id !== transferTarget.pharmacyId)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                  ))}
+              </select>
+            </F>
+            <div style={{ display:'flex', gap:'8px', marginTop:'4px' }}>
+              <button onClick={()=>setTransferTarget(null)} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                Cancel
+              </button>
+              <button onClick={handleTransfer} disabled={transferring || !transferDest} className="btn btn-primary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                {transferring
+                  ? <><Loader2 style={{ width:13, height:13, animation:'spin 1s linear infinite' }} />Transferring...</>
+                  : 'Transfer'
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

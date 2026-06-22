@@ -12,6 +12,8 @@ import { useToastStore } from '../../components/ui/Toast'
 import Logo from '../../components/brand/Logo'
 import { subscribeKpiRegistry }                       from '../../services/kpiRegistryService'
 import { DEFAULT_KPI_REGISTRY, getKpisForSurface }    from '../../engine/kpiRegistry'
+import { useI18n }                                     from '../../hooks/useI18n'
+import { LANGUAGE_META }                               from '../../i18n/index'
 
 function Toggle({ value, onChange }) {
   return (
@@ -49,8 +51,9 @@ function Section({ icon: Icon, title, children }) {
   )
 }
 
-const SECTIONS = ['appearance','dashboard','kpi','notifications','system','developer']
+const SECTIONS = ['language','appearance','dashboard','kpi','notifications','system','developer']
 const SECTION_LABELS = {
+  language:      { icon: Zap,             label: 'Language'     },
   appearance:    { icon: Palette,         label: 'Appearance'   },
   dashboard:     { icon: LayoutDashboard, label: 'Dashboard'    },
   kpi:           { icon: Target,          label: 'KPI Settings' },
@@ -68,6 +71,8 @@ export default function SettingsPage() {
     fontSize, setFontSize,
     dashboardCards, setDashboardCards,
   } = useSettingsStore()
+
+  const { t, lang, setLang } = useI18n()
 
   const { userProfile } = useAuthStore()
   const toast = useToastStore()
@@ -134,6 +139,48 @@ export default function SettingsPage() {
           )
         })}
       </div>
+
+      {/* ── Language ── */}
+      {active === 'language' && (
+        <Section icon={Zap} title={t('settings.language')}>
+          <p className="text-xs mb-5" style={{ color:'var(--text-muted)' }}>
+            {t('settings.languageSection')}
+          </p>
+          <div className="space-y-2">
+            {Object.entries(LANGUAGE_META).map(([code, meta]) => {
+              const isActive = lang === code
+              return (
+                <button key={code} onClick={() => setLang(code)}
+                  className="flex items-center justify-between w-full px-4 py-3 rounded-xl transition-all"
+                  style={{
+                    background: isActive ? 'var(--bg-active)' : 'var(--bg-hover)',
+                    border: `1px solid ${isActive ? 'var(--border-brand)' : 'var(--border)'}`,
+                  }}>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems: meta.dir === 'rtl' ? 'flex-end' : 'flex-start' }}>
+                    <div className="text-sm font-semibold" style={{ color:'var(--text-primary)' }}>
+                      {meta.nativeName}
+                    </div>
+                    <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                      {meta.label} · {meta.dir.toUpperCase()}
+                    </div>
+                  </div>
+                  <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all"
+                       style={{ background: isActive ? 'var(--brand-500)' : 'transparent', border:`1px solid ${isActive ? 'var(--brand-500)' : 'var(--border-hover)'}` }}>
+                    {isActive && <Check className="w-3 h-3 text-white" />}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          <div className="mt-4 rounded-lg px-4 py-3"
+               style={{ background:'var(--bg-hover)', border:'1px solid var(--border)' }}>
+            <div className="text-xs" style={{ color:'var(--text-muted)', lineHeight: 1.6 }}>
+              Changing language updates the interface direction (RTL/LTR) and persists across sessions.
+              Dynamic KPI labels come from the KPI Registry and are not affected by this setting.
+            </div>
+          </div>
+        </Section>
+      )}
 
       {/* ── Appearance ── */}
       {active === 'appearance' && (

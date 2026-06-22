@@ -3,9 +3,11 @@
 // ============================================================
 import { create } from 'zustand'
 import {
-  subscribeKpiEntries, subscribeAllKpiEntries,
-  saveKpiEntry, subscribeTargets, subscribeAllTargets, saveTarget,
+  subscribeKpiEntries,
+  subscribeRecentKpiEntries, fetchKpiEntriesRange,
+  saveKpiEntry, subscribeTargets, subscribeAllTargets, subscribeRecentTargets, saveTarget,
 } from '../services/kpiService'
+import { trackOperation } from '../offline/syncTracker'
 
 export const useKpiStore = create((set, get) => ({
   entries:  [],
@@ -25,10 +27,22 @@ export const useKpiStore = create((set, get) => ({
     )
   },
 
-  subscribeAllEntries: () => {
-    return subscribeAllKpiEntries((list) =>
-      set({ entries: list, loading: false })
-    )
+
+  // Rolling 90-day real-time listener for live/operational admin views.
+  // Use this instead of subscribeAllEntries for any view whose data
+  // requirements fit within the rolling window (Dashboard, Executive,
+  // Team, Targets). Pass a custom `days` value if a wider window is needed.
+  subscribeRecentEntries: (days = 90) => {
+    return subscribeRecentKpiEntries((list) =>
+      set({ entries: list, loading: false }),
+    days)
+  },
+
+  // On-demand historical fetch for analysis views (e.g. Reports with
+  // custom date range). Does NOT update the Zustand store — returns the
+  // data directly to the caller so each fetch is scoped and disposable.
+  fetchEntriesRange: (fromDate, toDate, options = {}, registry = null) => {
+    return fetchKpiEntriesRange(fromDate, toDate, options, registry)
   },
 
   // ── Save entry ────────────────────────────────────────────
@@ -37,7 +51,10 @@ export const useKpiStore = create((set, get) => ({
   // custom KPIs added via Firestore registry are persisted correctly.
   // Falls back to DEFAULT_KPI_REGISTRY when omitted.
   saveEntry: async (data, registry) => {
-    return saveKpiEntry({ ...data, registry })
+    // Offline First Bundle — visibility tracking only. trackOperation()
+    // never alters the call's arguments or outcome; saveKpiEntry's
+    // contract and behavior are unchanged.
+    return trackOperation('kpi_entry', 'KPI entry', () => saveKpiEntry({ ...data, registry }))
   },
 
   // ── Targets ───────────────────────────────────────────────
@@ -45,8 +62,17 @@ export const useKpiStore = create((set, get) => ({
     return subscribeTargets(pharmacyId, (list) => set({ targets: list }))
   },
 
+  // @deprecated — unbounded target listener. Use subscribeRecentTargets instead.
   subscribeAllTargets: () => {
     return subscribeAllTargets((list) => set({ targets: list }))
+  },
+
+  // Bounded 6-month rolling target subscription.
+  // Covers all current consumers: Dashboard (currentMonth),
+  // TeamPage (currentMonth), TargetsPage (±2 months),
+  // ExecutiveDashboard (currentMonth), ReportsPage (currentMonth).
+  subscribeRecentTargets: (months = 6) => {
+    return subscribeRecentTargets((list) => set({ targets: list }), months)
   },
 
   saveTarget: async (data) => {

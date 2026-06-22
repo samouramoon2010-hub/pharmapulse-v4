@@ -130,3 +130,52 @@ export function SkeletonKpiCard() {
     </div>
   )
 }
+
+// ── SkeletonText — single line or multi-line text block ───────
+export function SkeletonText({ lines = 1, width = '100%', gap = 6 }) {
+  const widths = Array.isArray(width) ? width : Array(lines).fill(width)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap }}>
+      {widths.slice(0, lines).map((w, i) => (
+        <div key={i} className="skeleton rounded"
+          style={{ height: '10px', width: w, opacity: 1 - i * 0.08 }} />
+      ))}
+    </div>
+  )
+}
+
+// ── SkeletonWidget — general section widget placeholder ───────
+export function SkeletonWidget({ height = 120, label = '' }) {
+  return (
+    <div className="pp-card" style={{ padding: '14px', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+        <div>
+          {label
+            ? <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)',
+                textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+            : <div className="skeleton rounded" style={{ height: '9px', width: '72px' }} />
+          }
+          <div className="skeleton rounded" style={{ height: '8px', width: '48px', marginTop: '5px' }} />
+        </div>
+        <div className="skeleton rounded" style={{ height: '20px', width: '20px', borderRadius: '6px' }} />
+      </div>
+      {/* Body area */}
+      <div className="skeleton rounded" style={{ height, borderRadius: '6px' }} />
+    </div>
+  )
+}
+
+// ── SkeletonPage — full-page loading placeholder ──────────────
+export function SkeletonPage({ widgets = 4, tableRows = 5 }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Stat row */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(widgets, 4)}, 1fr)`, gap: '12px' }}>
+        {Array.from({ length: widgets }).map((_, i) => <SkeletonStatCard key={i} />)}
+      </div>
+      {/* Table */}
+      <SkeletonTable rows={tableRows} />
+    </div>
+  )
+}

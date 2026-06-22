@@ -18,13 +18,32 @@ import {
   parseExcelRowsToRaw,
   previewKpiImport,
   commitValidatedKpiBatch,
+  buildTargetImportPayload,
 } from '../../services/kpiImportService'
+import { subscribeKpiRegistry } from '../../services/kpiRegistryService'
+import { DEFAULT_KPI_REGISTRY, getActiveKpis } from '../../engine/kpiRegistry'
 import {
   collection, query, where, getDocs,
 } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
 
-const SCHEMAS = {
+// kpi_entries columns are informational (template/preview display only) —
+// the actual import accepts ANY active KPI Registry key as a column header,
+// not just the ones listed here. See buildKpiEntriesSchema() below, which
+// derives this list from the live registry (Core KPI Dependency Removal —
+// Stage C: registry-driven import, no fixed KPI column list).
+function buildKpiEntriesSchema(registry) {
+  const engineKeys = getActiveKpis(registry).map((kpi) => kpi.aliasFor ?? kpi.key)
+  const columns = ['employeeId', 'date', ...engineKeys, 'notes']
+  const template = [{
+    employeeId: 'EMP-001', date: '2025-05-01',
+    ...Object.fromEntries(engineKeys.map((k) => [k, 0])),
+    notes: '',
+  }]
+  return { label: 'إدخالات KPI', columns, required: ['employeeId', 'date'], template }
+}
+
+const SCHEMAS_BASE = {
   pharmacies: {
     label: 'الفروع',
     columns: ['code','name','region','city','managerEmail','active'],
@@ -43,16 +62,10 @@ const SCHEMAS = {
     required: ['pharmacyCode','month'],
     template: [{ pharmacyCode:'5074', month:'2025-05', salesTarget:50000, wasfatyTarget:200, omniTarget:100, wellnessTarget:150, crossSellTarget:80 }],
   },
-  kpi_entries: {
-    label: 'إدخالات KPI',
-    columns: ['employeeId','date','wasfaty','omni','wellness','basket','crossSelling','notes'],
-    required: ['employeeId','date'],
-    template: [{ employeeId:'EMP-001', date:'2025-05-01', wasfaty:5, omni:3, wellness:4, basket:2, crossSelling:2, notes:'' }],
-  },
 }
 
-function downloadTemplate(schemaKey) {
-  const schema = SCHEMAS[schemaKey]
+function downloadTemplate(schemas, schemaKey) {
+  const schema = schemas[schemaKey]
   const ws = XLSX.utils.json_to_sheet(schema.template)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Template')
@@ -75,8 +88,20 @@ export default function ImportCenterPage() {
   // KPI import: staged pipeline state
   const [kpiPreview,    setKpiPreview]    = useState(null)   // ImportPreview
   const [kpiCommitting, setKpiCommitting] = useState(false)
+  // Live KPI Registry — drives which columns the import pipeline accepts.
+  // Falls back to DEFAULT_KPI_REGISTRY on error/loading.
+  const [liveRegistry,  setLiveRegistry]  = useState(DEFAULT_KPI_REGISTRY)
+
+  const SCHEMAS = { ...SCHEMAS_BASE, kpi_entries: buildKpiEntriesSchema(liveRegistry) }
 
   useEffect(() => { const u = subscribe(); return u }, [])
+  useEffect(() => {
+    const unsub = subscribeKpiRegistry(
+      (reg) => setLiveRegistry(reg),
+      ()    => setLiveRegistry(DEFAULT_KPI_REGISTRY),
+    )
+    return unsub
+  }, [])
 
   const reset = () => {
     setRows([]); setErrors([]); setStatus('idle'); setResult(null)
@@ -186,18 +211,24 @@ export default function ImportCenterPage() {
           try {
             const pid = pcMap[String(row.pharmacyCode)]
             if (!pid) { result.errors.push({ row, error: `كود الفرع غير موجود: ${row.pharmacyCode}` }); continue }
-            await saveTarget({ pharmacyId:pid, month:String(row.month),
-              salesTarget:Number(row.salesTarget)||0, wasfatyTarget:Number(row.wasfatyTarget)||0,
-              omniTarget:Number(row.omniTarget)||0, wellnessTarget:Number(row.wellnessTarget)||0,
-              crossSellTarget:Number(row.crossSellTarget)||0, actorId, actorRole })
+            // Core KPI Dependency Removal — Closure: any column ending in
+            // "Target" is forwarded as-is (saveTarget's own dynamic contract);
+            // no hardcoded list of KPI target field names here anymore.
+            const { targetFields, unknownTargetColumns } = buildTargetImportPayload(row, liveRegistry)
+            if (unknownTargetColumns.length) {
+              result.errors.push({ row, error: `حقل هدف غير معروف: ${unknownTargetColumns.join(', ')}` })
+            }
+            await saveTarget({ pharmacyId:pid, month:String(row.month), ...targetFields, actorId, actorRole })
             result.created++
           } catch (e) { result.errors.push({ row, error: e.message }) }
         }
 
       } else if (schemaKey === 'kpi_entries') {
         // ── STAGED PIPELINE — no dirty writes ─────────────────
-        // 1. Parse raw rows through ingestion layer
-        const rawRows = parseExcelRowsToRaw(rows, fileName)
+        // 1. Parse raw rows through ingestion layer — registry-driven column
+        // resolution (Core KPI Dependency Removal — Stage C): any active
+        // KPI in liveRegistry is accepted by its key/label as a column.
+        const rawRows = parseExcelRowsToRaw(rows, fileName, liveRegistry)
 
         // 2. Validate + preview (no Firestore write yet)
         const ctx = {
@@ -246,7 +277,7 @@ export default function ImportCenterPage() {
           </h1>
           <p className="text-sm text-slate-500">رفع ملفات Excel لاستيراد البيانات دفعة واحدة</p>
         </div>
-        <button onClick={() => downloadTemplate(schemaKey)} className="btn btn-secondary gap-2">
+        <button onClick={() => downloadTemplate(SCHEMAS, schemaKey)} className="btn btn-secondary gap-2">
           <Download className="w-4 h-4"/>تنزيل Template
         </button>
       </div>

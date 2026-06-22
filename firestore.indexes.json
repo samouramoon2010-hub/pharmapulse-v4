@@ -75,36 +75,6 @@
       ]
     },
     {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "employeeId",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "email",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "pharmacies",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "code",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "pharmacies",
       "queryScope": "COLLECTION",
       "fields": [
@@ -272,6 +242,232 @@
       "fields": [
         {
           "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "districts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "regionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "name",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "districts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "active",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "name",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "regions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "active",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "name",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "personal_targets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "personal_targets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "personal_targets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evaluation_profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "effectiveFrom",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evaluation_profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evaluation_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "calculatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evaluation_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "calculatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evaluation_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "calculatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "shadow_evaluation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "severity",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "shadow_evaluation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "shadow_evaluation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "shadow_evaluation_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pharmacyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "severity",
           "order": "ASCENDING"
         },
         {

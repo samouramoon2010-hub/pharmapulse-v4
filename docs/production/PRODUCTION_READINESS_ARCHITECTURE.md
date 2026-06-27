@@ -535,3 +535,45 @@ or index deploy, no commit, tag, or deploy created. See
 [`PR1I_EVALUATION_COMPLIANCE.md`](PR1I_EVALUATION_COMPLIANCE.md),
 [`PR1I_TEST_EVIDENCE.md`](PR1I_TEST_EVIDENCE.md), and
 [`PR1I_RELEASE_DECISION.md`](PR1I_RELEASE_DECISION.md).
+
+## RC1 Packaging — Controlled Commit, Tag, and Push
+
+**Status: complete.** The first commit, tag, and push of this program.
+Everything from PR-1A through PR-1I that was sitting uncommitted in the
+working tree was reviewed file-by-file, classified, and packaged.
+
+**Commit:** `5f10971886e7b1aafa624282502f51370db79a4e` ("release:
+package PharmaPulse RC1 production readiness baseline"), parent
+`2d978fc56e522320a789cfee767424c52c71f1c8` — 267 files, 35,101
+insertions, 698 deletions. Staged explicitly by reviewed path/group
+(never `git add -A`/`git add .`).
+
+**Excluded and preserved untouched on disk** (never staged, never
+deleted): `.render-tmp/` (scratch render pipeline), `design-assets/` +
+`design-reference/` (raw source images for already-shipped assets,
+referenced only in code comments), `.claude/` (local tool settings).
+`AGENTS.md`/`CLAUDE.md`/`CLAUDE.design.md` were included per explicit
+owner instruction after a content audit found no secrets, personal
+data, absolute paths, or session-only instructions — one dangling
+file reference (`AGENTS.md` → `@Codex.design.md`, which doesn't exist)
+was found and documented rather than silently fixed, per owner
+instruction not to modify already-reviewed content.
+
+**Tag:** annotated `pharmapulse-rc1` → commit `5f10971886e7...`,
+verified identical locally and on `origin` after push. No other tag
+was created or moved.
+
+**Push:** `origin` had neither this branch nor this tag before the
+push (confirmed via a fresh `fetch`/`ls-remote` immediately
+beforehand) — both pushes created new refs, no force, no rebase, no
+conflict.
+
+**Validation:** full suite re-run after the commit — 354 files /
+25,532 tests, 0 failures; TypeScript zero errors; production build
+unchanged in shape. No PR-1I test was rerun for re-verification beyond
+the existing closed result; the post-commit re-run confirmed the
+committed tree matches what was already validated.
+
+**No production mutation, no deploy, no reset.** See
+[`RC1_PACKAGING_REPORT.md`](RC1_PACKAGING_REPORT.md) for the full
+manifest, exclusions, secret-scan results, and rollback reference.

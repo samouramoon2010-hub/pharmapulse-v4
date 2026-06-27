@@ -763,21 +763,29 @@ export default function DashboardPage() {
             overflow: 'hidden',
             boxShadow: '0 1px 4px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)',
           }}>
-            {/* ── Row 1: Identity bar ── */}
+            {/* ── Row 1: Identity bar ──
+                PR-1E6 — this row's two clusters (name+metadata on the
+                left, Month Progress+Refresh on the right) had no wrap
+                and no minWidth:0, so together they didn't fit a 375px
+                viewport (confirmed via real-browser measurement: this
+                row's own scrollWidth exceeded its clientWidth by ~43px).
+                flexWrap lets the right cluster drop to its own line
+                below the name on narrow phones instead of overflowing. */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexWrap: 'wrap', gap: '10px',
               padding: '16px 20px 14px',
               borderBottom: '1px solid var(--border-subtle)',
               background: 'linear-gradient(135deg, rgba(26,122,74,0.06) 0%, transparent 60%)',
             }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'12px', minWidth: 0 }}>
                 {/* Green command stripe */}
                 <div style={{
                   width: '4px', height: '36px', borderRadius: '2px',
                   background: 'linear-gradient(180deg, #1a7a4a 0%, #0f5c36 100%)',
                   flexShrink: 0,
                 }} />
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{
                     fontSize: '18px', fontWeight: 700, lineHeight: 1.2,
                     color: 'var(--text-primary)', letterSpacing: '-0.01em',
@@ -794,7 +802,7 @@ export default function DashboardPage() {
                   </div>
                   <div style={{
                     fontSize: '11px', color: 'var(--text-muted)',
-                    marginTop: '2px', display:'flex', alignItems:'center', gap:'6px',
+                    marginTop: '2px', display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap',
                   }}>
                     <span>{monthLabel}</span>
                     <span style={{ color:'var(--border-default)' }}>·</span>
@@ -844,10 +852,17 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── Row 2: Executive KPI cards ── */}
-            <div style={{
+            {/* ── Row 2: Executive KPI cards ──
+                PR-1E6 — a fixed repeat(4,1fr) gave each card ~85px at a
+                375px viewport after its own 18px*2 padding, too narrow
+                for text like "On track to exceed target" (confirmed via
+                real-browser measurement: this row's own scrollWidth
+                exceeded its clientWidth by ~75px). The exec-kpi-row
+                class reflows to 2x2 below sm — same 4 cards, same
+                fields, just rearranged, per the locked mobile-blueprint
+                rule of reflow-not-drop. */}
+            <div className="exec-kpi-row" style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
               gap: '1px',
               background: 'var(--border-subtle)',
             }}>
@@ -1109,7 +1124,14 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'10px', marginBottom:'20px' }}>
+      {/* PR-1E6 — minmax(220px,1fr) is meant to collapse to 1 column
+          below ~440px available width, but at a 375px viewport this
+          grid still rendered 2 narrower-than-220px tracks, overflowing
+          the viewport by ~30px (confirmed via real-browser measurement
+          of the resulting tile's own bounding box). className="kpi-tile-grid"
+          forces a hard 1-column floor below 480px regardless of the
+          auto-fit computation, guaranteeing no overflow on phones. */}
+      <div className="kpi-tile-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'10px', marginBottom:'20px' }}>
         {loading
           ? Array.from({length:5}).map((_,i) => <SkeletonStatCard key={i} />)
           : KPI_KEYS.map((k) => {
@@ -1185,8 +1207,11 @@ export default function DashboardPage() {
       <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}
            className="xl:grid-cols-[1.4fr_1fr_1fr]">
 
-        {/* Trend chart */}
-        <div>
+        {/* Trend chart — PR-1E3: ordered after Smart Alerts on mobile
+            (risk/alerts outrank trend charts in the required mobile
+            priority order); xl:order-none restores the original
+            trend/distribution/alerts left-to-right desktop order. */}
+        <div className="order-2 xl:order-none">
           {loading ? <SkeletonChart /> : (
             <div className="card card-p space-y-3">
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -1228,14 +1253,19 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* KPI Distribution */}
-        <div className="card card-p">
+        {/* KPI Distribution — secondary insight; ordered after the trend
+            chart on mobile (PR-1E3 mobile priority order). */}
+        <div className="card card-p order-3 xl:order-none">
           <div className="section-title" style={{ fontSize:'12px', marginBottom:'10px' }}>KPI Distribution</div>
           <KpiDistributionDonut counts={kpiDistributionCounts} />
         </div>
 
-        {/* Smart Alerts */}
-        <TopAlertsPanel alerts={liveAnalytics?.alerts ?? []} onNavigate={navigate} maxVisible={5} />
+        {/* Smart Alerts — PR-1E3: ordered first on mobile (risk/alerts
+            rank above trend/secondary-insight content in the required
+            mobile priority order); xl:order-none restores desktop order. */}
+        <div className="order-1 xl:order-none">
+          <TopAlertsPanel alerts={liveAnalytics?.alerts ?? []} onNavigate={navigate} maxVisible={5} />
+        </div>
       </div>
 
       {/* ── Executive Intelligence Row — UI3.2-E ──────────────

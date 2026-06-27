@@ -29,6 +29,8 @@ import { usePharmacyStore } from '../../store/pharmacyStore'
 import { useToastStore }   from '../../components/ui/Toast'
 import { formatNumber }    from '../../utils/helpers'
 import F from '../../components/admin/evaluation/EvaluationFormField'
+// @ts-expect-error — MobileRankCard.jsx has no .d.ts (same pattern as RankingsPage.tsx)
+import MobileRankCard from '../../components/ui/MobileRankCard'
 import { getUsersByPharmacy }    from '../../services/userService'
 import { subscribeKpiRegistry }       from '../../services/kpiRegistryService'
 import { subscribePublishedProfiles } from '../../services/evaluationRegistryService'
@@ -129,7 +131,25 @@ function BasketCard({ basket }: { basket: BasketResult }) {
               ⚠ {basket.invalidReason}
             </div>
           )}
-          <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+          {/* PR-1E4 — phone-width card list, same `basket.elements`
+              data/order as the table below (mobile-blueprint.md rule). */}
+          <div className="sm:hidden space-y-2">
+            {basket.elements.map((el) => (
+              <MobileRankCard
+                key={el.kpiKey}
+                title={`${el.label}${el.required ? ' · REQ' : ''}${!el.dataAvailable ? ' · ✕' : ''}`}
+                subtitle={`Source: ${el.targetSource}`}
+                primaryMetric={{ label: 'W.Score', value: el.weightedScore.toFixed(4) }}
+                secondaryMetrics={[
+                  { label: 'Actual', value: formatNumber(el.actual) },
+                  { label: 'Target', value: formatNumber(el.target) },
+                  { label: 'Ach%', value: `${el.achievementPct.toFixed(1)}%` },
+                ]}
+                status={{ label: el.bandLabel, color: el.bandColor ?? undefined }}
+              />
+            ))}
+          </div>
+          <table className="hidden sm:table" style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 {['KPI', 'Actual', 'Target', 'Source', 'Ach%', 'Band', 'W.Score'].map((h) => (
@@ -181,7 +201,7 @@ function SingleUserTab(props: {
         background: 'var(--bg-card)', border: '1px solid var(--border-default)',
         borderRadius: '10px', padding: '18px', marginBottom: '20px',
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+        <div className="eval-run-fields-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '14px' }}>
           <F label="Branch">
             <select value={pharmacyId} onChange={(e) => { setPharmacyId(e.target.value) }} style={SEL} className="run-evaluation-select">
               <option value="">Select branch…</option>
@@ -356,7 +376,7 @@ function BulkBranchTab(props: {
         background: 'var(--bg-card)', border: '1px solid var(--border-default)',
         borderRadius: '10px', padding: '18px', marginBottom: '20px',
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+        <div className="eval-run-fields-3" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '14px' }}>
           <F label="Branch">
             <select value={bulkPharmacyId}
               onChange={(e) => setBulkPharmacyId(e.target.value)} style={SEL} className="run-evaluation-select">
@@ -502,7 +522,24 @@ function BulkBranchTab(props: {
             ))}
           </div>
 
-          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '7px', overflow: 'hidden' }}>
+          {/* PR-1E4 — phone-width card list, same `bulkReport.results`
+              data/order as the table below (mobile-blueprint.md rule). */}
+          <div className="sm:hidden space-y-2">
+            {bulkReport.results.map((r) => (
+              <MobileRankCard
+                key={r.userId}
+                title={r.displayName}
+                subtitle={r.role}
+                primaryMetric={{ label: 'Score', value: r.finalScore !== undefined ? r.finalScore.toFixed(3) : '—' }}
+                secondaryMetrics={[
+                  { label: 'Rating', value: r.rating ?? '—' },
+                  { label: 'Entries', value: r.entryCount ?? '—' },
+                ]}
+                status={{ label: `${r.status}${r.error ? ' — ' + r.error : r.skippedReason ? ' — ' + r.skippedReason : ''}`, color: statusColor(r.status) }}
+              />
+            ))}
+          </div>
+          <div className="hidden sm:block" style={{ border: '1px solid var(--border-subtle)', borderRadius: '7px', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface)' }}>

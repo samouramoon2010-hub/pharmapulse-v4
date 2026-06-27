@@ -1,76 +1,58 @@
 // ============================================================
-// Mobile Bottom Navigation + FAB
-// Visible only on small screens (lg:hidden)
-// Respects iPhone safe-area-inset-bottom
+// Mobile Bottom Navigation — PR-1E1
+// Visible only on small screens (lg:hidden). Role-aware primary
+// destinations come from src/config/mobileNav.js (single source,
+// shared canonical role resolution — no route list duplicated
+// here). "More" reuses the existing Sidebar mobile drawer via
+// onOpenMore/moreOpen props lifted from AppLayout — there is no
+// second drawer and no fake "/more" route.
+// Respects iPhone safe-area-inset-bottom.
 // ============================================================
 import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { LayoutDashboard, TrendingUp, Bell, Settings, Plus } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
+import { getMobilePrimaryNav } from '../../config/mobileNav'
 
-export default function MobileNav() {
+export default function MobileNav({ onOpenMore, moreOpen, moreTriggerRef }) {
   const navigate  = useNavigate()
   const location  = useLocation()
   const { userProfile } = useAuthStore()
 
-  const role = userProfile?.role || 'pharmacist'
-  const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + '/')
+  const role  = userProfile?.role || 'pharmacist'
+  const items = getMobilePrimaryNav(role)
 
-  // Role-based nav items (max 4 around the FAB)
-  const items = role === 'admin'
-    ? [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-        { icon: TrendingUp,      label: 'Reports',   path: '/reports'   },
-        { icon: Bell,            label: 'Alerts',    path: '/notifications' },
-        { icon: Settings,        label: 'Settings',  path: '/settings'  },
-      ]
-    : role === 'manager'
-    ? [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-        { icon: TrendingUp,      label: 'Reports',   path: '/reports'   },
-        { icon: Bell,            label: 'Alerts',    path: '/notifications' },
-        { icon: Settings,        label: 'Settings',  path: '/settings'  },
-      ]
-    : [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-        { icon: TrendingUp,      label: 'Performance', path: '/performance' },
-        { icon: Bell,            label: 'Alerts',    path: '/notifications' },
-        { icon: Settings,        label: 'Settings',  path: '/settings'  },
-      ]
-
-  // Split 2 left + FAB + 2 right
-  const left  = items.slice(0, 2)
-  const right = items.slice(2, 4)
+  const isActive = (path, exact) =>
+    exact ? location.pathname === path : (location.pathname === path || location.pathname.startsWith(path + '/'))
 
   return (
-    <nav className="mobile-nav lg:hidden">
-      {/* Left items */}
-      {left.map((item) => (
-        <button key={item.path}
-          onClick={() => navigate(item.path)}
-          className={`mobile-nav-item ${isActive(item.path) ? 'active' : ''}`}>
-          <item.icon className="w-5 h-5" />
-          <span>{item.label}</span>
-        </button>
-      ))}
+    <nav className="mobile-nav lg:hidden" aria-label="Primary mobile navigation">
+      {items.map((item) => {
+        const active = isActive(item.path, item.exact)
+        return (
+          <button key={item.key}
+            onClick={() => navigate(item.path)}
+            aria-current={active ? 'page' : undefined}
+            className={`mobile-nav-item ${active ? 'active' : ''}`}>
+            <item.icon className="w-5 h-5" />
+            <span>{item.label}</span>
+          </button>
+        )
+      })}
 
-      {/* FAB — KPI Entry */}
+      {/* "More" — opens the existing Sidebar mobile drawer. Not a route. */}
       <button
-        onClick={() => navigate('/entry')}
-        className="mobile-fab"
-        aria-label="KPI Entry">
-        <Plus className="w-6 h-6" />
+        ref={moreTriggerRef}
+        type="button"
+        onClick={onOpenMore}
+        aria-haspopup="dialog"
+        aria-expanded={moreOpen}
+        aria-controls="mobile-more-drawer"
+        aria-current={moreOpen ? 'page' : undefined}
+        className={`mobile-nav-item ${moreOpen ? 'active' : ''}`}>
+        <Menu className="w-5 h-5" />
+        <span>More</span>
       </button>
-
-      {/* Right items */}
-      {right.map((item) => (
-        <button key={item.path}
-          onClick={() => navigate(item.path)}
-          className={`mobile-nav-item ${isActive(item.path) ? 'active' : ''}`}>
-          <item.icon className="w-5 h-5" />
-          <span>{item.label}</span>
-        </button>
-      ))}
     </nav>
   )
 }

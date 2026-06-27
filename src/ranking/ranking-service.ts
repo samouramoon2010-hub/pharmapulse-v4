@@ -329,6 +329,10 @@ async function fetchUserDisplayNames(): Promise<Map<string, string>> {
   const map  = new Map<string, string>()
   for (const d of snap.docs) {
     const data = d.data()
+    // CLAIMED pending-onboarding docs are historical identity-link artifacts,
+    // never a real rankable entity — excluded for consistency with every
+    // other operational user reader in this codebase.
+    if (data.authStatus === 'CLAIMED') continue
     const name = data.displayName ?? data.name ?? data.email ?? d.id
     map.set(d.id, name)
   }

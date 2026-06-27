@@ -143,18 +143,22 @@ describe('ReportsPage 2F-3 — branchSummary visiblePharmacies', () => {
 // ════════════════════════════════════════════════════════════
 
 describe('ReportsPage 2F-3 — executiveSummary scope safety', () => {
-  it("executiveSummary 'all' fallback uses filterAllowedPharmacies (not all pharmacies)", async () => {
+  // PR-1A replaced the single first-active-branch fallback for 'all' with
+  // a true portfolio summary across every branch in scope. The underlying
+  // scope-safety property (never pharmacies the caller can't see) is
+  // preserved — visiblePharmacies is still filterAllowedPharmacies-derived.
+  it("executiveSummary 'all' mode uses filterAllowedPharmacies (not all pharmacies, not one branch)", async () => {
     const s = await src()
-    // The fallback for 'all' uses filterAllowedPharmacies, not pharmacies.find directly
     const execIdx = s.indexOf('executiveSummary = useMemo')
     expect(execIdx).toBeGreaterThan(-1)
-    const block = s.slice(execIdx, execIdx + 500)
+    const block = s.slice(execIdx, execIdx + 2000)
     expect(block).toContain('filterAllowedPharmacies(scope, pharmacies)')
+    expect(block).toContain('visiblePharmacies')
   })
 
   it('executiveSummary deps include scope', async () => {
     const s = await src()
-    expect(s).toContain('[selectedBranch, scope, pharmacies, targets, fetchedEntries]')
+    expect(s).toContain('[selectedBranch, scope, pharmacies, targets, fetchedEntries, KPI_FIELDS, userProfile?.uid]')
   })
 })
 

@@ -122,14 +122,20 @@ describe('Demo Readiness — ID Leakage: RankingsPage', () => {
     const src = await import('../../pages/admin/RankingsPage.tsx?raw')
     // The old pattern rendered the raw ID: {pharmId ?? '—'}
     expect(src.default).not.toContain("{pharmId ?? '—'}")
-    // The new pattern uses a branch-name sentinel
-    expect(src.default).toContain("pharmId !== undefined ? 'Unknown Branch' : '—'")
+    // PR-1A: the sentinel placeholder was replaced with a canonical
+    // pharmacy-name resolver (usePharmacyStore) — still never the raw ID.
+    expect(src.default).not.toContain('{pharmId}')
+    expect(src.default).toContain('pharmacyNameById.get(pharmId)')
   })
 
-  it('18: classificationId column unchanged (business label)', async () => {
+  it('18: classificationId column still renders the same business label (PR-1D3: title-cased for display, not replaced)', async () => {
     const src = await import('../../pages/admin/RankingsPage.tsx?raw')
-    // classificationId is a user-configured label — should still be rendered as-is
-    expect(src.default).toContain('{s.classificationId}')
+    // classificationId is a user-configured label. PR-1D3 humanizes its
+    // casing for the per-row cell (hub -> Hub, matching the cohort
+    // section headers) via classificationLabel() — still the same
+    // underlying value, never replaced with an invented label.
+    expect(src.default).toContain('classificationLabel(s.classificationId)')
+    expect(src.default).toContain('function classificationLabel(')
   })
 })
 

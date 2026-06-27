@@ -442,7 +442,15 @@ export default function PersonalTargetsPage() {
             </div>
           )}
 
-          {/* Table */}
+          {/* Table — PR-1E4: per-pharmacist × per-KPI editable allocation
+              matrix. Classified Desktop-preferred for the same reason as
+              the Bulk Target grid (TargetsPage) — a card list would
+              break the at-a-glance branch-total-vs-allocations check
+              this workflow depends on. The existing horizontal scroll
+              remains the documented mobile fallback. */}
+          <p className="sm:hidden" style={{ fontSize: '11px', color: 'var(--text-warning, #b45309)', marginBottom: '6px' }}>
+            توزيع الأهداف على عدة صيادلة يعمل بشكل أفضل على شاشة أكبر.
+          </p>
           {loadingUsers ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px', fontSize: '12px' }}>
               Loading pharmacists…

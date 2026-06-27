@@ -33,6 +33,11 @@ import type {
 // Import from shared utility — NOT from evaluationEngine.ts.
 // This removes the V2 → V1 coupling identified in the Phase 2A audit.
 import { matchThresholdBand } from '../evaluationShared/thresholdUtils'
+// PR-1I compliance fix: missing-data weight redistribution + final-score
+// rounding, shared with evaluationEngine.ts (V1) via evaluationShared/.
+import { computeApplicableWeightSum, normalizedElementWeight }
+  from '../evaluationShared/weightRedistribution'
+import { roundToTwoDecimals } from '../evaluationShared/scoreRounding'
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -265,8 +270,14 @@ const elementBandScorer: EvaluationProcessor = {
 
 // ── D. WEIGHTED_AVERAGE_AGGREGATOR ────────────────────────────
 //
-// Legacy flow: Σ (cappedAchievementPct × element.weight) per basket.
+// Legacy flow: Σ (cappedAchievementPct × element.normalizedWeight) per basket.
 // Writes aggregateValue to BasketContext.
+//
+// PR-1I Rule A: an element with no data (dataAvailable=false) is excluded
+// from the aggregate AND its weight is excluded from the denominator; the
+// remaining applicable elements' weights are renormalized so they still
+// sum to the basket's full weight. An element present but genuinely at 0%
+// achievement stays applicable (0 !== missing) and is NOT redistributed.
 //
 const weightedAverageAggregator: EvaluationProcessor = {
   type: 'WEIGHTED_AVERAGE_AGGREGATOR',
@@ -276,11 +287,20 @@ const weightedAverageAggregator: EvaluationProcessor = {
     const results: Array<{ basketId: string; aggregateValue: number }> = []
 
     for (const basket of out.baskets) {
-      const agg = basket.elements.reduce(
-        (sum, el) => sum + (el.cappedAchievementPct ?? 0) * el.weight, 0,
-      )
+      const applicableWeightSum = computeApplicableWeightSum(basket.elements)
+      for (const el of basket.elements) {
+        el.normalizedWeight = normalizedElementWeight(el.weight, el.dataAvailable, applicableWeightSum)
+      }
+      // No applicable elements → safe no-data state (never divide by zero,
+      // never invent a score) — matches the existing 0-when-no-data contract.
+      const agg = applicableWeightSum > 0
+        ? basket.elements.reduce(
+            (sum, el) => sum + (el.cappedAchievementPct ?? 0) * (el.normalizedWeight ?? 0), 0,
+          )
+        : 0
       basket.aggregateValue     = agg
       basket.aggregateValueUnit = 'achievement_pct'
+      basket.applicableWeightSum = applicableWeightSum
       results.push({ basketId: basket.basketId, aggregateValue: agg })
     }
 
@@ -300,9 +320,14 @@ const weightedAverageAggregator: EvaluationProcessor = {
 
 // ── E. WEIGHT_CONTRIBUTION_APPLIER ────────────────────────────
 //
-// SMARTS flow: contribution = cappedAchievementPct × element.weight
+// SMARTS flow: contribution = cappedAchievementPct × element.normalizedWeight
 // Writes contribution to each ElementContext.
 // Does NOT aggregate — that is SUM_AGGREGATOR's job.
+//
+// PR-1I Rule A: identical missing-data exclusion + proportional weight
+// redistribution as the legacy WEIGHTED_AVERAGE_AGGREGATOR, applied here
+// because the SMARTS flow computes contribution per-element rather than
+// aggregating in one step.
 //
 const weightContributionApplier: EvaluationProcessor = {
   type: 'WEIGHT_CONTRIBUTION_APPLIER',
@@ -312,8 +337,12 @@ const weightContributionApplier: EvaluationProcessor = {
     const results: Array<{ kpiKey: string; achievementPct: number; weight: number; contribution: number }> = []
 
     for (const basket of out.baskets) {
+      const applicableWeightSum = computeApplicableWeightSum(basket.elements)
+      basket.applicableWeightSum = applicableWeightSum
       for (const el of basket.elements) {
-        const contribution = (el.cappedAchievementPct ?? 0) * el.weight
+        const normalizedWeight = normalizedElementWeight(el.weight, el.dataAvailable, applicableWeightSum)
+        el.normalizedWeight = normalizedWeight
+        const contribution = (el.cappedAchievementPct ?? 0) * normalizedWeight
         el.contribution = contribution
         results.push({
           kpiKey: el.kpiKey,
@@ -448,7 +477,10 @@ const basketScoreAggregator: EvaluationProcessor = {
       basket.weightedScore = (basket.bandScore ?? 0) * basket.weight
     }
 
-    const finalScore = out.baskets.reduce((s, b) => s + (b.weightedScore ?? 0), 0)
+    // PR-1I Rule B: raw precision preserved for the normalization math and
+    // for traceability; the OFFICIAL finalScore is rounded once, here, at
+    // the final boundary.
+    const rawFinalScore = out.baskets.reduce((s, b) => s + (b.weightedScore ?? 0), 0)
 
     // Normalization: (finalScore - minScore) / (maxScore - minScore) × 100
     const minScore = out.baskets.reduce((s, b) => {
@@ -461,11 +493,14 @@ const basketScoreAggregator: EvaluationProcessor = {
     }, 0)
 
     const scoreRange = maxScore - minScore
-    const normalizedFinalScorePct = scoreRange > 0
-      ? Math.max(0, Math.min(100, ((finalScore - minScore) / scoreRange) * 100))
+    const rawNormalizedFinalScorePct = scoreRange > 0
+      ? Math.max(0, Math.min(100, ((rawFinalScore - minScore) / scoreRange) * 100))
       : 0
 
-    // Top-level rating
+    const finalScore              = roundToTwoDecimals(rawFinalScore)
+    const normalizedFinalScorePct = roundToTwoDecimals(rawNormalizedFinalScorePct)
+
+    // Top-level rating — matched against the rounded official value.
     const defaultRule = step.config.defaultThresholdRule as any
     const ratingBand  = defaultRule
       ? matchThresholdBand(normalizedFinalScorePct, defaultRule)
@@ -473,6 +508,8 @@ const basketScoreAggregator: EvaluationProcessor = {
 
     out.finalScore              = finalScore
     out.normalizedFinalScorePct = normalizedFinalScorePct
+    out.rawFinalScore              = rawFinalScore
+    out.rawNormalizedFinalScorePct = rawNormalizedFinalScorePct
     out.ratingLabel             = ratingBand?.label ?? 'Unknown'
     out.ratingLabelAr           = ratingBand?.labelAr
     out.ratingScore             = ratingBand?.score ?? 0

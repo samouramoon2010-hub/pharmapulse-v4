@@ -750,6 +750,35 @@ export default function EvaluationRegistryPage() {
     [filtered]
   )
 
+  // PR-1C: version grouping — one profile identity should not render a
+  // separate flat card/row for every historical archived version. Drafts
+  // and the active published version always stay visible (bulk-select and
+  // duplicate-draft detection both operate on them and must not change).
+  // Only OLDER archived versions of the same profile name are folded into
+  // a collapsible "version history" section, opened explicitly.
+  const [showArchivedHistory, setShowArchivedHistory] = useState(false)
+  const { primaryRows, archivedHistoryRows } = useMemo(() => {
+    const archivedByName = new Map<string, EvaluationProfile[]>()
+    filtered.forEach((p) => {
+      if (p.status !== 'archived') return
+      const list = archivedByName.get(p.name) ?? []
+      list.push(p)
+      archivedByName.set(p.name, list)
+    })
+
+    const olderArchivedIds = new Set<string>()
+    archivedByName.forEach((versions) => {
+      if (versions.length <= 1) return // single archived version stays inline — nothing to collapse
+      const sorted = [...versions].sort((a, b) => b.version - a.version)
+      sorted.slice(1).forEach((p) => olderArchivedIds.add(p.id))
+    })
+
+    return {
+      primaryRows: filtered.filter((p) => !olderArchivedIds.has(p.id)),
+      archivedHistoryRows: filtered.filter((p) => olderArchivedIds.has(p.id)),
+    }
+  }, [filtered])
+
   const handleCreate = async () => {
     if (!newName.trim() || !newRole || !newFrom) {
       toast.error('Name, role, and effective-from date are required')
@@ -936,7 +965,7 @@ export default function EvaluationRegistryPage() {
           fontSize: '10px', fontFamily: 'monospace', color: 'var(--text-muted)',
           display: 'flex', gap: '16px', flexWrap: 'wrap',
         }}>
-          <span>uid: <b style={{color:'var(--text-primary)'}}>{userProfile?.uid ?? 'undefined'}</b></span>
+          <span>uid: <b style={{color:'var(--text-primary)'}}>{userProfile?.uid ? `${userProfile.uid.slice(0, 6)}…` : 'undefined'}</b></span>
           <span>role: <b style={{color:'var(--text-primary)'}}>{userProfile?.role ?? 'undefined'}</b></span>
           <span>loading: <b style={{color: loading ? '#f59e0b' : '#22c55e'}}>{String(loading)}</b></span>
           <span>error: <b style={{color: storeError ? '#ef4444' : '#22c55e'}}>{storeError ?? 'none'}</b></span>
@@ -1016,8 +1045,32 @@ export default function EvaluationRegistryPage() {
               ⚠ Could not load profiles: {storeError}
               <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>Check that your account has admin or manager role.</div>
             </div>
-          : <DataTable columns={COLS} rows={filtered} rowKey="id" emptyText="No evaluation profiles yet" />
+          : <DataTable columns={COLS} rows={primaryRows} rowKey="id" emptyText="No evaluation profiles yet" />
       }
+
+      {/* PR-1C: explicit version-history view — older archived versions of
+          a profile are folded out of the main list above and only shown
+          here, on request, so the list above never shows duplicate cards
+          for the same profile identity. */}
+      {!loading && !storeError && archivedHistoryRows.length > 0 && (
+        <div style={{ marginTop: '10px' }}>
+          <button
+            onClick={() => setShowArchivedHistory((o) => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none',
+              cursor: 'pointer', padding: '4px 0', fontSize: '11px', color: 'var(--text-muted)',
+            }}
+          >
+            {showArchivedHistory ? <ChevronUp style={{ width: 12, height: 12 }} /> : <ChevronDown style={{ width: 12, height: 12 }} />}
+            {showArchivedHistory ? 'Hide' : 'Show'} {archivedHistoryRows.length} older archived version{archivedHistoryRows.length !== 1 ? 's' : ''}
+          </button>
+          {showArchivedHistory && (
+            <div style={{ marginTop: '6px', opacity: 0.85 }}>
+              <DataTable columns={COLS} rows={archivedHistoryRows} rowKey="id" emptyText="No archived version history" />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* New Profile modal */}
       {showCreate && (

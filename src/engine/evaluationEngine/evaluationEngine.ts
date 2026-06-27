@@ -30,6 +30,9 @@ import type {
   ElementResult, BasketResult, EvaluationResult,
   CalculationTrace, TargetSource, CappedKpiTrace,
 } from './evaluationEngineTypes'
+import { computeApplicableWeightSum, normalizedElementWeight }
+  from '../evaluationShared/weightRedistribution'
+import { roundToTwoDecimals } from '../evaluationShared/scoreRounding'
 
 // ── Threshold band matching ────────────────────────────────────
 
@@ -251,17 +254,36 @@ function scoreBasket(
     return result
   })
 
-  // Aggregate uses cappedAchievementPct (not raw achievementPct)
-  const aggregateAchievementPct = elementResults.reduce(
-    (sum, el) => sum + el.cappedAchievementPct * el.weight,
-    0,
-  )
+  // ── PR-1I Rule A: missing-data exclusion + proportional weight
+  // redistribution. An element with no data (dataAvailable=false) is
+  // excluded from the aggregate AND its weight is excluded from the
+  // denominator; the remaining applicable elements' weights are
+  // renormalized so they still sum to the basket's full weight.
+  // An element that is present but genuinely achieved 0% stays applicable
+  // (0 !== missing) and is NOT redistributed.
+  const applicableWeightSum = computeApplicableWeightSum(elementResults)
+
+  const elementResultsWithWeights: ElementResult[] = elementResults.map((el) => ({
+    ...el,
+    normalizedWeight: normalizedElementWeight(el.weight, el.dataAvailable, applicableWeightSum),
+    exclusionReason:  el.dataAvailable ? undefined : 'no-data',
+  }))
+
+  // No applicable elements at all → safe no-data state (never divide by
+  // zero, never invent a score). This preserves the engine's existing,
+  // already-approved numeric contract for "no data": 0.
+  const aggregateAchievementPct = applicableWeightSum > 0
+    ? elementResultsWithWeights.reduce(
+        (sum, el) => sum + el.cappedAchievementPct * (el.normalizedWeight ?? 0),
+        0,
+      )
+    : 0
 
   // Apply basket-level threshold rule to the aggregate achievement
   const band = matchThresholdBand(aggregateAchievementPct, basket.thresholdRule)
 
   // Validity: any required element with no data → basket invalid
-  const invalidElement = elementResults.find((el) => el.required && !el.dataAvailable)
+  const invalidElement = elementResultsWithWeights.find((el) => el.required && !el.dataAvailable)
   const isValid        = !invalidElement
   const invalidReason  = invalidElement
     ? `Required KPI "${invalidElement.kpiKey}" has no data`
@@ -271,7 +293,7 @@ function scoreBasket(
     basketId:   basket.id,
     basketName: basket.name,
     weight:     basket.weight,
-    elements:   elementResults,
+    elements:   elementResultsWithWeights,
     aggregateAchievementPct,
     bandLabel:    band.label,
     bandLabelAr:  band.labelAr,
@@ -280,6 +302,7 @@ function scoreBasket(
     weightedScore: band.score * basket.weight,
     isValid,
     invalidReason,
+    applicableWeightSum,
   }
 }
 
@@ -314,7 +337,10 @@ export function runEvaluation(input: EvaluationEngineInput): EvaluationResult {
   )
 
   // Final score = Σ basket.weightedScore
-  const finalScore = basketResults.reduce((sum, b) => sum + b.weightedScore, 0)
+  // PR-1I Rule B: raw precision is preserved for the normalization math
+  // below and for trace.rawFinalScore; the OFFICIAL finalScore returned to
+  // the caller is rounded once, at this final boundary.
+  const rawFinalScore = basketResults.reduce((sum, b) => sum + b.weightedScore, 0)
 
   // ── Rating via normalized final score ──────────────────────
   //
@@ -339,9 +365,15 @@ export function runEvaluation(input: EvaluationEngineInput): EvaluationResult {
   }, 0)
 
   const scoreRange = maxScore - minScore
-  const normalizedFinalScorePct = scoreRange > 0
-    ? Math.max(0, Math.min(100, ((finalScore - minScore) / scoreRange) * 100))
+  // Computed from the RAW (unrounded) finalScore — normalization precision
+  // must not be degraded by an earlier rounding step.
+  const rawNormalizedFinalScorePct = scoreRange > 0
+    ? Math.max(0, Math.min(100, ((rawFinalScore - minScore) / scoreRange) * 100))
     : 0
+
+  // PR-1I Rule B: round once, at the final official boundary.
+  const finalScore             = roundToTwoDecimals(rawFinalScore)
+  const normalizedFinalScorePct = roundToTwoDecimals(rawNormalizedFinalScorePct)
 
   const defaultRule = profile.defaultThresholdRule
   const ratingBand  = defaultRule
@@ -364,7 +396,9 @@ export function runEvaluation(input: EvaluationEngineInput): EvaluationResult {
     profileSnapshotId:  profile.id,
     profileVersion:     profile.version,
     calculatedAtMs:     startMs,
-    normalizedFinalScorePct,
+    normalizedFinalScorePct,  // rounded — this is the value ranking/report consumers read
+    rawFinalScore,
+    rawNormalizedFinalScorePct,
   }
 
   return {

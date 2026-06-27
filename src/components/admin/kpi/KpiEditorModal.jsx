@@ -201,7 +201,7 @@ export default function KpiEditorModal({ open, onClose, onSave, editingKpi, exis
               {isNew ? 'Add KPI Definition' : `Edit KPI: ${editingKpi?.key}`}
             </div>
             <div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'1px' }}>
-              {isProtected ? '⚠ Protected KPI — key and isCore are immutable' : isNew ? 'New custom KPI stored locally' : 'Changes stored in session'}
+              {isProtected ? '⚠ Protected KPI — key and protection status are immutable' : isNew ? 'New custom KPI stored locally' : 'Changes stored in session'}
             </div>
           </div>
           <button onClick={onClose} style={{ width:28, height:28, borderRadius:'6px', border:'none', background:'transparent', cursor:'pointer', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>

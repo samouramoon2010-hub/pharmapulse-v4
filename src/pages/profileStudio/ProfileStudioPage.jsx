@@ -5,6 +5,7 @@
 // Hidden from: pharmacist (enforced at route level + local guard)
 // ============================================================
 import React, { useState } from 'react'
+import { Info } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { useProfileStudioProfiles }      from '../../profileStudio/hooks/useProfileStudioProfiles'
 import { useProfileStudioSimulationRuns } from '../../profileStudio/hooks/useProfileStudioSimulationRuns'
@@ -73,7 +74,32 @@ export default function ProfileStudioPage() {
         onImport={() => setImportModalOpen(true)}
       />
 
+      {/* PR-1C: Profile Studio is an authoring tool only. "Publish" here
+          creates a publish package in Profile Studio's own collection — it
+          does not activate a profile in the live Evaluation Engine. Only a
+          published profile in the Evaluation Registry does that. This
+          banner exists so "Published" status here is never mistaken for
+          production activation. */}
       <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: '8px',
+        padding: '9px 12px', borderRadius: '8px', marginBottom: '14px',
+        background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.15)',
+        fontSize: '11px', color: 'var(--text-secondary)',
+      }}>
+        <Info style={{ width: 13, height: 13, color: '#60a5fa', flexShrink: 0, marginTop: 1 }} />
+        <span>
+          Profile Studio is an authoring and simulation workspace. Publishing a profile here does
+          not activate it for live evaluation — only a profile published in the Evaluation
+          Registry is used by the Evaluation Engine.
+        </span>
+      </div>
+
+      {/* PR-1E6 — the fixed '1fr 320px' template forced the left column to
+          ~39px at a 375px viewport (measured), crushing "All Profiles"
+          into unreadable wrapped text. .profile-studio-grid stacks to a
+          single column below 1024px so Simulation Runs moves below All
+          Profiles instead of squeezing it. */}
+      <div className="profile-studio-grid" style={{
         display: 'grid',
         gridTemplateColumns: '1fr 320px',
         gap: '16px',

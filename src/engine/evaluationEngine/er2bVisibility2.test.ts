@@ -54,10 +54,12 @@ vi.mock('../../services/auditService', () => ({
 describe('ER visibility — DataTable prop name (root cause)', () => {
   it('EvaluationRegistryPage passes rows= to DataTable, NOT data=', async () => {
     const src = await import('../../pages/admin/EvaluationRegistryPage.tsx?raw')
-    // Must use rows={filtered}, not data={filtered}
-    expect(src.default).toContain('rows={filtered}')
-    // Must NOT have data={filtered} (the broken prop name)
+    // PR-1C: primaryRows is the version-grouped derivative of filtered
+    // (older archived versions folded out) — same rows= prop convention.
+    expect(src.default).toContain('rows={primaryRows}')
+    // Must NOT have data={...} (the broken prop name)
     expect(src.default).not.toContain('data={filtered}')
+    expect(src.default).not.toContain('data={primaryRows}')
   })
 
   it('RegionsPage passes rows= to DataTable, NOT data=', async () => {

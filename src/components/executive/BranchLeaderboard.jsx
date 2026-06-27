@@ -45,15 +45,24 @@ export default function BranchLeaderboard({ report, onSelectBranch, selectedId, 
         </div>
       </div>
 
-      {/* Table header */}
-      <div style={{
+      {/* Table header.
+          PR-1E6 — the grid used a fixed 6-column gridTemplateColumns
+          (28+52+60+80+64=284px of fixed tracks) that didn't fit below
+          ~430px, forcing the whole card 47px+ wider than a 375px
+          viewport (confirmed via real-browser measurement: scrollWidth
+          422px vs clientWidth 375px). Risk/Trend drop below sm — the
+          rank/branch/score/achievement columns are the ones a
+          pharmacist/manager needs at a glance; Risk/Trend remain on
+          tablet/desktop and inside BranchDrilldown. */}
+      <div className="leaderboard-row" style={{
         display: 'grid',
-        gridTemplateColumns: '28px 1fr 52px 60px 80px 64px',
         gap: '8px', padding: '6px 10px',
         borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px',
       }}>
         {['#', 'Branch', 'Score', 'Ach%', 'Risk', 'Trend'].map((h) => (
-          <span key={h} style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <span key={h}
+            className={h === 'Risk' || h === 'Trend' ? 'hidden sm:inline' : undefined}
+            style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             {h}
           </span>
         ))}
@@ -76,9 +85,9 @@ export default function BranchLeaderboard({ report, onSelectBranch, selectedId, 
             <button
               key={branch.pharmacyId}
               onClick={() => onSelectBranch && onSelectBranch(branch)}
+              className="leaderboard-row"
               style={{
                 display: 'grid',
-                gridTemplateColumns: '28px 1fr 52px 60px 80px 64px',
                 gap: '8px', alignItems: 'center',
                 padding: '8px 10px', borderRadius: '6px',
                 border: `1px solid ${isSelected ? gradeBorder : 'transparent'}`,
@@ -127,12 +136,12 @@ export default function BranchLeaderboard({ report, onSelectBranch, selectedId, 
               </span>
 
               {/* Risk */}
-              <span style={{ fontSize: '11px', fontWeight: 500, color: riskCfg.color, whiteSpace: 'nowrap' }}>
+              <span className="hidden sm:inline" style={{ fontSize: '11px', fontWeight: 500, color: riskCfg.color, whiteSpace: 'nowrap' }}>
                 {riskCfg.label}
               </span>
 
               {/* Trend */}
-              <span style={{ fontSize: '12px', fontWeight: 700, color: trendCfg.color }}>
+              <span className="hidden sm:inline" style={{ fontSize: '12px', fontWeight: 700, color: trendCfg.color }}>
                 {trendCfg.label}
               </span>
             </button>

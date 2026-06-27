@@ -1,7 +1,7 @@
 // ============================================================
 // Sidebar — Premium Enterprise (monochrome, compact)
 // ============================================================
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
@@ -15,6 +15,7 @@ import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
 import Logo, { LogoIcon } from '../brand/Logo'
 import { useI18n }         from '../../hooks/useI18n'
 import PersonalIdentitySignature, { isSignatureIdentity } from '../identity/PersonalIdentitySignature'
+import { getRoleLabel } from '../../constants/roleScope'
 
 // UI3-D — Linear-style 3-group taxonomy: Intelligence Operations /
 // Data Architecture / Platform. "Actions" (and a couple of small
@@ -34,13 +35,19 @@ const NAV_CONFIG = {
     ]},
     { group: 'Data Architecture', items: [
       { icon: Database,        label: 'KPI Registry',          path: '/admin/kpis' },
-      { icon: FlaskConical,    label: 'Dynamic KPI Shadow',    path: '/admin/dynamic-kpi-shadow' },
+      // PR-1C: developer-only migration/parity diagnostic — not business
+      // navigation. Stays a real, reachable route for engineers in dev
+      // mode; filtered out of the rendered nav below in production.
+      { icon: FlaskConical,    label: 'Dynamic KPI Shadow',    path: '/admin/dynamic-kpi-shadow', devOnly: true },
       { icon: BookOpen,        label: 'Profile Studio',        path: '/profile-studio' },
       // ER-0 — Evaluation Registry (Evaluation Ledger analog)
       { icon: ClipboardCheck,  label: 'Evaluation Registry',   path: '/admin/evaluation-registry' },
       // ER-2A — Evaluation execution
       { icon: PlayCircle,      label: 'Run Evaluation',        path: '/admin/evaluation-run' },
       { icon: FileSpreadsheet, label: 'Import',                path: '/import' },
+      // DX-2/DX-3 — Data Exchange Studio: Organization Onboarding
+      { icon: FileSpreadsheet, label: 'Data Exchange Studio',   path: '/data-exchange' },
+      { icon: FileSpreadsheet, label: 'Export Studio',          path: '/export-studio' },
       { icon: Building2,       label: 'Pharmacies',            path: '/pharmacies' },
       { icon: Users,           label: 'Users',                 path: '/users' },
       // RBAC Phase 1 — Territory Infrastructure
@@ -112,13 +119,14 @@ const NAV_CONFIG = {
   ],
 }
 
-// branch_manager: forward-compat alias for manager nav.
-// Not an active production role in the current deployment.
-// When branch_manager users are activated in future, they
-// will inherit manager nav (including Executive BI via the
-// same 'manager' role check if needed, or via their own
-// config at that point). Phase A routes use 'manager' only.
+// branch_manager: forward-compat alias for manager nav, minus the two
+// items 'manager' can reach but 'branch_manager' cannot (PR-1E6 fix —
+// PS_ROLES in App.jsx only authorizes the 'manager' role value, not its
+// canonical 'branch_manager' counterpart, so showing these links here
+// previously sent branch_manager to /unauthorized on click).
 NAV_CONFIG.branch_manager = NAV_CONFIG.manager
+  .map((g) => ({ ...g, items: g.items.filter((item) => item.path !== '/profile-studio' && item.path !== '/assistant') }))
+  .filter((g) => g.items.length > 0)
 
 // district_supervisor: territory oversight nav (Phase 3A).
 // No KPI Entry — supervisors manage territory, not individual data entry.
@@ -147,8 +155,13 @@ NAV_CONFIG.district_supervisor = [
     { icon: Settings, label: 'Settings', path: '/settings' },
   ]},
 ]
-// Phase 3A-1B: regional_manager gets same nav as district_supervisor.
+// Phase 3A-1B: regional_manager gets district_supervisor's nav, minus
+// Profile Studio/Assistant (PR-1E6 fix — PS_ROLES in App.jsx does not
+// authorize 'regional_manager' for either route; same defect class as
+// branch_manager above).
 NAV_CONFIG.regional_manager = NAV_CONFIG.district_supervisor
+  .map((g) => ({ ...g, items: g.items.filter((item) => item.path !== '/profile-studio' && item.path !== '/assistant') }))
+  .filter((g) => g.items.length > 0)
 
 // general_manager: executive nav + Actions Layer (Phase 3C-3D).
 NAV_CONFIG.general_manager = [
@@ -175,17 +188,15 @@ NAV_CONFIG.general_manager = [
   ]},
 ]
 
-const ROLE_LABELS = {
-  admin:               'Admin',
-  manager:             'Manager',
-  branch_manager:      'Branch Manager',
-  district_supervisor: 'District Supervisor',
-  regional_manager:    'Regional Manager',
-  pharmacist:          'Pharmacist',
-}
-
+// PR-1C: items marked devOnly never render in a production build —
+// they stay reachable by direct URL for engineers in dev mode, but never
+// sit beside ordinary business navigation in production.
 function resolveNav(role) {
-  return NAV_CONFIG[role] || NAV_CONFIG.pharmacist
+  const groups = NAV_CONFIG[role] || NAV_CONFIG.pharmacist
+  if (process.env.NODE_ENV !== 'production') return groups
+  return groups
+    .map((g) => ({ ...g, items: g.items.filter((item) => !item.devOnly) }))
+    .filter((g) => g.items.length > 0)
 }
 
 // Tooltip for collapsed mode
@@ -240,6 +251,18 @@ export default function Sidebar({ mobileOpen, onClose }) {
   const { userProfile, logout } = useAuthStore()
   const { sidebarMode, toggleSidebar } = useSettingsStore()
   const { t } = useI18n()
+  const closeButtonRef = useRef(null)
+
+  // PR-1E1 — More drawer accessibility: Escape closes it, and opening it
+  // moves focus into the drawer (onto its close button) rather than
+  // leaving focus stranded on whichever trigger was clicked.
+  useEffect(() => {
+    if (!mobileOpen) return
+    closeButtonRef.current?.focus()
+    const escHandler = (e) => { if (e.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', escHandler)
+    return () => document.removeEventListener('keydown', escHandler)
+  }, [mobileOpen])
 
   // Nav label i18n map — translates known sidebar labels to current language.
   // Unknown labels fall through unchanged (safe for any hardcoded label).
@@ -310,7 +333,7 @@ export default function Sidebar({ mobileOpen, onClose }) {
                     {userProfile?.displayName}
                   </div>
                   <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {ROLE_LABELS[role] || role}
+                    {getRoleLabel(role)}
                   </div>
                 </>
               )}
@@ -413,13 +436,16 @@ export default function Sidebar({ mobileOpen, onClose }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-          <aside className="absolute right-0 top-0 bottom-0 animate-sidebar-in"
+          <aside id="mobile-more-drawer" role="dialog" aria-modal="true" aria-label="More navigation"
+                 className="absolute right-0 top-0 bottom-0 animate-sidebar-in"
                  style={{
                    width: '260px',
                    background: 'var(--sidebar-bg)',
                    borderLeft: '1px solid var(--border-subtle)',
+                   paddingBottom: 'env(safe-area-inset-bottom)',
                  }}>
-            <button onClick={onClose} className="absolute top-3.5 left-3 btn btn-ghost btn-icon">
+            <button ref={closeButtonRef} onClick={onClose} aria-label="Close navigation menu"
+                    className="absolute top-3.5 left-3 btn btn-ghost btn-icon">
               <X className="w-4 h-4" />
             </button>
             <Content isMobile />

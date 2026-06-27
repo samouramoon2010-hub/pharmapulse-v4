@@ -18,11 +18,12 @@ import { usePharmacyStore } from '../../store/pharmacyStore'
 import { useToastStore }    from '../../components/ui/Toast'
 import EmptyState           from '../../components/ui/EmptyState'
 import { SkeletonChart }    from '../../components/ui/SkeletonCard'
+import MobileRankCard       from '../../components/ui/MobileRankCard'
 import { formatNumber }     from '../../utils/helpers'
 import {
   getTrafficLight, TRAFFIC_COLORS,
   computeAchievementPct, sumKpi, getDayProgress,
-  computeOverallAchievement, computeKpiStats,
+  computeOverallAchievement, computeKpiStats, getKpiMetaForKey,
 } from '../../engine'
 import { subscribeKpiRegistry }                    from '../../services/kpiRegistryService'
 import { DEFAULT_KPI_REGISTRY, getTargetFieldName,
@@ -30,7 +31,7 @@ import { DEFAULT_KPI_REGISTRY, getTargetFieldName,
 
 // Executive Intelligence Layer
 import {
-  generateBranchSummary,
+  generateBranchSummary, generateExecutiveReport,
   GRADE_COLORS, GRADE_BG, GRADE_BORDER,
 } from '../../engine/executive'
 import { format as dateFnsFormat } from 'date-fns'
@@ -106,6 +107,9 @@ export default function ReportsPage() {
   const [customTo,       setCustomTo]       = useState('')
   const [useCustom,      setUseCustom]      = useState(false)
   const [loading,        setLoading]        = useState(true)
+  // KPI selected for the MTD Trend card — single-KPI only, never a
+  // cross-KPI sum (mixed-unit aggregation is exactly the bug being fixed).
+  const [mtdKpiKey,      setMtdKpiKey]      = useState('')
 
   // ── Fetched entries (local state — not global Zustand store) ─
   // Populated by fetchEntriesRange on every dateRange / role change.
@@ -331,16 +335,28 @@ export default function ReportsPage() {
           }
         })
         const ach = computeOverallAchievement(kpiStatsMap)
-        const totalActual = KPI_FIELDS.reduce((s, { key }) => s + (kpiStatsMap[key]?.actual || 0), 0)
-        const totalTarget = KPI_FIELDS.reduce((s, { key }) => s + (kpiStatsMap[key]?.target || 0), 0)
-        const gap = Math.max(0, totalTarget - totalActual)
-        return { ...ph, achievement: ach, entryCount: be.length, totalActual, totalTarget, gap }
+        // Valid KPI Count uses the exact same exclusion rule as
+        // computeOverallAchievement (target > 0, finite, not NaN) so this
+        // count always stays internally consistent with the achievement %
+        // shown next to it — never a separately-computed, possibly
+        // contradictory number.
+        const validKpiCount = KPI_FIELDS.filter(({ key }) => {
+          const t = kpiStatsMap[key]?.target
+          return t && t > 0 && isFinite(t) && !isNaN(t)
+        }).length
+        const status = getTrafficLight(ach, dp.ratio)
+        return { ...ph, achievement: ach, entryCount: be.length, validKpiCount, totalKpiCount: KPI_FIELDS.length, status }
       })
       .sort((a, b) => b.achievement - a.achievement)
-  }, [pharmacies, rangeEntries, targets, currentMonth, scope, KPI_FIELDS])
+  }, [pharmacies, rangeEntries, targets, currentMonth, scope, KPI_FIELDS, dp])
 
-  // MTD trend — current month vs same-day period in previous month
+  // MTD trend — one KPI, current month-to-date vs the equivalent
+  // day-of-month window in the previous month. Never sums two KPIs
+  // together (each has its own unit — that was the mixed-unit bug).
+  const activeMtdKpi = KPI_FIELDS.find((f) => f.key === mtdKpiKey) || KPI_FIELDS[0] || null
+
   const mtdTrend = useMemo(() => {
+    if (!activeMtdKpi) return null
     const now = new Date()
     const yr = now.getFullYear(), mo = now.getMonth()
     const day = now.getDate()
@@ -352,97 +368,155 @@ export default function ReportsPage() {
     const lastPrev = new Date(prevYr, prevMo + 1, 0).getDate()
     const prevTo = format(new Date(prevYr, prevMo, Math.min(day, lastPrev)), 'yyyy-MM-dd')
     const inScope = (e) => scope ? isPharmacyAllowed(scope, e.pharmacyId) : false
-    const sum = (arr) => arr.reduce((s, e) =>
-      KPI_FIELDS.reduce((ss, { key }) => ss + (Number(e[key]) || 0), s), 0)
-    const currTotal = sum(fetchedEntries.filter((e) => e.date >= currFrom && e.date <= currTo && inScope(e)))
-    const prevTotal = sum(fetchedEntries.filter((e) => e.date >= prevFrom && e.date <= prevTo && inScope(e)))
+    const sumOne = (arr) => arr.reduce((s, e) => s + (Number(e[activeMtdKpi.key]) || 0), 0)
+    const currTotal = sumOne(fetchedEntries.filter((e) => e.date >= currFrom && e.date <= currTo && inScope(e)))
+    const prevTotal = sumOne(fetchedEntries.filter((e) => e.date >= prevFrom && e.date <= prevTo && inScope(e)))
     const diff = currTotal - prevTotal
+    // Safe division — a 0 previous total never produces Infinity/NaN.
+    const pctChange = prevTotal > 0 ? Math.round((diff / prevTotal) * 100) : (currTotal > 0 ? null : 0)
     const trend = diff > 0 ? 'improving' : diff < 0 ? 'declining' : 'neutral'
     const prevMonth = format(new Date(prevYr, prevMo, 1), 'yyyy-MM')
     const currMonth2 = format(new Date(yr, mo, 1), 'yyyy-MM')
-    return { currTotal, prevTotal, diff, trend, currMonth: currMonth2, prevMonth }
-  }, [fetchedEntries, scope, KPI_FIELDS])
+    const unit = getKpiMetaForKey(activeMtdKpi.key, liveRegistry).unit
+    return {
+      kpiKey: activeMtdKpi.key, kpiLabel: activeMtdKpi.label, unit,
+      currTotal, prevTotal, diff, pctChange, trend,
+      currFrom, currTo, prevFrom, prevTo, currMonth: currMonth2, prevMonth,
+    }
+  }, [fetchedEntries, scope, activeMtdKpi, liveRegistry])
 
   // Territory summary — list scope only
   const territorySummary = useMemo(() => {
     if (!scope || scope.type !== 'list') return null
     if (branchSummary.length === 0) return null
-    const totalGap = branchSummary.reduce((s, b) => s + (b.gap || 0), 0)
     const avgAchievement = Math.round(branchSummary.reduce((s, b) => s + b.achievement, 0) / branchSummary.length)
+    const avgValidKpiCount = Math.round(
+      (branchSummary.reduce((s, b) => s + (b.validKpiCount || 0), 0) / branchSummary.length) * 10
+    ) / 10
     return {
       count: branchSummary.length,
       avgAchievement,
       bestBranch: branchSummary[0],
       worstBranch: branchSummary[branchSummary.length - 1],
-      totalGap,
+      avgValidKpiCount,
     }
   }, [scope, branchSummary])
 
-  // 14-day trend
+  // 14-day entry volume — a count of entry records per day, never a
+  // sum of KPI values (which would mix incompatible units and silently
+  // mislabel a value-sum as a "volume").
   const trendData = useMemo(() =>
     Array.from({ length: 14 }, (_, i) => {
       const date  = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
       const label = format(subDays(new Date(), 13 - i), 'dd/MM')
       const de    = fetchedEntries.filter((e) =>
-        e.date === date && (selectedBranch === 'all' || e.pharmacyId === selectedBranch)
+        e.date === date && (selectedBranch === 'all'
+          ? (scope ? isPharmacyAllowed(scope, e.pharmacyId) : false)
+          : e.pharmacyId === selectedBranch)
       )
-      const total = de.reduce((s, e) =>
-        KPI_FIELDS.reduce((ss, { key }) => ss + (Number(e[key]) || 0), s), 0)
-      return { date: label, total }
+      return { date: label, total: de.length }
     }),
-    [fetchedEntries, selectedBranch]
+    [fetchedEntries, selectedBranch, scope]
   )
 
   // ── Executive Intelligence Summary ─────────────────────────────
-  // For selected branch (or first active branch for admin)
+  // Single branch selected → per-branch summary (generateBranchSummary).
+  // 'all' selected → true portfolio summary across every branch the
+  // caller is authorized to see (generateExecutiveReport) — never a
+  // single first-active-branch standing in for "All Branches".
   const executiveSummary = useMemo(() => {
     const today     = new Date().toISOString().split('T')[0]
     const thisMonth = format(new Date(), 'yyyy-MM')
-
-    // Determine which branch to summarise (scope-scoped fallback for 'all')
-    const targetPharmacyId = selectedBranch !== 'all'
-      ? selectedBranch
-      : (scope ? filterAllowedPharmacies(scope, pharmacies) : pharmacies)
-          .find((p) => p.active !== false)?.id
-
-    if (!targetPharmacyId) return null
-
-    const pharmacy = pharmacies.find((p) => p.id === targetPharmacyId)
-    if (!pharmacy) return null
-
-    const branchTarget = targets.find(
-      (t) => t.pharmacyId === targetPharmacyId && t.month === thisMonth
-    )
-
     const from = `${thisMonth}-01`
     const last = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()
     const to   = `${thisMonth}-${String(last).padStart(2,'0')}`
-    const branchMTD = fetchedEntries.filter(
-      (e) => e.pharmacyId === targetPharmacyId && e.date >= from && e.date <= to
-    )
-    const historical = [...fetchedEntries]
-      .filter((e) => e.pharmacyId === targetPharmacyId)
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-60)
+
+    const buildBranchInput = (targetPharmacyId) => {
+      const pharmacy = pharmacies.find((p) => p.id === targetPharmacyId)
+      if (!pharmacy) return null
+      const branchTarget = targets.find(
+        (t) => t.pharmacyId === targetPharmacyId && t.month === thisMonth
+      )
+      const branchMTD = fetchedEntries.filter(
+        (e) => e.pharmacyId === targetPharmacyId && e.date >= from && e.date <= to
+      )
+      const historical = [...fetchedEntries]
+        .filter((e) => e.pharmacyId === targetPharmacyId)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-60)
+      return {
+        pharmacyId:   targetPharmacyId,
+        pharmacyName: pharmacy.name,
+        pharmacyCode: pharmacy.code || '',
+        region:       pharmacy.region || '',
+        mtdEntries:   branchMTD,
+        target:       branchTarget || null,
+        historicalEntries: historical,
+      }
+    }
+
+    if (selectedBranch !== 'all') {
+      if (!selectedBranch) return null
+      const branchInput = buildBranchInput(selectedBranch)
+      if (!branchInput) return null
+      try {
+        return { mode: 'branch', ...generateBranchSummary(branchInput, today, thisMonth) }
+      } catch {
+        return null
+      }
+    }
+
+    // Portfolio mode — every branch in scope, not just the first one.
+    const visiblePharmacies = (scope ? filterAllowedPharmacies(scope, pharmacies) : [])
+      .filter((p) => p.active !== false)
+    if (visiblePharmacies.length === 0) return null
+
+    const branchInputs = visiblePharmacies
+      .map((p) => buildBranchInput(p.id))
+      .filter(Boolean)
+    if (branchInputs.length === 0) return null
 
     try {
-      return generateBranchSummary(
-        {
-          pharmacyId:   targetPharmacyId,
-          pharmacyName: pharmacy.name,
-          pharmacyCode: pharmacy.code || '',
-          region:       pharmacy.region || '',
-          mtdEntries:   branchMTD,
-          target:       branchTarget || null,
-          historicalEntries: historical,
-        },
-        today,
-        thisMonth,
-      )
+      const report = generateExecutiveReport({
+        branches:    branchInputs,
+        reportDate:  today,
+        reportMonth: thisMonth,
+        generatedBy: userProfile?.uid ?? 'system',
+      })
+      // Adapter shape — maps the portfolio report onto the same fields the
+      // render JSX already reads for branch mode, so no structural redesign
+      // is needed: only the underlying numbers change, never the layout.
+      const kpiBreakdown = Object.entries(report.portfolioAch).map(([kpiKey, agg]) => {
+        const field = KPI_FIELDS.find((f) => f.key === kpiKey)
+        return {
+          kpiKey,
+          label: field?.label ?? kpiKey,
+          achievementPct: agg.achievementPct,
+          status: agg.status,
+        }
+      })
+      const validBreakdown = kpiBreakdown.filter((k) => report.portfolioAch[k.kpiKey]?.totalTarget > 0)
+      const weakestKpi   = validBreakdown.length
+        ? validBreakdown.reduce((w, k) => k.achievementPct < w.achievementPct ? k : w).kpiKey
+        : null
+      const strongestKpi = validBreakdown.length
+        ? validBreakdown.reduce((s, k) => k.achievementPct > s.achievementPct ? k : s).kpiKey
+        : null
+      return {
+        mode: 'portfolio',
+        pharmacyName: `All Branches`,
+        branchCount: branchInputs.length,
+        reportMonth: thisMonth,
+        score: { grade: report.portfolioGrade, adjusted: report.portfolioScore, kpiBreakdown },
+        weakestKpi,
+        strongestKpi,
+        riskDistribution: report.riskDistribution,
+        recommendations: report.portfolioRecommendations,
+      }
     } catch {
       return null
     }
-  }, [selectedBranch, scope, pharmacies, targets, fetchedEntries])
+  }, [selectedBranch, scope, pharmacies, targets, fetchedEntries, KPI_FIELDS, userProfile?.uid])
 
   // ── CSV Export — registry-driven ─────────────────────────
   // Headers and row values built from live KPI_FIELDS (same source
@@ -468,9 +542,9 @@ export default function ReportsPage() {
 
   const exportExcel = () => {
     const dataRows = branchSummary.map((b) =>
-      `<tr><td>${b.name}</td><td>${b.achievement}%</td><td>${formatNumber(b.totalActual||0)}</td><td>${formatNumber(b.totalTarget||0)}</td><td>${formatNumber(b.gap||0)}</td></tr>`
+      `<tr><td>${b.name}</td><td>${b.achievement}%</td><td>${b.validKpiCount}/${b.totalKpiCount}</td><td>${b.entryCount}</td><td>${TRAFFIC_COLORS[b.status]?.label || ''}</td></tr>`
     ).join('')
-    const html = `<html><head><meta charset="UTF-8"></head><body><table border="1"><tr><th>Branch</th><th>Achievement %</th><th>Actual</th><th>Target</th><th>Gap</th></tr>${dataRows}</table></body></html>`
+    const html = `<html><head><meta charset="UTF-8"></head><body><table border="1"><tr><th>Branch</th><th>Achievement %</th><th>Valid KPIs</th><th>Entries</th><th>Status</th></tr>${dataRows}</table></body></html>`
     const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
@@ -486,10 +560,10 @@ export default function ReportsPage() {
     lines.push(`Total Entries: ${rangeEntries.length}`)
     lines.push(`Active Branches: ${branchSummary.filter((b) => b.entryCount > 0).length}`)
     lines.push('')
-    lines.push('=== BRANCH RANKING ===')
-    lines.push('Rank,Branch,Achievement%,Actual,Target,Gap')
+    lines.push('=== BRANCH RANKING — Overall Weighted Achievement ===')
+    lines.push('Rank,Branch,Achievement%,ValidKPIs,TotalKPIs,Entries,Status')
     branchSummary.forEach((b, i) => {
-      lines.push(`${i + 1},${b.name},${b.achievement}%,${b.totalActual||0},${b.totalTarget||0},${b.gap||0}`)
+      lines.push(`${i + 1},${b.name},${b.achievement}%,${b.validKpiCount},${b.totalKpiCount},${b.entryCount},${TRAFFIC_COLORS[b.status]?.label || ''}`)
     })
     lines.push('')
     lines.push('=== TOP 5 BRANCHES ===')
@@ -498,15 +572,17 @@ export default function ReportsPage() {
     lines.push('=== BOTTOM 5 BRANCHES ===')
     ;[...branchSummary].slice(-5).reverse().forEach((b, i) => lines.push(`${i + 1},${b.name},${b.achievement}%`))
     lines.push('')
-    lines.push('=== MTD TREND ===')
-    lines.push('Current MTD,Previous MTD,Difference,Trend')
-    lines.push(`${mtdTrend.currTotal},${mtdTrend.prevTotal},${mtdTrend.diff},${mtdTrend.trend}`)
-    lines.push('')
-    lines.push('=== GAP ANALYSIS ===')
-    lines.push('Branch,Gap')
-    branchSummary.filter((b) => (b.gap||0) > 0)
-      .sort((a, b) => (b.gap||0) - (a.gap||0))
-      .forEach((b) => lines.push(`${b.name},${b.gap||0}`))
+    if (mtdTrend) {
+      lines.push(`=== MTD TREND — ${mtdTrend.kpiLabel}${mtdTrend.unit ? ` (${mtdTrend.unit})` : ''} ===`)
+      lines.push('CurrentMTD,PreviousMTD,Difference,PctChange,Trend')
+      lines.push(`${mtdTrend.currTotal},${mtdTrend.prevTotal},${mtdTrend.diff},${mtdTrend.pctChange === null ? 'N/A' : mtdTrend.pctChange + '%'},${mtdTrend.trend}`)
+      lines.push('')
+    }
+    lines.push('=== VALID KPI COVERAGE — branches below full coverage ===')
+    lines.push('Branch,ValidKPIs,TotalKPIs')
+    branchSummary.filter((b) => b.validKpiCount < b.totalKpiCount)
+      .sort((a, b) => a.validKpiCount - b.validKpiCount)
+      .forEach((b) => lines.push(`${b.name},${b.validKpiCount},${b.totalKpiCount}`))
     const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
@@ -555,6 +631,10 @@ export default function ReportsPage() {
           </h1>
           <p style={{ fontSize:'12px', color:'var(--text-muted)', marginTop:'2px' }}>
             {rangeEntries.length} entries · {dateRange.from}{dateRange.from !== dateRange.to ? ` → ${dateRange.to}` : ''}
+            {' · '}
+            {selectedBranch === 'all'
+              ? (scope?.type === 'list' ? 'Scope: My Branches' : 'Scope: All Branches')
+              : `Scope: ${pharmacies.find((p) => p.id === selectedBranch)?.name || 'Selected Branch'}`}
           </p>
         </div>
         <div style={{ display:'flex', gap:'6px' }}>
@@ -624,6 +704,25 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {/* PR-1E3 — mobile-only active filter summary: scope/period/KPI/
+          comparison basis always visible without scrolling to find the
+          controls above (which wrap on narrow widths). No new state —
+          every value here is already computed above. */}
+      <div className="sm:hidden flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+        <span>Scope: <span style={{ color: 'var(--text-secondary)' }}>
+          {selectedBranch === 'all'
+            ? (scope?.type === 'list' ? 'My Branches' : 'All Branches')
+            : (pharmacies.find((p) => p.id === selectedBranch)?.name || 'Selected Branch')}
+        </span></span>
+        <span>Period: <span style={{ color: 'var(--text-secondary)' }}>
+          {useCustom ? `${customFrom} → ${customTo}` : REPORT_TYPES.find((rt) => rt.id === reportType)?.label}
+        </span></span>
+        {activeMtdKpi && (
+          <span>MTD KPI: <span style={{ color: 'var(--text-secondary)' }}>{activeMtdKpi.label}</span></span>
+        )}
+        <span>Comparison: <span style={{ color: 'var(--text-secondary)' }}>Month-to-date vs. equivalent prior period</span></span>
+      </div>
+
       {/* ── Executive Intelligence Summary Card ─────────────── */}
       {executiveSummary && (
         <div style={{
@@ -653,7 +752,10 @@ export default function ReportsPage() {
                   {executiveSummary.pharmacyName}
                 </div>
                 <div style={{ fontSize:'10px', color:'var(--text-muted)', marginTop:'1px', fontFamily:"'Inter',sans-serif" }}>
-                  Executive Summary · {executiveSummary.reportMonth}
+                  Executive Summary · {executiveSummary.reportMonth} ·{' '}
+                  {executiveSummary.mode === 'portfolio'
+                    ? `Portfolio — ${executiveSummary.branchCount} branch${executiveSummary.branchCount === 1 ? '' : 'es'}`
+                    : 'Single Branch'}
                 </div>
               </div>
             </div>
@@ -671,14 +773,34 @@ export default function ReportsPage() {
                 Score {executiveSummary.score.adjusted}/100
               </div>
 
-              {/* Risk badge */}
-              {(() => {
+              {/* Risk badge(s) — single branch has one risk level; the
+                  portfolio has a distribution across branches, never
+                  collapsed into one fabricated overall level. */}
+              {executiveSummary.mode === 'portfolio' ? (
+                [
+                  { key:'highRisk',   label:'High Risk',   bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  color:'#ef4444' },
+                  { key:'mediumRisk', label:'Medium Risk',  bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)', color:'#f59e0b' },
+                  { key:'lowRisk',    label:'Low Risk',     bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  color:'#22c55e' },
+                  { key:'onTrack',    label:'On Track',     bg:'rgba(0,210,173,0.08)',  border:'rgba(0,210,173,0.2)',  color:'#00d2ad' },
+                ].filter((r) => (executiveSummary.riskDistribution?.[r.key] || 0) > 0)
+                 .map((r) => (
+                  <div key={r.key} style={{
+                    display:'flex', alignItems:'center', gap:'4px',
+                    padding:'3px 10px', borderRadius:'99px', fontSize:'11px', fontWeight:500,
+                    fontFamily:"'Inter',sans-serif",
+                    background: r.bg, border:`1px solid ${r.border}`, color: r.color,
+                  }}>
+                    <div style={{ width:5, height:5, borderRadius:'50%', background:r.color, flexShrink:0 }} />
+                    {executiveSummary.riskDistribution[r.key]} {r.label}
+                  </div>
+                ))
+              ) : (() => {
                 const riskStyle = {
                   ON_TRACK:    { bg:'rgba(0,210,173,0.08)',  border:'rgba(0,210,173,0.2)',  color:'#00d2ad', label:'On Track'  },
                   LOW_RISK:    { bg:'rgba(34,197,94,0.08)',  border:'rgba(34,197,94,0.2)',  color:'#22c55e', label:'Low Risk'  },
                   MEDIUM_RISK: { bg:'rgba(245,158,11,0.08)', border:'rgba(245,158,11,0.2)', color:'#f59e0b', label:'Medium Risk'},
                   HIGH_RISK:   { bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.2)',  color:'#ef4444', label:'High Risk' },
-                }[executiveSummary.riskProfile.riskLevel] || { bg:'var(--bg-hover)', border:'var(--border-subtle)', color:'var(--text-muted)', label:'Unknown' }
+                }[executiveSummary.riskProfile?.riskLevel] || { bg:'var(--bg-hover)', border:'var(--border-subtle)', color:'var(--text-muted)', label:'Unknown' }
                 return (
                   <div style={{
                     display:'flex', alignItems:'center', gap:'4px',
@@ -913,7 +1035,7 @@ export default function ReportsPage() {
               { label:'Avg Achievement', value: `${territorySummary.avgAchievement}%`,   color: TRAFFIC_COLORS[getTrafficLight(territorySummary.avgAchievement, dp.ratio)]?.color || 'var(--brand-400)' },
               { label:'Best Branch',     value: territorySummary.bestBranch?.name || '—', color:'#22c55e' },
               { label:'Worst Branch',    value: territorySummary.worstBranch?.name || '—', color:'#ef4444' },
-              { label:'Total Gap',       value: formatNumber(territorySummary.totalGap), color:'#f59e0b' },
+              { label:'Avg Valid KPIs',  value: territorySummary.avgValidKpiCount, color:'#f59e0b' },
             ].map((s) => (
               <div key={s.label} style={{ background:'var(--bg-overlay)', borderRadius:'8px', padding:'10px 12px' }}>
                 <div style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'4px', fontFamily:"'Inter',sans-serif" }}>{s.label}</div>
@@ -929,7 +1051,7 @@ export default function ReportsPage() {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
           <div style={{ ...STAT_STYLE, padding:'14px' }}>
             <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'#22c55e', marginBottom:'10px', fontFamily:"'Inter',sans-serif" }}>
-              Top 5 Branches
+              Top 5 Branches — Overall Weighted Achievement
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
               {branchSummary.slice(0, 5).map((b, i) => (
@@ -943,7 +1065,7 @@ export default function ReportsPage() {
           </div>
           <div style={{ ...STAT_STYLE, padding:'14px' }}>
             <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'#ef4444', marginBottom:'10px', fontFamily:"'Inter',sans-serif" }}>
-              Bottom 5 Branches
+              Bottom 5 Branches — Overall Weighted Achievement
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
               {[...branchSummary].slice(-5).reverse().map((b, i) => (
@@ -961,29 +1083,53 @@ export default function ReportsPage() {
       {/* ── Branch Comparison Table — scope-aware, sorted desc ── */}
       {branchSummary.length > 0 && (
         <div style={{ ...STAT_STYLE, padding:'16px' }}>
-          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
-            Branch Comparison
+          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'4px', fontFamily:"'Inter',sans-serif" }}>
+            Branch Comparison — Overall Weighted Achievement
           </div>
-          <div style={{ overflowX:'auto' }}>
+          <div style={{ fontSize:'10px', color:'var(--text-muted)', marginBottom:'12px' }}>
+            Achievement % is each KPI's achievement weighted by its registry weight, averaged across only the KPIs with a valid target ("Valid KPIs").
+          </div>
+          {/* PR-1E3 — phone-width card list, same `branchSummary` data/
+              order as the table below (already sorted desc by
+              achievement). No re-sort, no re-aggregation. */}
+          <div className="sm:hidden space-y-2">
+            {branchSummary.map((b, idx) => {
+              const cfg = TRAFFIC_COLORS[b.status] || TRAFFIC_COLORS[getTrafficLight(b.achievement, dp.ratio)]
+              return (
+                <MobileRankCard
+                  key={b.id}
+                  rank={idx + 1}
+                  title={b.name}
+                  primaryMetric={{ label: 'Achievement', value: `${b.achievement}%`, color: cfg.color }}
+                  secondaryMetrics={[
+                    { label: 'Valid KPIs', value: `${b.validKpiCount}/${b.totalKpiCount}` },
+                    { label: 'Entries', value: b.entryCount },
+                  ]}
+                  status={{ label: cfg.label, color: cfg.color }}
+                />
+              )
+            })}
+          </div>
+          <div className="hidden sm:block" style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'11px' }}>
               <thead>
                 <tr style={{ borderBottom:'1px solid var(--border-subtle)' }}>
-                  {['#', 'Branch', 'Achievement %', 'Actual', 'Target', 'Gap'].map((h) => (
+                  {['#', 'Branch', 'Achievement %', 'Valid KPIs', 'Entries', 'Status'].map((h) => (
                     <th key={h} style={{ padding:'4px 8px', textAlign:'left', fontSize:'9px', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {branchSummary.map((b, idx) => {
-                  const cfg = TRAFFIC_COLORS[getTrafficLight(b.achievement, dp.ratio)]
+                  const cfg = TRAFFIC_COLORS[b.status] || TRAFFIC_COLORS[getTrafficLight(b.achievement, dp.ratio)]
                   return (
                     <tr key={b.id} style={{ borderBottom:'1px solid var(--border-subtle)' }}>
                       <td style={{ padding:'5px 8px', color:'var(--text-muted)', fontVariantNumeric:'tabular-nums', width:'24px' }}>{idx + 1}</td>
                       <td style={{ padding:'5px 8px', color:'var(--text-primary)', fontWeight:500 }}>{b.name}</td>
                       <td style={{ padding:'5px 8px', color: cfg.color, fontWeight:600, fontVariantNumeric:'tabular-nums' }}>{b.achievement}%</td>
-                      <td style={{ padding:'5px 8px', color:'var(--text-secondary)', fontVariantNumeric:'tabular-nums' }}>{formatNumber(b.totalActual||0)}</td>
-                      <td style={{ padding:'5px 8px', color:'var(--text-secondary)', fontVariantNumeric:'tabular-nums' }}>{formatNumber(b.totalTarget||0)}</td>
-                      <td style={{ padding:'5px 8px', color:(b.gap||0) > 0 ? '#f59e0b' : 'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{formatNumber(b.gap||0)}</td>
+                      <td style={{ padding:'5px 8px', color:'var(--text-secondary)', fontVariantNumeric:'tabular-nums' }}>{b.validKpiCount}/{b.totalKpiCount}</td>
+                      <td style={{ padding:'5px 8px', color:'var(--text-secondary)', fontVariantNumeric:'tabular-nums' }}>{b.entryCount}</td>
+                      <td style={{ padding:'5px 8px', color: cfg.color, fontWeight:500 }}>{cfg.label}</td>
                     </tr>
                   )
                 })}
@@ -993,18 +1139,31 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* ── MTD Trend Analysis ─────────────────────────────────── */}
-      {(mtdTrend.currTotal > 0 || mtdTrend.prevTotal > 0) && (
+      {/* ── MTD Trend Analysis — single KPI, never a cross-KPI sum ── */}
+      {mtdTrend && (mtdTrend.currTotal > 0 || mtdTrend.prevTotal > 0) && (
         <div style={{ ...STAT_STYLE, padding:'16px' }}>
-          <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', fontFamily:"'Inter',sans-serif" }}>
-            MTD Trend Analysis
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'8px', marginBottom:'4px' }}>
+            <div style={{ fontSize:'10px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', fontFamily:"'Inter',sans-serif" }}>
+              MTD Trend Analysis — {mtdTrend.kpiLabel}{mtdTrend.unit ? ` (${mtdTrend.unit})` : ''}
+            </div>
+            {KPI_FIELDS.length > 1 && (
+              <select value={activeMtdKpi?.key ?? ''} onChange={(e) => setMtdKpiKey(e.target.value)}
+                style={{ height:'26px', fontSize:'11px', padding:'0 6px' }}>
+                {KPI_FIELDS.map((f) => (
+                  <option key={f.key} value={f.key}>{f.label}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div style={{ fontSize:'10px', color:'var(--text-muted)', marginBottom:'12px' }}>
+            {mtdTrend.currFrom} → {mtdTrend.currTo} vs. equivalent period {mtdTrend.prevFrom} → {mtdTrend.prevTo}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'8px' }} className="sm:grid-cols-4">
             {[
               { label:'Current MTD',                       value: formatNumber(mtdTrend.currTotal),  color:'var(--brand-400)' },
               { label:`Previous MTD (${mtdTrend.prevMonth})`, value: formatNumber(mtdTrend.prevTotal), color:'var(--text-secondary)' },
               { label:'Difference', value: (mtdTrend.diff >= 0 ? '+' : '') + formatNumber(mtdTrend.diff), color: mtdTrend.diff >= 0 ? '#22c55e' : '#ef4444' },
-              { label:'Trend',      value: mtdTrend.trend === 'improving' ? '▲ Improving' : mtdTrend.trend === 'declining' ? '▼ Declining' : '— Neutral', color: mtdTrend.trend === 'improving' ? '#22c55e' : mtdTrend.trend === 'declining' ? '#ef4444' : 'var(--text-muted)' },
+              { label:'% Change',   value: mtdTrend.pctChange === null ? 'N/A (no prior data)' : `${mtdTrend.pctChange >= 0 ? '+' : ''}${mtdTrend.pctChange}%`, color: mtdTrend.pctChange === null ? 'var(--text-muted)' : mtdTrend.pctChange >= 0 ? '#22c55e' : '#ef4444' },
             ].map((s) => (
               <div key={s.label} style={{ background:'var(--bg-overlay)', borderRadius:'8px', padding:'10px 12px' }}>
                 <div style={{ fontSize:'9px', fontWeight:500, letterSpacing:'0.07em', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'4px', fontFamily:"'Inter',sans-serif" }}>{s.label}</div>

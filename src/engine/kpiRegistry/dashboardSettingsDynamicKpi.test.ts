@@ -72,10 +72,12 @@ describe('SettingsPage — Phase bug-3 patch applied', () => {
     expect(SETTINGS_SRC).toMatch(/registryKpiCards\.map/)
   })
 
-  it('shows core vs custom badge distinction', () => {
-    expect(SETTINGS_SRC).toContain('isCore')
-    expect(SETTINGS_SRC).toContain("'Core'")
-    expect(SETTINGS_SRC).toContain("'Custom'")
+  // PR-1C: the user-facing Core/Custom badge was removed from this list —
+  // it surfaced a misleading hierarchy distinction to every user, not just
+  // admins. The isCore field itself is untouched in the registry/engine.
+  it('does not show a Core/Custom badge distinction to end users', () => {
+    expect(SETTINGS_SRC).not.toContain("isCore ? 'Core' : 'Custom'")
+    expect(SETTINGS_SRC).not.toMatch(/>\s*Core\s*<\/span>/)
   })
 
   it('static DASHBOARD_CARDS widget toggles still present', () => {
@@ -190,9 +192,10 @@ describe('Settings — safe fallbacks for missing metadata', () => {
     expect(buildRegistryKpiCards({})).toEqual([])
   })
 
-  it('color in dot indicator falls back to #a1a1aa for custom KPIs', () => {
-    // registryKpiCards don't carry color — the dot color in JSX is hardcoded brand/fallback
-    // Verify the source uses '#a1a1aa' as the custom KPI dot color
-    expect(SETTINGS_SRC).toContain('#a1a1aa')
+  // PR-1C: the dot indicator no longer varies by isCore (that was the same
+  // Core/Custom distinction removed above) — every KPI row uses one
+  // consistent brand-colored dot.
+  it('dot indicator uses one consistent color, not an isCore-driven fallback', () => {
+    expect(SETTINGS_SRC).not.toMatch(/background:\s*isCore\s*\?/)
   })
 })

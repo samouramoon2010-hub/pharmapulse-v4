@@ -1,7 +1,7 @@
 // ============================================================
 // ConfirmModal — Premium enterprise dialog
 // ============================================================
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 
 export default function ConfirmModal({
@@ -16,11 +16,36 @@ export default function ConfirmModal({
   // Callers that pass onCancel work correctly; callers that pass onClose work correctly.
   // A missing close handler falls back to a no-op so the modal never crashes.
   const handleClose = onClose ?? onCancel ?? (() => {})
+
+  // PR-1E6 Final Pass — this component previously rendered with no
+  // role="dialog", no focus management, and no Escape handling, which
+  // affects every caller (KPI Entry's date-change/discard guards,
+  // destructive confirmations, user create/edit, import commit). Focus
+  // now moves into the dialog on open and returns to whatever element
+  // triggered it on close, mirroring the pattern already used by the
+  // mobile drawer in Sidebar.jsx.
+  const dialogRef = useRef(null)
+  const triggerRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    triggerRef.current = document.activeElement
+    dialogRef.current?.focus()
+    const onKeyDown = (e) => { if (e.key === 'Escape') handleClose() }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      triggerRef.current?.focus?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative w-full max-w-sm animate-scale-in rounded-xl p-5"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}
+           className="relative w-full max-w-sm animate-scale-in rounded-xl p-5"
            style={{
              background: 'var(--bg-elevated)',
              border: '1px solid var(--border-default)',

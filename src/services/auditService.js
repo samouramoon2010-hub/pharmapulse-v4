@@ -16,6 +16,7 @@ export const AUDIT_ACTION = {
   APPROVE:      'approve',
   REJECT:       'reject',
   IMPORT:       'import',
+  EXPORT:       'export',
   BULK_APPROVE: 'bulk_approve',
 }
 

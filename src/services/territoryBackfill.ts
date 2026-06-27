@@ -63,7 +63,13 @@ export async function backfillAllAssignedPharmacyIds(
     failures:  [],
   }
 
-  for (const userDoc of snap.docs) {
+  // Closure Patch Part 2: a CLAIMED pending-onboarding document (see
+  // services/dataExchange/pharmacistActivationService.ts) is a
+  // historical identity-link artifact, superseded by a real Auth-linked
+  // doc — never an operational territory-role user to backfill.
+  const docs = snap.docs.filter((d) => d.data().authStatus !== 'CLAIMED')
+
+  for (const userDoc of docs) {
     result.scanned++
     const uid         = userDoc.id
     const displayName = (userDoc.data().displayName as string | undefined) || ''

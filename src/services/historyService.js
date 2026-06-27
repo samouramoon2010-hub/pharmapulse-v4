@@ -129,11 +129,17 @@ async function fetchBranchPharmacists(pharmacyId) {
       where('active',     '==', true),
     )
     const snap = await getDocs(q)
-    return snap.docs.map((d) => ({
-      uid:         d.id,
-      displayName: d.data().displayName || 'Unknown',
-      pharmacyId:  d.data().pharmacyId,
-    }))
+    // A CLAIMED pending-onboarding doc keeps its original active/pharmacyId/role
+    // fields untouched after being claimed (see userService.js getUsersByPharmacy
+    // for the canonical explanation) — it would otherwise double-count alongside
+    // the real Auth-linked user in missing-submission detection and ranking history.
+    return snap.docs
+      .filter((d) => d.data().authStatus !== 'CLAIMED')
+      .map((d) => ({
+        uid:         d.id,
+        displayName: d.data().displayName || 'Unknown',
+        pharmacyId:  d.data().pharmacyId,
+      }))
   } catch (e) {
     console.warn('[historyService] Could not fetch branch pharmacists:', e.message)
     return []
@@ -181,8 +187,6 @@ async function fetchPreviousRanking(pharmacyId, currentMonth) {
 export async function triggerHistorySnapshots(userId, pharmacyId, date, actorId, actorRole) {
   const month = date.slice(0, 7)
 
-  console.log('[historyService] Starting history snapshots:', { userId, pharmacyId, date, month })
-
   // ── Fetch shared data ─────────────────────────────────────────
   const [target, mtdEntries] = await Promise.all([
     fetchTarget(pharmacyId, month),
@@ -191,7 +195,6 @@ export async function triggerHistorySnapshots(userId, pharmacyId, date, actorId,
 
   // ── BATCH 1: User-level snapshots ─────────────────────────────
   // daily_summary + forecast_snapshot — write atomically
-  let batch1Success = false
   try {
     const dailySummary    = generateDailySummary(userId, pharmacyId, date, mtdEntries, target)
     const forecastSnap    = generateForecastSnapshot(userId, pharmacyId, date, mtdEntries, target)
@@ -221,8 +224,6 @@ export async function triggerHistorySnapshots(userId, pharmacyId, date, actorId,
     )
 
     await batch1.commit()
-    batch1Success = true
-    console.log('[historyService] Batch 1 committed: daily_summary + forecast_snapshot')
 
     // Audit log for batch 1
     await logAction({
@@ -304,12 +305,6 @@ export async function triggerHistorySnapshots(userId, pharmacyId, date, actorId,
     )
 
     await batch2.commit()
-    console.log('[historyService] Batch 2 committed: risk_snapshot + ranking_history', {
-      riskLevel:         riskSnap.riskLevel,
-      submissionRate:    riskSnap.submissionRate,
-      missingCount:      riskSnap.missingPharmacists.length,
-      pharmacistsRanked: rankingHistory.rankings.length,
-    })
   } catch (e) {
     // Batch 2 failure — log clearly, but KPI save already succeeded
     console.error('[historyService] Batch 2 failed (risk_snapshot + ranking_history):', {
@@ -318,16 +313,4 @@ export async function triggerHistorySnapshots(userId, pharmacyId, date, actorId,
       stack: e.stack,
     })
   }
-
-  // Summary log
-  console.log('[historyService] History snapshot trigger complete:', {
-    userId, pharmacyId, date,
-    batch1: batch1Success ? 'OK' : 'FAILED',
-    collectionsTargeted: [
-      COL.DAILY_SUMMARIES,
-      COL.FORECAST_SNAPSHOTS,
-      COL.RISK_SNAPSHOTS,
-      COL.RANKING_HISTORY,
-    ],
-  })
 }

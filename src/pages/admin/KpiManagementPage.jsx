@@ -6,7 +6,7 @@
 // Does NOT modify existing KPI calculations or Firestore data.
 // ============================================================
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
-import { Database, Plus, RefreshCw, AlertTriangle, Info } from 'lucide-react'
+import { Database, Plus, RefreshCw, AlertTriangle, Info, X, Loader2, ChevronDown } from 'lucide-react'
 
 import {
   DEFAULT_KPI_REGISTRY,
@@ -20,6 +20,7 @@ import {
   resetKpiRegistryToDefaults,
   PROTECTED_CORE_KEYS,
 } from '../../services/kpiRegistryService'
+import { checkKpiArchiveDependencies } from '../../services/kpiArchiveGuard'
 
 import KpiRegistryTable from '../../components/admin/kpi/KpiRegistryTable'
 import KpiEditorModal   from '../../components/admin/kpi/KpiEditorModal'
@@ -55,19 +56,23 @@ export default function KpiManagementPage() {
   )
 
   // ── Registry health stats ──────────────────────────────────
+  // PR-1C: warnings are split into blockers (prevent correct evaluation —
+  // e.g. no primary KPI) and recommendations (content-completeness gaps,
+  // safe to defer) instead of one flat, ungrouped list.
   const healthStats = useMemo(() => {
     const counts = { draft:0, pilot_tracking:0, shadow_evaluation:0, production_evaluation:0, archived:0 }
-    const warnings = []
+    const blockers = []
+    const recommendations = []
     allKpis.forEach((kpi) => {
       const stage = kpi.lifecycleStage ?? 'production_evaluation'
       if (stage in counts) counts[stage] = counts[stage] + 1
-      if (!kpi.labelAr || kpi.labelAr.trim() === kpi.label) warnings.push(`${kpi.key}: Missing Arabic label`)
-      if (!kpi.coachingAction)   warnings.push(`${kpi.key}: Missing coaching action (EN)`)
-      if (!kpi.coachingActionAr) warnings.push(`${kpi.key}: Missing coaching action (AR)`)
+      if (!kpi.labelAr || kpi.labelAr.trim() === kpi.label) recommendations.push(`"${kpi.label}" is missing an Arabic label.`)
+      if (!kpi.coachingAction)   recommendations.push(`"${kpi.label}" is missing a coaching action (English).`)
+      if (!kpi.coachingActionAr) recommendations.push(`"${kpi.label}" is missing a coaching action (Arabic).`)
     })
     const primaryKpis = allKpis.filter((k) => k.isPrimary)
-    if (primaryKpis.length !== 1) warnings.push(`Registry must have exactly one primary KPI (found ${primaryKpis.length})`)
-    return { counts, warnings }
+    if (primaryKpis.length !== 1) blockers.push(`The registry must have exactly one primary KPI (found ${primaryKpis.length}).`)
+    return { counts, blockers, recommendations, total: blockers.length + recommendations.length }
   }, [allKpis])
 
   // Existing keys set for duplicate-key validation
@@ -80,6 +85,11 @@ export default function KpiManagementPage() {
   const [editorOpen,   setEditorOpen]   = useState(false)
   const [editingKpi,   setEditingKpi]   = useState(null)
   const [successMsg,   setSuccessMsg]   = useState('')
+  const [recsOpen,     setRecsOpen]     = useState(false)
+  // PR-1C: archive dependency check — null while idle, then either
+  // { key, loading:true } or { key, loading:false, result } from
+  // checkKpiArchiveDependencies().
+  const [archiveCheck, setArchiveCheck] = useState(null)
 
   const openAdd  = () => { setEditingKpi(null); setEditorOpen(true) }
   const openEdit = (kpi) => { setEditingKpi(kpi); setEditorOpen(true) }
@@ -105,15 +115,32 @@ export default function KpiManagementPage() {
     }
   }, [mergedRegistry])
 
-  const handleArchive = useCallback(async (key) => {
+  // PR-1C: clicking Archive no longer archives immediately — it runs the
+  // dependency check first and opens a modal showing exactly what would be
+  // affected. Archiving itself only proceeds from the modal, and only when
+  // the check reports safe:true.
+  const requestArchive = useCallback(async (key) => {
     if (PROTECTED_CORE_KEYS.has(key) && mergedRegistry[key]?.isCore) return
+    setArchiveCheck({ key, loading: true })
+    try {
+      const result = await checkKpiArchiveDependencies(key)
+      setArchiveCheck({ key, loading: false, result })
+    } catch (e) {
+      setArchiveCheck({ key, loading: false, result: { safe: false, dependencies: [], error: e.message } })
+    }
+  }, [mergedRegistry])
+
+  const confirmArchive = useCallback(async () => {
+    if (!archiveCheck?.key) return
+    const key = archiveCheck.key
+    setArchiveCheck(null)
     try {
       await archiveKpiDefinition(key)
       flash(`KPI "${key}" archived.`)
     } catch (e) {
       flash(`Error archiving KPI: ${e.message}`)
     }
-  }, [mergedRegistry])
+  }, [archiveCheck])
 
   const handleHide = useCallback(async (key) => {
     if (PROTECTED_CORE_KEYS.has(key) && mergedRegistry[key]?.isCore) return
@@ -223,18 +250,48 @@ export default function KpiManagementPage() {
         ))}
       </div>
 
-      {/* Validation warnings */}
-      {healthStats.warnings.length > 0 && (
-        <div style={{ borderRadius:'8px', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', padding:'10px 14px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'6px', fontSize:'11px', fontWeight:600, color:'#f59e0b' }}>
-            <AlertTriangle style={{ width:12, height:12 }} />
-            Registry Validation Warnings ({healthStats.warnings.length})
-          </div>
-          <ul style={{ margin:0, paddingLeft:'16px', display:'flex', flexDirection:'column', gap:'3px' }}>
-            {healthStats.warnings.map((w, i) => (
-              <li key={i} style={{ fontSize:'11px', color:'#f59e0b', opacity:0.85 }}>{w}</li>
-            ))}
-          </ul>
+      {/* Validation warnings — PR-1C: blockers and recommendations are now
+          visually separated. Blockers prevent correct evaluation and are
+          always expanded; recommendations are content-completeness gaps,
+          collapsed by default so they don't compete for attention. */}
+      {healthStats.total > 0 && (
+        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+          {healthStats.blockers.length > 0 && (
+            <div style={{ borderRadius:'8px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.2)', padding:'10px 14px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'6px', fontSize:'11px', fontWeight:600, color:'#f87171' }}>
+                <AlertTriangle style={{ width:12, height:12 }} />
+                Blockers ({healthStats.blockers.length}) — must be fixed
+              </div>
+              <ul style={{ margin:0, paddingLeft:'16px', display:'flex', flexDirection:'column', gap:'3px' }}>
+                {healthStats.blockers.map((w, i) => (
+                  <li key={i} style={{ fontSize:'11px', color:'#f87171', opacity:0.9 }}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {healthStats.recommendations.length > 0 && (
+            <div style={{ borderRadius:'8px', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', padding:'10px 14px' }}>
+              <button
+                onClick={() => setRecsOpen((o) => !o)}
+                style={{
+                  display:'flex', alignItems:'center', gap:'6px', width:'100%',
+                  background:'none', border:'none', cursor:'pointer', padding:0,
+                  fontSize:'11px', fontWeight:600, color:'#f59e0b',
+                }}
+              >
+                <ChevronDown style={{ width:12, height:12, transform: recsOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition:'transform 0.15s' }} />
+                Recommendations ({healthStats.recommendations.length}) — safe to address later
+              </button>
+              {recsOpen && (
+                <ul style={{ margin:'8px 0 0', paddingLeft:'16px', display:'flex', flexDirection:'column', gap:'3px' }}>
+                  {healthStats.recommendations.map((w, i) => (
+                    <li key={i} style={{ fontSize:'11px', color:'#f59e0b', opacity:0.85 }}>{w}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -243,7 +300,7 @@ export default function KpiManagementPage() {
         kpis={allKpis}
         uiStatuses={uiStatuses}
         onEdit={openEdit}
-        onArchive={handleArchive}
+        onArchive={requestArchive}
         onHide={handleHide}
       />
 
@@ -255,6 +312,76 @@ export default function KpiManagementPage() {
         editingKpi={editingKpi}
         existingKeys={existingKeys}
       />
+
+      {/* Archive dependency check modal — PR-1C */}
+      {archiveCheck && (
+        <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}>
+          <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.55)', backdropFilter:'blur(6px)' }} onClick={() => setArchiveCheck(null)} />
+          <div style={{
+            position:'relative', width:'100%', maxWidth:'440px',
+            background:'var(--bg-elevated)', border:'1px solid var(--border-strong)',
+            borderRadius:'12px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)',
+            padding:'18px',
+          }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'12px' }}>
+              <div style={{ fontSize:'14px', fontWeight:600, color:'var(--text-primary)' }}>
+                Archive "{archiveCheck.key}"
+              </div>
+              <button onClick={() => setArchiveCheck(null)} style={{ width:26, height:26, borderRadius:'6px', border:'none', background:'transparent', cursor:'pointer', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <X style={{ width:13, height:13 }} />
+              </button>
+            </div>
+
+            {archiveCheck.loading ? (
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', fontSize:'12px', color:'var(--text-muted)', padding:'12px 0' }}>
+                <Loader2 style={{ width:14, height:14, animation:'spin 1s linear infinite' }} />
+                Checking dependencies…
+              </div>
+            ) : (
+              <>
+                {archiveCheck.result.dependencies.length === 0 ? (
+                  <p style={{ fontSize:'12px', color:'var(--text-secondary)', marginBottom:'14px' }}>
+                    No dependencies found. This KPI is safe to archive — historical data, if any appears later, is always preserved.
+                  </p>
+                ) : (
+                  <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'14px' }}>
+                    {archiveCheck.result.dependencies.map((dep) => (
+                      <div key={dep.type} style={{
+                        padding:'9px 11px', borderRadius:'8px', fontSize:'12px',
+                        background: dep.type === 'active_profile' || dep.type === 'draft_profile' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)',
+                        border: `1px solid ${dep.type === 'active_profile' || dep.type === 'draft_profile' ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}`,
+                      }}>
+                        <div style={{ fontWeight:600, color: dep.type === 'active_profile' || dep.type === 'draft_profile' ? '#f87171' : '#f59e0b' }}>
+                          {dep.reason}
+                        </div>
+                        <div style={{ color:'var(--text-muted)', marginTop:'3px' }}>{dep.recommendedAction}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!archiveCheck.result.safe && (
+                  <div style={{ display:'flex', gap:'8px', padding:'8px 12px', borderRadius:'8px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.15)', fontSize:'11px', color:'#f87171', marginBottom:'14px' }}>
+                    <AlertTriangle style={{ width:13, height:13, flexShrink:0, marginTop:1 }} />
+                    Archive is blocked until this KPI is removed from the active/draft profile(s) listed above.
+                  </div>
+                )}
+
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button onClick={() => setArchiveCheck(null)} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                    {archiveCheck.result.safe ? 'Cancel' : 'Close'}
+                  </button>
+                  {archiveCheck.result.safe && (
+                    <button onClick={confirmArchive} className="btn btn-primary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
+                      Archive
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

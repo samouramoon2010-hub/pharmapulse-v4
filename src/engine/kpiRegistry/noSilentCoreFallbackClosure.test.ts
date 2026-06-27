@@ -233,6 +233,12 @@ describe('No Silent Core Fallback Closure — Proof 4: no active production logi
     'src/engine/kpiRegistry/dynamicKpiFoundation.ts',
     'src/engine/kpiAnalyticsEngine.ts',
     'src/engine/executive/dynamicExecutiveAdapter.ts',
+    // KPI & Targets Bundle (DX-4): reads/preserves isCore from the
+    // existing record when committing a bulk-imported KPI definition —
+    // CRUD fidelity (never strip a field the import has no column for),
+    // not analytics gating. Bulk import always writes isCore: false for
+    // NEW KPIs and never modifies a protected core KPI's isCore at all.
+    'src/services/dataExchange/adapters/kpiRegistryAdapter.ts',
   ])
 
   it('every file referencing .isCore is either a known non-gating consumer or absent entirely', () => {

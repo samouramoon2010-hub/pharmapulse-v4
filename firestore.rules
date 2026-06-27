@@ -229,7 +229,20 @@ service cloud.firestore {
                     // is a fake demo ID, not the admin's real Auth UID. This bypass
                     // allows admin to write demo entries. isDemoData:true is required
                     // so real pharmacist entries are completely unaffected.
-                    || (isAdmin() && request.resource.data.get('isDemoData', false) == true);
+                    || (isAdmin() && request.resource.data.get('isDemoData', false) == true)
+                    // DX-6 Actuals Import bypass: admin bulk-importing REAL KPI
+                    // actuals on behalf of another user (pharmacist or a branch's
+                    // managerUid). isOwnData() blocks this because the payload's
+                    // userId is the target user, not the admin's own Auth UID.
+                    // Narrowly scoped, mirroring the isDemoData bypass above:
+                    // requires importedViaDataExchange:true AND a non-empty
+                    // importBatchRef (the import_jobs jobId) so every such write
+                    // is traceable to a specific admin-confirmed import job —
+                    // never a silent, unattributed cross-user write.
+                    || (isAdmin()
+                        && request.resource.data.get('importedViaDataExchange', false) == true
+                        && request.resource.data.get('importBatchRef', '') is string
+                        && request.resource.data.get('importBatchRef', '') != '');
 
       allow update: if isAny() && (
         (resource.data.userId == uid() && isOwnData()) ||
@@ -396,6 +409,34 @@ service cloud.firestore {
       );
     }
 
+
+    // ════════════════════════════════════════════════════════
+    // IMPORT JOBS (Data Exchange Studio — DX-2/DX-3)
+    // ════════════════════════════════════════════════════════
+
+    // import_jobs: persistent job record for the generic Import Job
+    // Engine (src/services/dataExchange/). Bulk onboarding (Groups/
+    // Branches/Pharmacists/Assignments) is admin-only in this bundle —
+    // matches the existing admin-only write rules on pharmacies/
+    // districts/regions. Org/scope isolation is enforced by createdBy
+    // ownership, same pattern as staging_entries above.
+    match /import_jobs/{jobId} {
+      allow read:   if isAny() && (resource.data.createdBy == uid() || isAdmin());
+      allow create: if isAdmin() && request.resource.data.createdBy == uid();
+      allow update: if isAdmin() && resource.data.createdBy == uid();
+      allow delete: if isAdmin() && resource.data.createdBy == uid();
+
+      // Staged rows for this job — never written directly to any
+      // production collection without passing through the job's
+      // validate -> preview -> commit lifecycle.
+      match /rows/{rowId} {
+        allow read: if isAny() && (
+          get(/databases/$(database)/documents/import_jobs/$(jobId)).data.createdBy == uid() || isAdmin()
+        );
+        allow create, update, delete: if isAdmin() &&
+          get(/databases/$(database)/documents/import_jobs/$(jobId)).data.createdBy == uid();
+      }
+    }
 
     // ════════════════════════════════════════════════════════
     // KPI REGISTRY

@@ -185,9 +185,12 @@ function TargetCard({ target, mtdEntries, dp, onEdit, onDelete, onCopy, kpiField
         </div>
       </div>
 
-      {/* Row 2 — KPI targets grid */}
+      {/* Row 2 — KPI targets grid. PR-1E4 fix: was a fixed
+          repeat(5,1fr) — with 5+ KPI columns this compressed each
+          column below 430px to an illegible width. auto-fit/minmax
+          reflows onto additional rows instead of compressing further. */}
       <div style={{
-        display:'grid', gridTemplateColumns:'repeat(5,1fr)',
+        display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(64px, 1fr))',
         borderTop:'1px solid var(--border-subtle)', padding:'8px 14px', gap:'4px',
       }}>
         {kpiFields.map(({ key, label, color, kpi }) => {
@@ -435,7 +438,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving, targetInputConfi
     setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
     if (!rows[id]) {
       const ph = pharmacies.find(p => p.id === id)
-      setRows(r => ({ ...r, [id]: { name: ph?.name || id, ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, 0])) } }))
+      setRows(r => ({ ...r, [id]: { name: ph?.name || 'Unnamed branch', ...Object.fromEntries(targetInputConfigs.map(c => [c.targetFieldName, 0])) } }))
     }
   }
 
@@ -506,7 +509,15 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving, targetInputConfi
             </div>
           </div>
 
-          {/* KPI table */}
+          {/* KPI table — PR-1E4: bulk multi-branch × multi-KPI editable
+              grid. Converting this to cards would make simultaneous
+              cross-branch comparison while typing harder, not easier —
+              classified Desktop-preferred with the existing horizontal
+              scroll kept as the documented mobile fallback (one of the
+              4 patterns the program allows; not a card list). */}
+          <p className="sm:hidden" style={{ fontSize:'11px', color:'var(--text-warning, #b45309)', marginBottom:'6px' }}>
+            تعديل الأهداف لعدة فروع دفعة واحدة يعمل بشكل أفضل على شاشة أكبر.
+          </p>
           {selected.length > 0 && (
             <div style={{ overflowX:'auto' }}>
               <table style={{ width:'100%', borderCollapse:'collapse' }}>
@@ -526,7 +537,7 @@ function BulkModal({ open, onClose, pharmacies, onSave, saving, targetInputConfi
                   {selected.map(id => (
                     <tr key={id}>
                       <td style={{ padding:'6px 10px', fontSize:'12px', fontWeight:500, color:'var(--text-primary)', borderBottom:'1px solid var(--border-subtle)', whiteSpace:'nowrap' }}>
-                        {rows[id]?.name || id}
+                        {rows[id]?.name || 'Unnamed branch'}
                       </td>
                       {kpiFields.map(({ key }) => (
                         <td key={key} style={{ padding:'4px 5px', borderBottom:'1px solid var(--border-subtle)' }}>

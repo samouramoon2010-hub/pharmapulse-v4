@@ -19,16 +19,26 @@ import { logAction, AUDIT_ACTION } from '../services/auditService'
 // userService.updateUserProfile() for those.
 const SELF_UPDATE_WHITELIST = ['displayName', 'phone']
 
+// PR-1F Gate 3 — translated from Arabic to English business-facing
+// copy and extended with the two previously-unmapped codes
+// (auth/invalid-email, auth/user-disabled). This map has exactly one
+// consumer surface: the login pages (LoginPageV2/V3), which are both
+// deliberately English-only per the approved Identity Gateway V3
+// design — no other part of the app reads useAuthStore().error.
 const AUTH_ERROR_MAP = {
-  'auth/user-not-found':         'البريد الإلكتروني غير مسجّل',
-  'auth/wrong-password':         'كلمة المرور غير صحيحة',
-  'auth/invalid-credential':     'البريد أو كلمة المرور غير صحيحة',
-  'auth/too-many-requests':      'تم تجاوز عدد المحاولات — انتظر قليلاً',
-  'auth/network-request-failed': 'تحقق من الاتصال بالإنترنت',
-  'auth/email-already-in-use':   'البريد مستخدم مسبقاً',
-  'auth/weak-password':          'كلمة المرور ضعيفة (6 أحرف كحد أدنى)',
-  'no-profile':                  'الحساب غير مرتبط بملف مستخدم — تواصل مع الإدارة',
+  'auth/user-not-found':         'No account found with that email.',
+  'auth/wrong-password':         'Incorrect password. Please try again.',
+  'auth/invalid-credential':     'Incorrect email or password.',
+  'auth/invalid-email':          'That email address looks invalid.',
+  'auth/user-disabled':          'This account has been disabled. Contact your administrator.',
+  'auth/too-many-requests':      'Too many attempts. Please wait a moment and try again.',
+  'auth/network-request-failed': 'Network error. Check your connection and try again.',
+  'auth/email-already-in-use':   'That email address is already in use.',
+  'auth/weak-password':          'Password is too weak (6 characters minimum).',
+  'no-profile':                  'This account is not linked to a user profile. Contact your administrator.',
 }
+const GENERIC_AUTH_ERROR = 'Unable to sign in. Please try again.'
+const GENERIC_RESET_ERROR = 'Unable to send the reset link. Please try again.'
 
 export const useAuthStore = create(
   persist(
@@ -82,7 +92,7 @@ export const useAuthStore = create(
           set({ user: { uid: user.uid, email: user.email }, userProfile: profile, _loggingIn: false })
           return profile
         } catch (err) {
-          const msg = AUTH_ERROR_MAP[err.code] || AUTH_ERROR_MAP[err.message] || err.message || 'خطأ في تسجيل الدخول'
+          const msg = AUTH_ERROR_MAP[err.code] || AUTH_ERROR_MAP[err.message] || GENERIC_AUTH_ERROR
           set({ error: msg, _loggingIn: false })
           throw new Error(msg)
         }
@@ -97,7 +107,11 @@ export const useAuthStore = create(
       },
 
       resetPassword: async (email) => {
-        await sendPasswordResetEmail(auth, email)
+        try {
+          await sendPasswordResetEmail(auth, email)
+        } catch (err) {
+          throw new Error(AUTH_ERROR_MAP[err.code] || GENERIC_RESET_ERROR)
+        }
       },
 
       changePassword: async (currentPw, newPw) => {

@@ -90,6 +90,14 @@ export interface ElementContext {
    * Mirrors V1: el.thresholdOverride ?? basket.thresholdRule
    */
   thresholdOverride?: ThresholdRule
+
+  /**
+   * PR-1I — missing-data weight redistribution (Rule A).
+   * Set by WEIGHTED_AVERAGE_AGGREGATOR (legacy) / WEIGHT_CONTRIBUTION_APPLIER
+   * (SMARTS): weight / Σ(weight of applicable elements in the basket).
+   * 0 when dataAvailable is false. Backwards-compatible (optional).
+   */
+  normalizedWeight?: number
 }
 
 /**
@@ -125,6 +133,14 @@ export interface BasketContext {
   // Validity
   isValid?:      boolean
   invalidReason?: string
+
+  /**
+   * PR-1I — missing-data weight redistribution (Rule A).
+   * Sum of element weights with dataAvailable=true in this basket; the
+   * denominator each applicable element's normalizedWeight is computed
+   * against. 0 when no element in the basket has data. Backwards-compatible.
+   */
+  applicableWeightSum?: number
 }
 
 /**
@@ -150,8 +166,12 @@ export interface EvaluationPipelineContext {
   baskets:    BasketContext[]
 
   // Final outputs (set by BASKET_SCORE_AGGREGATOR)
-  finalScore?:             number
-  normalizedFinalScorePct?: number
+  finalScore?:             number   // rounded to 2 decimals (PR-1I Rule B)
+  normalizedFinalScorePct?: number  // rounded to 2 decimals (PR-1I Rule B)
+  /** PR-1I — unrounded finalScore, preserved for traceability. */
+  rawFinalScore?:             number
+  /** PR-1I — unrounded normalizedFinalScorePct, preserved for traceability. */
+  rawNormalizedFinalScorePct?: number
   ratingLabel?:            string
   ratingLabelAr?:          string
   ratingScore?:            number

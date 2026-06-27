@@ -49,6 +49,8 @@ export const COL = {
   SHADOW_EVALUATION_LOGS: 'shadow_evaluation_logs',
   // Runtime feature flags — read-only config for operational switches
   SYSTEM_CONFIG:       'system_config',
+  // Data Exchange Studio — DX-2/DX-3 Import Job persistence
+  IMPORT_JOBS:         'import_jobs',
 }
 
 // ── Config from .env ─────────────────────────────────────────

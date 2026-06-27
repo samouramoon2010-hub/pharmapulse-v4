@@ -6,6 +6,7 @@ import { ShieldCheck, Search, ChevronDown, ChevronUp, Clock } from 'lucide-react
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
 import DataTable, { StatusPill } from '../../components/ui/DataTable'
+import MobileRankCard from '../../components/ui/MobileRankCard'
 
 const ACTION_STYLE = {
   create:       { label:'Created',  status:'active'  },
@@ -166,7 +167,38 @@ export default function AuditLogsPage() {
             Loading logs...
           </div>
         ) : (
-          <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <>
+          {/* PR-1E4 — phone-width card list, same `filtered.slice(0,100)`
+              data/order as the table below (mobile-blueprint.md rule).
+              The expand toggle reuses the exact same `expanded` state
+              and `ExpandedLog` component the table's row already uses —
+              no duplicated diff-rendering logic. Raw userId remains
+              visible here (truncated) — this page IS the authorized
+              diagnostics surface the technical-data exception applies to. */}
+          <div className="sm:hidden space-y-2">
+            {filtered.slice(0,100).map((log) => {
+              const cfg = ACTION_STYLE[log.action] || { label: log.action, status: 'neutral' }
+              return (
+                <div key={log.id}>
+                  <MobileRankCard
+                    title={cfg.label}
+                    subtitle={`${log.collection || '—'} · ${log.userId?.slice(0,12) || '—'}…`}
+                    primaryMetric={{ label: 'Time', value: fmt(log.timestamp) }}
+                    secondaryMetrics={[{ label: 'Role', value: log.userRole || '—' }]}
+                    actions={(
+                      <button onClick={() => setExpanded(expanded===log.id?null:log.id)}
+                        className="btn btn-ghost btn-sm gap-1 text-xs">
+                        {expanded===log.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        تفاصيل
+                      </button>
+                    )}
+                  />
+                  {expanded === log.id && <ExpandedLog log={log} />}
+                </div>
+              )
+            })}
+          </div>
+          <table className="hidden sm:table" style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
               <tr>
                 {columns.map((col) => (
@@ -211,6 +243,7 @@ export default function AuditLogsPage() {
               ))}
             </tbody>
           </table>
+          </>
         )}
         {!loading && filtered.length === 0 && (
           <div style={{ padding:'40px', textAlign:'center', color:'var(--text-muted)', fontSize:'13px' }}>

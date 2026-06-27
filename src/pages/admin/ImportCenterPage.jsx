@@ -371,6 +371,17 @@ export default function ImportCenterPage() {
                 <Eye className="w-4 h-4 text-brand-400"/>
                 <span className="text-sm font-semibold text-slate-200">معاينة (أول 5 صفوف)</span>
               </div>
+              {/* PR-1E4 — this preview's column count is whatever the
+                  uploaded file's schema has (arbitrary, unknown ahead of
+                  time) — a raw tabular preview for column-mapping
+                  verification, not a fixed entity-row table. Cards would
+                  be less readable for this, not more, so this stays
+                  Desktop-preferred with horizontal scroll (already
+                  present) as the documented mobile fallback; rows are
+                  already capped at 5. */}
+              <p className="sm:hidden px-4 pt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                معاينة الملف الكامل تعمل بشكل أفضل على شاشة أكبر.
+              </p>
               <div className="overflow-x-auto">
                 <table className="tbl text-xs">
                   <thead><tr>{schema.columns.map((c)=><th key={c}>{c}</th>)}</tr></thead>

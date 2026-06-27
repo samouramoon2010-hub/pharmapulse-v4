@@ -15,6 +15,10 @@ import {
   BarChart3, Users, Building2, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { useAuthStore }                   from '../../store/authStore'
+// @ts-expect-error — pharmacyStore.js has no .d.ts (same pre-existing gap as its other .tsx importers)
+import { usePharmacyStore }               from '../../store/pharmacyStore'
+// @ts-expect-error — MobileRankCard.jsx has no .d.ts (same pattern as usePharmacyStore above)
+import MobileRankCard                     from '../../components/ui/MobileRankCard'
 import { subscribePublishedProfiles }     from '../../services/evaluationRegistryService'
 import { generateAndPersistAllRankings }  from '../../ranking/ranking-service'
 import { subscribeRankingSnapshots }      from '../../ranking/repository'
@@ -61,6 +65,15 @@ function currentMonthId(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// Display-only humanizer for a branch classification id (e.g. 'hub' →
+// 'Hub'). The cohort grouping above already title-cases the same value
+// for section labels; this keeps the per-row "Classification" cell
+// consistent rather than showing the raw lowercase string.
+function classificationLabel(id?: string): string {
+  if (!id) return '—'
+  return id.charAt(0).toUpperCase() + id.slice(1)
+}
+
 function MovementBadge({ mv, dir }: { mv?: number; dir?: string }) {
   const direction = dir ?? (mv === undefined ? undefined : mv < 0 ? 'up' : mv > 0 ? 'down' : 'unchanged')
   if (direction === 'new') return <span style={{ fontSize: '10px', color: 'var(--accent)', fontWeight: 600 }}>NEW</span>
@@ -87,7 +100,31 @@ function BranchCohortTable({ label, snapshots }: { label: string; snapshots: Sto
         textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>
         {label} · {snapshots.length} branches
       </div>
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+      {/* PR-1E3 — phone-width card list, same `snapshots` data/order as
+          the table below. No re-sort, no re-filter: identical rows. */}
+      <div className="sm:hidden space-y-2">
+        {snapshots.map((s) => {
+          const branchAch  = (s as any).branchAchievementPct as number | undefined
+          const pharmCount = (s as any).pharmacistCount      as number | undefined
+          const movDir     = (s as any).movementDirection    as string | undefined
+          return (
+            <MobileRankCard
+              key={s.snapshotId}
+              rank={s.currentRank}
+              title={s.entityName ?? 'Unknown'}
+              subtitle={classificationLabel(s.classificationId)}
+              primaryMetric={{ label: 'Score', value: `${s.cappedScore.toFixed(1)}%`, color: s.cappedScore >= 85 ? '#22c55e' : s.cappedScore >= 70 ? '#f59e0b' : 'var(--text-primary)' }}
+              secondaryMetrics={[
+                { label: 'Achievement', value: branchAch !== undefined ? `${branchAch.toFixed(1)}%` : '—' },
+                { label: 'Pharmacists', value: pharmCount ?? '—' },
+                { label: 'Prev', value: s.previousRank ?? '—' },
+              ]}
+              movement={<MovementBadge mv={s.rankMovement} dir={movDir} />}
+            />
+          )
+        })}
+      </div>
+      <div className="hidden sm:block" style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
           <thead>
             <tr style={{ background: 'var(--bg-surface)' }}>
@@ -131,7 +168,7 @@ function BranchCohortTable({ label, snapshots }: { label: string; snapshots: Sto
                     <MovementBadge mv={s.rankMovement} dir={movDir} />
                   </td>
                   <td style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '11px' }}>
-                    {s.classificationId}
+                    {classificationLabel(s.classificationId)}
                   </td>
                 </tr>
               )
@@ -145,10 +182,35 @@ function BranchCohortTable({ label, snapshots }: { label: string; snapshots: Sto
 
 // ── Pharmacist cohort table ───────────────────────────────────
 
-function PharmacistCohortTable({ snapshots }: { snapshots: StoredRankingSnapshot[] }) {
+function PharmacistCohortTable({ snapshots, pharmacyNameById }: { snapshots: StoredRankingSnapshot[]; pharmacyNameById: Map<string, string> }) {
   return (
     <div style={{ marginBottom: '20px' }}>
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+      {/* PR-1E3 — phone-width card list, same `snapshots` data/order as
+          the table below. No re-sort, no re-filter: identical rows. */}
+      <div className="sm:hidden space-y-2">
+        {snapshots.map((s) => {
+          const ach     = (s as any).achievementPct    as number | undefined
+          const kpis    = (s as any).kpisAbove100Count as number | undefined
+          const pharmId = (s as any).pharmacyId        as string | undefined
+          const movDir  = (s as any).movementDirection as string | undefined
+          return (
+            <MobileRankCard
+              key={s.snapshotId}
+              rank={s.currentRank}
+              title={s.entityName ?? 'Unknown'}
+              subtitle={pharmId !== undefined ? (pharmacyNameById.get(pharmId) ?? '—') : '—'}
+              primaryMetric={{ label: 'Score', value: `${s.cappedScore.toFixed(1)}%`, color: s.cappedScore >= 85 ? '#22c55e' : s.cappedScore >= 70 ? '#f59e0b' : 'var(--text-primary)' }}
+              secondaryMetrics={[
+                { label: 'Achievement', value: ach !== undefined ? `${ach.toFixed(1)}%` : '—' },
+                { label: 'KPIs≥100', value: kpis ?? '—' },
+                { label: 'Prev', value: s.previousRank ?? '—' },
+              ]}
+              movement={<MovementBadge mv={s.rankMovement} dir={movDir} />}
+            />
+          )
+        })}
+      </div>
+      <div className="hidden sm:block" style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
           <thead>
             <tr style={{ background: 'var(--bg-surface)' }}>
@@ -177,7 +239,7 @@ function PharmacistCohortTable({ snapshots }: { snapshots: StoredRankingSnapshot
                     {s.entityName ?? 'Unknown'}
                   </td>
                   <td style={{ padding: '8px 12px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                    {pharmId !== undefined ? 'Unknown Branch' : '—'}
+                    {pharmId !== undefined ? (pharmacyNameById.get(pharmId) ?? '—') : '—'}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600,
                     color: s.cappedScore >= 85 ? '#22c55e' : s.cappedScore >= 70 ? '#f59e0b' : 'var(--text-primary)' }}>
@@ -209,6 +271,7 @@ function PharmacistCohortTable({ snapshots }: { snapshots: StoredRankingSnapshot
 
 export default function RankingsPage() {
   const { userProfile } = useAuthStore()
+  const { pharmacies, subscribe: subPharmacies } = usePharmacyStore()
 
   const [periodId,     setPeriodId]     = useState(currentMonthId())
   const [profiles,     setProfiles]     = useState<EvaluationProfile[]>([])
@@ -228,6 +291,18 @@ export default function RankingsPage() {
       if (list.length > 0 && !selectedProf) setSelectedProf(list[0])
     })
   }, [])
+
+  useEffect(() => subPharmacies(), [])
+
+  // Canonical pharmacy-name resolver — replaces the old hardcoded
+  // placeholder string. A pharmacyId with no match (e.g. a deleted
+  // pharmacy) renders the same '—' used elsewhere on this page for
+  // missing data, not a fabricated label.
+  const pharmacyNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of pharmacies) m.set(p.id, p.name)
+    return m
+  }, [pharmacies])
 
   useEffect(() => {
     if (!selectedProf) return
@@ -604,9 +679,14 @@ export default function RankingsPage() {
         <div style={card}>
           <div style={sectionTitle}>
             <Trophy size={15} />
-            {activeTab === 'branch' ? 'Branch Rankings' : 'Pharmacist Rankings (Company-Wide)'} · {periodId}
+            {activeTab === 'branch' ? 'Branch Rankings (Company-Wide)' : 'Pharmacist Rankings (Company-Wide)'} · {periodId}
             <span style={{ fontWeight: 400, fontSize: '12px', color: 'var(--text-muted)' }}>
               {snapshots.length} {activeTab === 'branch' ? 'branches' : 'pharmacists'} · {cohortMap.size} cohort{cohortMap.size !== 1 ? 's' : ''}
+              {diagnostics && (
+                activeTab === 'branch'
+                  ? ` · Showing ${diagnostics.branchesRanked} of ${diagnostics.branchesRanked + diagnostics.branchesExcluded} eligible`
+                  : ` · Showing ${diagnostics.pharmacistsRanked} of ${diagnostics.pharmacistsRanked + diagnostics.pharmacistsExcluded} eligible`
+              )}
             </span>
           </div>
           {activeTab === 'branch'
@@ -617,7 +697,7 @@ export default function RankingsPage() {
                   snapshots={cohortMap.get(key)!}
                 />
               ))
-            : <PharmacistCohortTable snapshots={snapshots} />
+            : <PharmacistCohortTable snapshots={snapshots} pharmacyNameById={pharmacyNameById} />
           }
         </div>
       ) : (

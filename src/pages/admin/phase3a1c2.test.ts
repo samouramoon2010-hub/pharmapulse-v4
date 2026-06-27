@@ -137,7 +137,7 @@ describe('3A-1C2 UsersPage — handleSave guards', () => {
   it('handleSave admin edit sends full payload including role and status', async () => {
     const s = await usersPageSrc()
     const saveIdx = s.indexOf('const handleSave = async')
-    const block = s.slice(saveIdx, saveIdx + 1200)
+    const block = s.slice(saveIdx, saveIdx + 1600)
     // The full payload (non-territory branch) includes role, status, pharmacyId
     expect(block).toContain('form.role')
     expect(block).toContain('form.status')
@@ -171,9 +171,10 @@ describe('3A-1C2 UsersPage — modal restricted for territory edit', () => {
 
   it('Branch section guarded with (!isTerritoryRole || isNew)', async () => {
     const s = await usersPageSrc()
-    // The branch section condition was extended to include (!isTerritoryRole || isNew).
-    // Search for the combined guard expression directly.
-    expect(s).toContain('needsPharmacy && (!isTerritoryRole || isNew)')
+    // PR-1B: the branch-specific needsPharmacy flag was replaced by the
+    // canonical requiredScopeType === 'branch' check (roleScope.js), but the
+    // territory-edit guard combinator is unchanged — still required here.
+    expect(s).toContain("requiredScopeType === 'branch' && (!isTerritoryRole || isNew)")
   })
 
   it('Status section wrapped in (!isTerritoryRole || isNew) guard', async () => {

@@ -9,6 +9,14 @@
    Designed & Developed by Samir Goda
    ══════════════════════════════════════════════════════════ */
 
+/* PR-1E6 — defensive guard: three real sub-375px overflow sources were
+   found and fixed in this gate (BranchLeaderboard's fixed grid columns,
+   the Dashboard Identity bar/exec-kpi-row, the KPI tile grid's
+   minmax floor). This rule does not replace those fixes — it's a
+   belt-and-suspenders backstop so any future fixed-width regression
+   clips instead of producing a page-wide horizontal scrollbar. */
+html, body { overflow-x: hidden; }
+
 :root {
   /* ── Layout ─────────────────────────────────────────────── */
   --sidebar-w:         256px;
@@ -439,7 +447,14 @@
 
   /* ── MOBILE NAV ──────────────────────────────────────────── */
   .mobile-nav {
-    position: fixed; bottom: 0; left: 0; right: 0;
+    /* PR-1E6 — `left:0; right:0` on a fixed element under dir="rtl"
+       resolved against a wider-than-viewport containing block in this
+       browser engine whenever any other element briefly caused
+       horizontal overflow (confirmed via real-browser measurement: this
+       element measured 422px wide at a 375px viewport). `left:0; width:
+       100%` pins the same visual position without depending on the
+       right-edge computation. */
+    position: fixed; bottom: 0; left: 0; width: 100%;
     z-index: 40;
     display: flex;
     align-items: center;
@@ -451,9 +466,21 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
   .mobile-nav-item {
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
     cursor: pointer;
-    padding: 0.375rem 0.875rem;
+    flex: 1;
+    /* PR-1E6 — flex items default to min-width:auto, i.e. their
+       content's min-content size. With 5 items (some 2-word labels
+       like "Executive BI"), each item's min-content settled at ~84px,
+       totaling 420px+ — wider than a 375px viewport — so the row never
+       actually compressed to fit despite flex:1, causing real
+       horizontal overflow of the whole page (confirmed via real-browser
+       measurement). min-width:0 lets flex:1 shrink items below their
+       label's natural width; the label wraps onto a second line
+       instead of forcing overflow. */
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.375rem 0.5rem;
     color: var(--text-muted);
     font-size: 10px;
     font-weight: 500;
@@ -462,17 +489,84 @@
     border-radius: 0.5rem;
   }
   .mobile-nav-item.active { color: var(--text-brand); }
-  .mobile-fab {
-    display: flex; align-items: center; justify-content: center;
-    width: 44px; height: 44px;
-    border-radius: 0.75rem;
-    background: var(--brand-500);
-    color: #ffffff;
-    transform: translateY(-8px);
-    box-shadow: 0 4px 14px rgba(13,107,116,0.35);
-    transition: transform 0.2s ease, filter 0.15s ease;
-  }
-  .mobile-fab:hover { transform: translateY(-10px); filter: brightness(1.08); }
+
+  /* PR-1E2 — KPI Entry's sticky save bar (position: sticky, bottom-anchored)
+     was added in PR-1D with a flat `bottom-2`. At mobile widths the fixed
+     bottom nav (z-40) sits on top of that offset and can cover the save
+     button. Below lg, push the save bar up by the bottom-nav height plus
+     its own safe-area inset so the two never overlap. */
+  .sticky-save-bar { bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 8px); }
+}
+
+/* PR-1E5 — icon buttons (.btn-icon is 32px, below the ~44px touch-target
+   guideline) grow their tap target on touch-primary widths only (below
+   Tailwind's lg breakpoint, matching where MobileNav/the mobile drawer
+   take over); the icon's own visual size (Tailwind w-4/w-5 on the <svg>)
+   is unaffected, and desktop's mouse-precision sizing is unchanged.
+   min-width/min-height win over the smaller explicit width/height per the
+   CSS box model, so no !important is needed. */
+@media (max-width: 1023.98px) {
+  .btn-icon { min-width: 44px; min-height: 44px; }
+}
+
+/* PR-1E6 — BranchLeaderboard's header/row grid (Dashboard's "Branch
+   Rankings" card, also used on the Executive/Rankings surfaces) had a
+   fixed 6-column gridTemplateColumns (28+52+60+80+64=284px of fixed
+   tracks) that didn't fit below ~430px — confirmed via real-browser
+   measurement (scrollWidth 422px vs a 375px viewport), forcing the
+   whole card to overflow horizontally. The Risk/Trend columns are
+   hidden below sm (see BranchLeaderboard.jsx), so the grid only needs
+   4 narrower tracks there. */
+.leaderboard-row { grid-template-columns: 28px 1fr 52px 60px 80px 64px; }
+@media (max-width: 639.98px) {
+  .leaderboard-row { grid-template-columns: 22px 1fr 48px 44px; }
+}
+
+/* PR-1E6 — Dashboard's "Identity bar" Executive KPI cards row had a
+   fixed repeat(4,1fr), leaving ~85px per card after padding at a 375px
+   viewport — too narrow for text like "On track to exceed target"
+   (confirmed via real-browser measurement: this row's own scrollWidth
+   exceeded its clientWidth by ~75px). Reflows to 2x2 below sm — same 4
+   cards, same fields, just rearranged. */
+.exec-kpi-row { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 639.98px) {
+  .exec-kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* PR-1E6 — Dashboard's KPI Achievement tile grid (minmax(220px,1fr),
+   auto-fit) still rendered 2 sub-220px tracks at a 375px viewport
+   instead of collapsing to 1 column, overflowing the viewport
+   (confirmed via real-browser measurement). Force a hard 1-column
+   floor below 480px so the grid can never produce a track narrower
+   than its own minmax minimum. */
+@media (max-width: 479.98px) {
+  .kpi-tile-grid { grid-template-columns: 1fr !important; }
+}
+
+/* PR-1E6 — Profile Studio's "All Profiles" / "Simulation Runs" row used
+   a fixed gridTemplateColumns: '1fr 320px'. At a 375px viewport the
+   first column resolved to ~39px (375 - 320 - 16px gap), crushing the
+   profile list/filter bar into unreadable wrapped text (confirmed via
+   screenshot, no horizontal overflow — the damage was column-width
+   starvation, not scrollWidth). Stacks to one column below 1024px;
+   DOM order already puts the profile list first, so it reads correctly
+   stacked with no field dropped. */
+@media (max-width: 1023.98px) {
+  .profile-studio-grid { grid-template-columns: 1fr !important; }
+}
+
+/* PR-1E6 — Run Evaluation's Single User (4 cols) and Bulk Branch (3
+   cols) control rows used fixed gridTemplateColumns with no breakpoint.
+   At a 375px viewport each <select width:100%> cell narrowed to ~84px,
+   clipping its own placeholder text ("Select branch…") inside the
+   control (confirmed via screenshot — no page-level scrollWidth
+   overflow, the clipping happened inside the fixed-width select itself).
+   Stacks to one column below 640px; same fields, same order. */
+@media (max-width: 639.98px) {
+  .eval-run-fields-4, .eval-run-fields-3 { grid-template-columns: 1fr !important; }
+}
+@media (min-width: 1024px) {
+  .sticky-save-bar { bottom: 8px; }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -517,6 +611,17 @@
 .animate-sidebar-in { animation: sidebar-in 0.3s cubic-bezier(0.2,0,0,1) both; }
 
 .delay-50  { animation-delay: 50ms  !important; }
+
+/* PR-1D5 — respect prefers-reduced-motion: neutralize decorative
+   animations/transitions globally rather than per-component. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 .delay-100 { animation-delay: 100ms !important; }
 .delay-150 { animation-delay: 150ms !important; }
 .delay-200 { animation-delay: 200ms !important; }
@@ -750,9 +855,15 @@
   background: var(--border-subtle);
 }
 
-/* ── Command bar (topbar search area) ────────────────────── */
+/* ── Command bar (topbar search area) ──────────────────────
+   PR-1E6 Final Pass — display was previously hardcoded to flex
+   here with no media query, so it always beat the JSX's own
+   `hidden md:flex` Tailwind utility classes at the same
+   specificity (same-specificity, later-in-cascade wins) — the
+   trigger rendered and floated over mobile content below the
+   md breakpoint instead of staying hidden. display is now left
+   to the Tailwind classes already on the element. */
 .cmd-trigger {
-  display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;

@@ -408,8 +408,10 @@ describe('SMARTS sales fix — scope guard', () => {
 
   it('rating normalization is present (Option A implemented)', async () => {
     const src = await import('../../engine/evaluationEngine/evaluationEngine.ts?raw')
-    // finalScore is still Σ basket.weightedScore — unchanged
-    expect(src.default).toContain('finalScore = basketResults.reduce')
+    // finalScore is still Σ basket.weightedScore — unchanged in formula.
+    // PR-1I renamed the raw (pre-rounding) sum to rawFinalScore; the
+    // official finalScore is roundToTwoDecimals(rawFinalScore).
+    expect(src.default).toContain('rawFinalScore = basketResults.reduce')
     // normalizedFinalScorePct is computed before rating threshold matching
     expect(src.default).toContain('normalizedFinalScorePct')
     // Rating uses the normalized value, not raw finalScore

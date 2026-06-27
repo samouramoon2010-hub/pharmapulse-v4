@@ -221,7 +221,8 @@ describe('7 — Personal Identity Signature is presentation-only', () => {
 
   it('Sidebar.jsx falls back to original markup for non-signature names', () => {
     expect(sidebarSrc).toContain('isSignatureIdentity(userProfile?.displayName)')
-    expect(sidebarSrc).toContain('{ROLE_LABELS[role] || role}')
+    // PR-1B: role label lookup moved to the canonical roleScope contract
+    expect(sidebarSrc).toContain('{getRoleLabel(role)}')
     expect(sidebarSrc).toContain('<PersonalIdentitySignature name={userProfile.displayName} />')
   })
 

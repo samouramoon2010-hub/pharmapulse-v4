@@ -192,6 +192,17 @@ export default function DynamicKpiShadowPage() {
         <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
           Internal diagnostics only. Admin-only visibility into Dynamic KPI Foundation readiness.
         </p>
+        {/* PR-1E4 — developer/admin-only diagnostics classification: this
+            page stays out of normal navigation (gated by Sidebar.jsx's
+            devOnly filter, per PR-1C); the dense comparison tables below
+            are best read on a larger screen, so this is a labeled
+            desktop-preferred workflow rather than a card redesign. The
+            table wrappers were fixed from overflow:hidden (silently
+            clipped content) to overflow:auto (scrollable) as a real,
+            disclosed mobile-safety fix. */}
+        <p className="sm:hidden" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+          أفضل تجربة على شاشة أكبر — الجداول التفصيلية تتمرر أفقياً عند الحاجة.
+        </p>
       </div>
 
       {/* ── Governance banner ── */}
@@ -252,7 +263,7 @@ export default function DynamicKpiShadowPage() {
               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Legacy Fallback Used</div>
             </div>
           </div>
-          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface)' }}>
@@ -308,7 +319,7 @@ export default function DynamicKpiShadowPage() {
       {parityResults && (
         <div style={card}>
           <div style={sectionTitle}><FlaskConical size={14} />Dynamic KPI Exposure Readiness</div>
-          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface)' }}>
@@ -349,7 +360,7 @@ export default function DynamicKpiShadowPage() {
       {/* ── Registry-derived display profile summary ── */}
       <div style={card}>
         <div style={sectionTitle}><Info size={14} />Registry-Derived Display Profile Summary</div>
-        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)' }}>
@@ -407,7 +418,7 @@ export default function DynamicKpiShadowPage() {
             <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Dynamic Pilot Coverage (surfaces)</div>
           </div>
         </div>
-        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)' }}>
@@ -494,7 +505,7 @@ export default function DynamicKpiShadowPage() {
         <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
           Final Core Assumption Sweep
         </div>
-        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)' }}>

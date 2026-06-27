@@ -222,7 +222,7 @@ describe('3A-1C1 userService — pre-Auth territory guard', () => {
     const s = await userServiceSrc()
     const createIdx = s.indexOf('export async function createUser')
     // Long function signature (~500 chars CRLF) before the guard body — use 1200
-    const block = s.slice(createIdx, createIdx + 1200)
+    const block = s.slice(createIdx, createIdx + 2400)
     expect(block).toContain('TERRITORY_ROLES_SVC')
     expect(block).toContain('SUPERVISOR_CREATABLE_SVC')
   })
@@ -230,8 +230,8 @@ describe('3A-1C1 userService — pre-Auth territory guard', () => {
   it('guard runs before createFirebaseAuthUser (no orphan Auth accounts)', async () => {
     const s = await userServiceSrc()
     const createIdx = s.indexOf('export async function createUser')
-    // Function signature (~500 chars) + guard block (~600 chars) + CRLF overhead — use 2000
-    const block = s.slice(createIdx, createIdx + 2000)
+    // Function signature (~500 chars) + guard block (~600 chars) + CRLF overhead — use 2400
+    const block = s.slice(createIdx, createIdx + 2400)
     const guardIdx = block.indexOf('TERRITORY_ROLES_SVC')
     // Search for the actual call (await), not the comment that mentions the function name
     const authIdx  = block.indexOf('await createFirebaseAuthUser')
@@ -271,8 +271,8 @@ describe('3A-1C1 userService — pre-Auth territory guard', () => {
   it('guard reads actor Firestore document to verify assignedPharmacyIds', async () => {
     const s = await userServiceSrc()
     const createIdx = s.indexOf('export async function createUser')
-    // Function signature is ~450 chars; guard block follows — use 1800 to be safe
-    const block = s.slice(createIdx, createIdx + 1800)
+    // Function signature is ~450 chars; guard block follows — use 2600 to be safe
+    const block = s.slice(createIdx, createIdx + 2600)
     expect(block).toContain('actorSnap')
     expect(block).toContain('assignedPharmacyIds')
     expect(block).toContain('actorAssigned')
@@ -281,7 +281,7 @@ describe('3A-1C1 userService — pre-Auth territory guard', () => {
   it('guard throws if pharmacyId not in assignedPharmacyIds', async () => {
     const s = await userServiceSrc()
     const createIdx = s.indexOf('export async function createUser')
-    const block = s.slice(createIdx, createIdx + 1800)
+    const block = s.slice(createIdx, createIdx + 2600)
     expect(block).toContain('actorAssigned.includes(pharmacyId)')
   })
 })

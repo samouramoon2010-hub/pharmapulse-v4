@@ -6,6 +6,17 @@
 // ============================================================
 import React from 'react'
 import { Pencil, Archive, EyeOff, Shield } from 'lucide-react'
+import MobileRankCard from '../../ui/MobileRankCard'
+
+// PR-1E4 — same lifecycle-stage label map the desktop table renders,
+// extracted so the mobile card can reuse it instead of recomputing.
+const LIFECYCLE_CFG = {
+  production_evaluation: { label: 'Production', color: '#22c55e' },
+  pilot_tracking:        { label: 'Pilot',       color: '#f59e0b' },
+  shadow_evaluation:     { label: 'Shadow',      color: '#60a5fa' },
+  draft:                  { label: 'Draft',       color: '#a1a1aa' },
+  archived:               { label: 'Archived',    color: '#6b7280' },
+}
 
 // ── Status badge ───────────────────────────────────────────────
 const STATUS_CFG = {
@@ -38,20 +49,6 @@ function VisDot({ enabled }) {
   )
 }
 
-// ── Protected badge ────────────────────────────────────────────
-function ProtectedBadge() {
-  return (
-    <span title="Protected production KPI — key is immutable" style={{
-      display:'inline-flex', alignItems:'center', gap:'3px',
-      padding:'1px 6px', borderRadius:'4px', fontSize:'10px', fontWeight:600,
-      color:'#60a5fa', background:'rgba(96,165,250,0.1)', border:'1px solid rgba(96,165,250,0.2)',
-    }}>
-      <Shield style={{ width:9, height:9 }} />
-      Core
-    </span>
-  )
-}
-
 // ── Main table ─────────────────────────────────────────────────
 export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, onHide }) {
   const COL = { fontSize:'11px', fontWeight:600, color:'var(--text-muted)',
@@ -61,14 +58,64 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                  verticalAlign:'middle' }
 
   return (
-    <div className="tbl-wrap" style={{ overflowX:'auto' }}>
+    <>
+      {/* PR-1E4 — phone-width card list, same `kpis` data/order as the
+          table below (mobile-blueprint.md rule: card conversion is the
+          required mobile fallback, not horizontal scroll). Action
+          buttons are reused as-is via MobileRankCard's `actions` slot —
+          no archive/hide/edit logic is duplicated. */}
+      <div className="sm:hidden space-y-2">
+        {kpis.map((kpi) => {
+          const uiStatus = uiStatuses[kpi.key] ?? (kpi.isActive ? 'ACTIVE' : 'ARCHIVED')
+          const isArchived = uiStatus === 'ARCHIVED'
+          const lifecycle = LIFECYCLE_CFG[kpi.lifecycleStage ?? 'production_evaluation']
+            ?? { label: kpi.lifecycleStage, color: '#a1a1aa' }
+          const statusCfg = STATUS_CFG[uiStatus] ?? STATUS_CFG.ACTIVE
+          return (
+            <MobileRankCard
+              key={kpi.key}
+              title={kpi.label}
+              subtitle={`${kpi.key}${kpi.labelAr ? ' · ' + kpi.labelAr : ''}`}
+              primaryMetric={{ label: 'Weight', value: kpi.weight > 0 ? `${Math.round(kpi.weight * 100)}%` : '—' }}
+              secondaryMetrics={[
+                { label: 'Lifecycle', value: lifecycle.label },
+                { label: 'Dash', value: kpi.visibility.dashboardEnabled && !isArchived ? 'On' : 'Off' },
+                { label: 'Team', value: kpi.visibility.teamEnabled && !isArchived ? 'On' : 'Off' },
+              ]}
+              status={{ label: statusCfg.label, color: statusCfg.color }}
+              actions={(
+                <>
+                  <button onClick={() => onEdit(kpi)} className="btn btn-ghost btn-sm gap-1 text-xs">
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </button>
+                  {!kpi.isCore && uiStatus === 'ACTIVE' && (
+                    <>
+                      <button onClick={() => onHide(kpi.key)} className="btn btn-ghost btn-sm gap-1 text-xs">
+                        <EyeOff className="w-3.5 h-3.5" /> Hide
+                      </button>
+                      <button onClick={() => onArchive(kpi.key)} className="btn btn-ghost btn-sm gap-1 text-xs">
+                        <Archive className="w-3.5 h-3.5" /> Archive
+                      </button>
+                    </>
+                  )}
+                  {kpi.isCore && (
+                    <span title="Protected system KPI — cannot be archived or hidden" className="flex items-center gap-1 text-[11px]" style={{ color: 'rgba(96,165,250,0.7)' }}>
+                      <Shield className="w-3 h-3" /> Protected
+                    </span>
+                  )}
+                </>
+              )}
+            />
+          )
+        })}
+      </div>
+    <div className="hidden sm:block tbl-wrap" style={{ overflowX:'auto' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
         <colgroup>
           <col style={{ width:'110px' }} />   {/* Key */}
           <col style={{ width:'120px' }} />   {/* Label */}
           <col style={{ width:'120px' }} />   {/* Lifecycle Stage */}
           <col style={{ width:'90px'  }} />   {/* Status */}
-          <col style={{ width:'50px'  }} />   {/* Core */}
           <col style={{ width:'60px'  }} />   {/* Weight */}
           <col style={{ width:'44px'  }} />   {/* Target */}
           <col style={{ width:'36px'  }} />   {/* Dash */}
@@ -79,7 +126,7 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
         </colgroup>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--border-subtle)' }}>
-            {['Key','Label','Lifecycle Stage','Status','Core','Weight','Target','Dash','Team','Exec','Reg',''].map((h) => (
+            {['Key','Label','Lifecycle Stage','Status','Weight','Target','Dash','Team','Exec','Reg',''].map((h) => (
               <th key={h} style={COL}>{h}</th>
             ))}
           </tr>
@@ -142,11 +189,6 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                 {/* Status */}
                 <td style={CELL}>
                   <StatusBadge status={uiStatus} />
-                </td>
-
-                {/* Core */}
-                <td style={{ ...CELL, textAlign:'center' }}>
-                  {kpi.isCore ? <ProtectedBadge /> : <span style={{ color:'var(--text-muted)', fontSize:'12px' }}>—</span>}
                 </td>
 
                 {/* Weight */}
@@ -229,7 +271,7 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                       </>
                     )}
                     {kpi.isCore && (
-                      <span title="Core KPIs are protected" style={{ width:26, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+                      <span title="Protected system KPI — cannot be archived or hidden" style={{ width:26, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
                         <Shield style={{ width:11, height:11, color:'rgba(96,165,250,0.4)' }} />
                       </span>
                     )}
@@ -241,5 +283,6 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
         </tbody>
       </table>
     </div>
+    </>
   )
 }

@@ -55,10 +55,15 @@ export default function RegionsPage() {
       where('role',   '==', 'regional_manager'),
       where('active', '==', true),
     )).then((snap) => {
-      setManagers(snap.docs.map((d) => ({
-        uid:         d.id,
-        displayName: (d.data().displayName as string) || (d.data().email as string) || d.id,
-      })))
+      // CLAIMED pending-onboarding docs must never appear in a role/scope
+      // assignment dropdown — same exclusion as every other operational
+      // user reader (see userService.getUsersByPharmacy).
+      setManagers(snap.docs
+        .filter((d) => d.data().authStatus !== 'CLAIMED')
+        .map((d) => ({
+          uid:         d.id,
+          displayName: (d.data().displayName as string) || (d.data().email as string) || d.id,
+        })))
     }).catch(() => {}) // non-fatal — form still works without the list
     return u
   }, [])

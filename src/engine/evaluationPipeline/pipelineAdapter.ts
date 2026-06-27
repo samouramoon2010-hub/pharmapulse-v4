@@ -78,6 +78,9 @@ export function pipelineResultToEvaluationResult(
     calculatedAtMs:         opts.calculatedAt ?? Date.now(),
     normalizedFinalScorePct: ctx.normalizedFinalScorePct,
     integrityWarnings:      [...new Set(ctx.warnings)],
+    // PR-1I Rule B: unrounded values preserved for traceability.
+    rawFinalScore:              ctx.rawFinalScore,
+    rawNormalizedFinalScorePct: ctx.rawNormalizedFinalScorePct,
   }
 
   return {
@@ -122,6 +125,8 @@ function mapBasket(basket: BasketContext): BasketResult {
     weightedScore: basket.weightedScore ?? 0,
     isValid:       basket.isValid      ?? true,
     invalidReason: basket.invalidReason,
+    // PR-1I Rule A: traceable redistribution denominator.
+    applicableWeightSum: basket.applicableWeightSum,
   }
 }
 
@@ -147,6 +152,9 @@ function mapElement(el: ElementContext): ElementResult {
     weightedScore: el.weightedScore ?? 0,
     required:     el.required,
     dataAvailable: el.dataAvailable,
+    // PR-1I Rule A: traceable redistributed weight.
+    normalizedWeight: el.normalizedWeight,
+    exclusionReason:  el.dataAvailable ? undefined : 'no-data',
   }
 }
 

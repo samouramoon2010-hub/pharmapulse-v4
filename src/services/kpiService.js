@@ -44,13 +44,37 @@ export async function saveKpiEntry({
   actorId,
   actorRole,
   registry,   // optional: pass live registry from caller for full dynamic support
+  // DX-6 Actuals Import: when an admin bulk-imports actuals on behalf of
+  // another user (a pharmacist, or a branch's managerUid), the caller is
+  // NOT the entry's owner — the opposite of every existing manual-entry
+  // call site. isDataExchangeImport opts into that explicit attribution
+  // path; importBatchRef (the import_jobs jobId) makes every such write
+  // traceable. Both are additive — omitted, behavior is byte-for-byte
+  // unchanged from before this bundle.
+  isDataExchangeImport = false,
+  importBatchRef,
   ...kpiFields  // all remaining fields treated as candidate KPI values
 }) {
-  // ── Step 1: resolve userId from Firebase Auth (source of truth) ──
-  // ALWAYS use auth.currentUser.uid when available — this is what Firestore
-  // isOwnData() rule compares against (request.auth.uid).
-  // The passed `userId` is only a fallback for non-browser contexts (e.g. batch import).
-  const resolvedUserId = auth?.currentUser?.uid || userId
+  // ── Step 1: resolve the entry's owner ─────────────────────────
+  // Manual entry (the default): ALWAYS use auth.currentUser.uid when
+  // available — this is what Firestore isOwnData() rule compares against
+  // (request.auth.uid). The passed `userId` is only a fallback for
+  // non-browser contexts.
+  // DX-6 import path: the admin's own auth.currentUser.uid must NOT be
+  // substituted — the entry belongs to the imported userId. The matching
+  // Firestore rule bypass (firestore.rules, kpi_entries create) requires
+  // importedViaDataExchange:true + a non-empty importBatchRef, so this
+  // path can never silently write under the wrong identity or escape audit.
+  if (isDataExchangeImport && !userId) {
+    throw new Error('saveKpiEntry: isDataExchangeImport requires an explicit userId')
+  }
+  if (isDataExchangeImport && (!importBatchRef || !String(importBatchRef).trim())) {
+    throw new Error('saveKpiEntry: isDataExchangeImport requires a non-empty importBatchRef')
+  }
+  let resolvedUserId = auth?.currentUser?.uid || userId
+  if (isDataExchangeImport) {
+    resolvedUserId = userId
+  }
   const today          = new Date().toISOString().split('T')[0]
 
   // ── Step 2: strict validation with clear error messages ──────
@@ -105,6 +129,10 @@ export async function saveKpiEntry({
     // setDoc with merge:true will NOT overwrite these if the document already exists.
     createdAt:   serverTimestamp(),
     submittedBy: actorId || resolvedUserId || null,
+
+    // DX-6 Actuals Import attribution marker — required by the matching
+    // Firestore rule bypass. Never set for manual entry.
+    ...(isDataExchangeImport ? { importedViaDataExchange: true, importBatchRef } : {}),
   })
 
   // ── Step 5: write to Firestore ────────────────────────────────

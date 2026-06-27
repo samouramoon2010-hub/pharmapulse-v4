@@ -45,23 +45,27 @@ describe('3B ReportsPage — branchSummary scope', () => {
     expect(block).toContain('return []')
   })
 
-  it('branchSummary computes totalActual per branch (test 3)', async () => {
+  // PR-1A: totalActual/totalTarget/gap summed every KPI_FIELDS key into one
+  // scalar, mixing incompatible units (SAR + prescriptions + counts...).
+  // Replaced with validKpiCount — same exclusion rule as
+  // computeOverallAchievement, so it stays consistent with the displayed
+  // achievement % instead of producing a separately-fabricated number.
+  it('branchSummary no longer mixes units into totalActual/totalTarget/gap (test 3)', async () => {
     const s = await reportsSrc()
     const idx = s.indexOf('const branchSummary = useMemo')
     expect(idx).toBeGreaterThan(-1)
-    // Window 1500: useMemo body is large before totalActual (CRLF adds bytes)
     const block = s.slice(idx, idx + 1500)
-    expect(block).toContain('totalActual')
+    expect(block).not.toContain('totalActual')
+    expect(block).not.toContain('totalTarget')
   })
 
-  it('branchSummary computes totalTarget and gap per branch (test 4)', async () => {
+  it('branchSummary computes validKpiCount per branch (test 4)', async () => {
     const s = await reportsSrc()
     const idx = s.indexOf('const branchSummary = useMemo')
     expect(idx).toBeGreaterThan(-1)
-    // Window 1500: totalTarget and gap appear after totalActual
-    const block = s.slice(idx, idx + 1500)
-    expect(block).toContain('totalTarget')
-    expect(block).toContain('gap')
+    const block = s.slice(idx, idx + 1800)
+    expect(block).toContain('validKpiCount')
+    expect(block).toContain('totalKpiCount')
   })
 })
 
@@ -112,8 +116,9 @@ describe('3B ReportsPage — mtdTrend', () => {
     const s = await reportsSrc()
     const idx = s.indexOf('const mtdTrend = useMemo')
     expect(idx).toBeGreaterThan(-1)
-    // Window 1200: trend strings appear after currTotal/prevTotal computations
-    const block = s.slice(idx, idx + 1200)
+    // Window 1800: PR-1A added unit lookup + safe-division pctChange before
+    // the trend strings, growing the useMemo body.
+    const block = s.slice(idx, idx + 1800)
     expect(block).toContain("'improving'")
     expect(block).toContain("'declining'")
     expect(block).toContain("'neutral'")

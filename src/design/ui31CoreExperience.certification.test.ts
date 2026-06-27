@@ -43,8 +43,8 @@ const TOUCHED_FILES: Record<string, string> = {
 // A — Header structure (UI3.1-A)
 // ════════════════════════════════════════════════════════════
 describe('UI3.1-A — Header matches header-blueprint.md', () => {
-  it('header is 52px (var(--topbar-h))', () => {
-    expect(appLayoutSrc).toContain("height:'var(--topbar-h)'")
+  it('header is 52px (var(--topbar-h)), plus the iOS safe-area-inset-top on notched devices (PR-1E5)', () => {
+    expect(appLayoutSrc).toContain("height:'calc(var(--topbar-h) + env(safe-area-inset-top))'")
   })
   it('there is exactly one <header> element in AppLayout', () => {
     const matches = appLayoutSrc.match(/<header\b/g) ?? []

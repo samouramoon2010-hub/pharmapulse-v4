@@ -231,7 +231,9 @@ describe('UI3-C — exactly one <header> element in AppLayout (no duplicate head
 describe('UI3-C — command header includes every required element', () => {
   const REQUIRED = [
     ['product identity / logo', /LogoIcon/],
-    ['live status', /Live/],
+    // PR-1D1: the hardcoded "Live" pill was a duplicate of SyncStatusIndicator
+    // and was removed; live/sync status is now this one consolidated control.
+    ['live/sync status', /SyncStatusIndicator/],
     ['date / period', /DateChip/],
     ['search trigger', /Search or jump to/],
     ['notifications', /Bell/],
@@ -243,6 +245,9 @@ describe('UI3-C — command header includes every required element', () => {
   }
   it('does not wire real command-palette behavior beyond the existing trigger (CommandPalette only opens on click, UI3 added no new behavior)', () => {
     expect(appLayoutSrc).toContain('setCmdOpen(true)')
+  })
+  it('PR-1D1: no duplicate hardcoded "Live" pill alongside SyncStatusIndicator', () => {
+    expect(appLayoutSrc).not.toMatch(/>\s*Live\s*</)
   })
 })
 

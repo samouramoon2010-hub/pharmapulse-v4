@@ -4,13 +4,15 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import {
   Users, Plus, Search, Pencil, UserCheck, UserX,
-  Save, X, Loader2, Eye, EyeOff, AlertCircle,
+  Save, X, Loader2, AlertCircle,
   Mail, Phone, Hash, Shield, Crown, Building2, Download, ArrowRightLeft,
 } from 'lucide-react'
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
 import { useAuthStore } from '../../store/authStore'
 import { usePharmacyStore } from '../../store/pharmacyStore'
+import { useDistrictStore } from '../../store/districtStore'
+import { useRegionStore } from '../../store/regionStore'
 import {
   createUser, updateUserProfile, toggleUserStatus,
   employeeIdExists, transferUser, promoteBranchManager,
@@ -20,33 +22,35 @@ import { useScopeProfile } from '../../hooks/useScopeProfile'
 import { isPharmacyAllowed, filterAllowedPharmacies } from '../../services/scopeResolver'
 import ConfirmModal from '../../components/ui/ConfirmModal'
 import DataTable, { StatusPill, RowActions } from '../../components/ui/DataTable'
+import {
+  ROLE_METADATA, CREATABLE_ROLES, getRoleLabel, getRequiredScopeType,
+  getScopeRequiredMessage, getCanonicalRoleValue,
+} from '../../constants/roleScope'
 
-const ROLES = [
-  { value:'admin',               label:'Admin',               icon:'👑', needsPharmacy:false },
-  { value:'manager',             label:'Manager (legacy)',     icon:'🏪', needsPharmacy:true  },
-  { value:'branch_manager',      label:'Branch Manager',       icon:'🏪', needsPharmacy:true  },
-  // Phase 0: district_supervisor and regional_manager are selectable
-  // but have no dedicated UI yet — they use the pharmacist dashboard as fallback.
-  { value:'district_supervisor', label:'District Supervisor',  icon:'🗺️', needsPharmacy:false },
-  { value:'regional_manager',    label:'Regional Manager',     icon:'📊', needsPharmacy:false },
-  { value:'pharmacist',          label:'Pharmacist',           icon:'💊', needsPharmacy:true  },
-]
+// Presentation-only icon/color per role — canonical label/scope rules live in roleScope.js
+const ROLE_ICONS = {
+  admin:'👑', general_manager:'🏢', regional_manager:'📊',
+  district_supervisor:'🗺️', branch_manager:'🏪', manager:'🏪', pharmacist:'💊',
+}
+const ROLE_STAT_COLORS = {
+  admin:'#f87171', general_manager:'#f87171', regional_manager:'#a78bfa',
+  district_supervisor:'#fb923c', branch_manager:'#fbbf24', pharmacist:'var(--brand-400)',
+}
+const ROLES = CREATABLE_ROLES.map((r) => ({ ...r, icon: ROLE_ICONS[r.value] || '•' }))
 
-function pwStrength(pw) {
-  if (!pw) return { score:0, label:'', color:'' }
-  let s=0
-  if (pw.length>=6)s++; if (pw.length>=10)s++
-  if (/[A-Z]/.test(pw))s++; if (/[0-9]/.test(pw))s++
-  if (/[^A-Za-z0-9]/.test(pw))s++
-  if (s<=1) return { score:s, label:'Weak',    color:'#ef4444' }
-  if (s<=2) return { score:s, label:'Fair',    color:'#f59e0b' }
-  if (s<=3) return { score:s, label:'Good',    color:'#00d2ad' }
-  return          { score:s, label:'Strong',  color:'#22c55e' }
+// Identity state — derived only from fields that already exist on the user
+// document (active, lastLoginAt). No new persisted state is introduced.
+function identityState(u) {
+  const isActive = u.active !== false && u.status !== 'inactive'
+  if (!isActive) return { label: 'Inactive', tone: 'inactive' }
+  if (!u.lastLoginAt) return { label: 'Pending Invitation', tone: 'pending' }
+  return { label: 'Active', tone: 'active' }
 }
 
 const EMPTY = {
-  displayName:'', email:'', password:'', role:'pharmacist',
-  pharmacyId:'', phone:'', employeeId:'', status:'active', sendEmail:true,
+  displayName:'', email:'', role:'pharmacist',
+  pharmacyId:'', districtId:'', regionId:'',
+  phone:'', employeeId:'', status:'active',
 }
 
 // Tiny field component
@@ -70,6 +74,8 @@ function F({ label, required, error, children }) {
 export default function UsersPage() {
   const { userProfile } = useAuthStore()
   const { pharmacies, subscribe: subPh } = usePharmacyStore()
+  const { districts, subscribe: subDistricts } = useDistrictStore()
+  const { regions, subscribe: subRegions } = useRegionStore()
   const toast = useToastStore()
   const { scope, loading: scopeLoading, error: scopeError } = useScopeProfile()
   // Phase 3A-1B: territory roles identified via list scope.
@@ -99,7 +105,6 @@ export default function UsersPage() {
   const [form,         setForm]         = useState(EMPTY)
   const [errors,       setErrors]       = useState({})
   const [saving,       setSaving]       = useState(false)
-  const [showPass,     setShowPass]     = useState(false)
   const [step,         setStep]         = useState('form')
   const [created,      setCreated]      = useState(null)
   const [confirmToggle,setConfirmToggle]= useState(null)
@@ -110,12 +115,20 @@ export default function UsersPage() {
 
   useEffect(() => {
     const u1 = subPh()
+    const u3 = subDistricts()
+    const u4 = subRegions()
     const q  = query(collection(db, COL.USERS), orderBy('createdAt', 'desc'))
     const u2 = onSnapshot(q, (snap) => {
-      setUsers(snap.docs.map((d) => ({ id:d.id, uid:d.id, ...d.data() })))
+      // Closure Patch Part 2: CLAIMED pending-onboarding docs are
+      // historical identity-link artifacts (see
+      // pharmacistActivationService.ts) — superseded by a real
+      // Auth-linked user doc the moment they're claimed. They remain
+      // fully readable via Audit Logs; they must never appear as an
+      // operational row in this list.
+      setUsers(snap.docs.filter((d) => d.data().authStatus !== 'CLAIMED').map((d) => ({ id:d.id, uid:d.id, ...d.data() })))
       setLoading(false)
     }, () => setLoading(false))
-    return () => { u1?.(); u2?.() }
+    return () => { u1?.(); u2?.(); u3?.(); u4?.() }
   }, [])
 
   const isNew = !editUser
@@ -132,7 +145,7 @@ export default function UsersPage() {
   const stats = useMemo(() => ({
     total:  scopedUsers.length,
     active: scopedUsers.filter((u) => u.active !== false).length,
-    counts: scopedUsers.reduce((a,u)=>{ a[u.role]=(a[u.role]||0)+1; return a }, {}),
+    counts: scopedUsers.reduce((a,u)=>{ const r=getCanonicalRoleValue(u.role); a[r]=(a[r]||0)+1; return a }, {}),
   }), [scopedUsers])
 
   const filtered = useMemo(() =>
@@ -141,13 +154,26 @@ export default function UsersPage() {
       const ms = !q || u.displayName?.toLowerCase().includes(q) ||
                        u.email?.toLowerCase().includes(q) ||
                        u.employeeId?.toLowerCase().includes(q)
-      const mr = filterRole==='all' || u.role===filterRole
+      const mr = filterRole==='all' || u.role===filterRole || getCanonicalRoleValue(u.role)===filterRole
       return ms && mr
     }), [scopedUsers, search, filterRole])
 
   const getPharmacyName = (id) => pharmacies.find((p) => p.id===id)?.name || '—'
+  const getDistrictName = (id) => districts.find((d) => d.id===id)?.name || '—'
+  const getRegionName   = (id) => regions.find((r) => r.id===id)?.name || '—'
   const sf = (f,v) => { setForm((p)=>({...p,[f]:v})); setErrors((e)=>({...e,[f]:undefined})) }
-  const selectedRole = ROLES.find((r) => r.value === form.role)
+  const requiredScopeType = getRequiredScopeType(form.role)
+
+  // Changing role must clear whichever scope field the *previous* role
+  // required — a Branch Manager's pharmacyId must not silently survive
+  // into a Regional Manager submission, and vice versa.
+  const setRole = (roleValue) => {
+    setForm((p) => ({
+      ...p, role: roleValue,
+      pharmacyId: '', districtId: '', regionId: '',
+    }))
+    setErrors((e) => ({ ...e, role: undefined, pharmacyId: undefined, districtId: undefined, regionId: undefined }))
+  }
 
   const openCreate = () => {
     if (!canCreate) return
@@ -155,10 +181,11 @@ export default function UsersPage() {
   }
   const openEdit   = (u)  => {
     if (!canEdit) return
-    setForm({ displayName:u.displayName||'', email:u.email||'', password:'',
+    setForm({ displayName:u.displayName||'', email:u.email||'',
               role:u.role||'pharmacist', pharmacyId:u.pharmacyId||'',
+              districtId:u.districtId||'', regionId:(u.regionIds||[])[0]||'',
               phone:u.phone||'', employeeId:u.employeeId||'',
-              status:u.status||(u.active!==false?'active':'inactive'), sendEmail:false })
+              status:u.status||(u.active!==false?'active':'inactive') })
     setEditUser(u); setErrors({}); setStep('form'); setCreated(null); setShowModal(true)
   }
   const closeModal = () => { setShowModal(false); setEditUser(null) }
@@ -190,12 +217,16 @@ export default function UsersPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email='Invalid email'
     else if (isNew && users.some((u)=>u.email?.toLowerCase()===form.email.toLowerCase()))
       e.email='Email already registered'
-    if (isNew) {
-      if (!form.password) e.password='Password required'
-      else if (form.password.length<6) e.password='Min 6 characters'
-    }
     if (!form.role) e.role='Role required'
-    if (selectedRole?.needsPharmacy && !form.pharmacyId) e.pharmacyId='Branch required for this role'
+    // Role-aware scope validation — never the generic "pharmacyId is
+    // required" message, and never validates a field the role doesn't use.
+    if (requiredScopeType === 'branch' && !form.pharmacyId) {
+      e.pharmacyId = getScopeRequiredMessage(form.role)
+    } else if (requiredScopeType === 'district' && !form.districtId) {
+      e.districtId = getScopeRequiredMessage(form.role)
+    } else if (requiredScopeType === 'region' && !form.regionId) {
+      e.regionId = getScopeRequiredMessage(form.role)
+    }
     if (form.employeeId?.trim()) {
       const dup = await employeeIdExists(form.employeeId.trim(), isNew?null:editUser?.uid||editUser?.id)
       if (dup) e.employeeId='Employee ID already in use'
@@ -228,11 +259,16 @@ export default function UsersPage() {
     setSaving(true)
     try {
       if (isNew) {
+        // No admin-entered password — userService generates one internally
+        // and always emails a reset/setup link; the admin never sees it.
         const result = await createUser({
           displayName:form.displayName.trim(), email:form.email.trim(),
-          password:form.password, role:form.role, status:form.status,
-          pharmacyId:form.pharmacyId||null, phone:form.phone,
-          employeeId:form.employeeId, sendWelcomeEmail:form.sendEmail,
+          role:form.role, status:form.status,
+          pharmacyId:form.pharmacyId||null,
+          districtId:form.districtId||null,
+          regionIds:form.regionId ? [form.regionId] : null,
+          phone:form.phone,
+          employeeId:form.employeeId,
           actorId:userProfile?.uid, actorRole:userProfile?.role,
         })
         setCreated(result); setStep('success')
@@ -242,7 +278,10 @@ export default function UsersPage() {
           ? { displayName:form.displayName.trim(), phone:form.phone, employeeId:form.employeeId }
           : { displayName:form.displayName.trim(), role:form.role,
               status:form.status, active:form.status==='active',
-              pharmacyId:form.pharmacyId||null, phone:form.phone, employeeId:form.employeeId }
+              pharmacyId:form.pharmacyId||null,
+              districtId:form.districtId||null,
+              regionIds:form.regionId ? [form.regionId] : null,
+              phone:form.phone, employeeId:form.employeeId }
         await updateUserProfile(
           editUser.uid||editUser.id,
           updateData,
@@ -374,8 +413,6 @@ export default function UsersPage() {
     setPromotionTarget(null)
   }
 
-  const pw = pwStrength(form.password)
-
   // 3A-1C1: scope-aware pharmacy list and role list for create modal
   const allowedPharmacies = scope ? filterAllowedPharmacies(scope, pharmacies) : []
   const pickablePharmacies = isTerritoryRole ? allowedPharmacies : pharmacies
@@ -426,17 +463,23 @@ export default function UsersPage() {
     },
     {
       key:'role', label:'Role', sortable:true,
-      render:(val)=><StatusPill status={val} label={{admin:'Admin',manager:'Manager',branch_manager:'Branch Manager',district_supervisor:'District Supervisor',regional_manager:'Regional Manager',pharmacist:'Pharmacist'}[val]||val} />,
+      render:(val)=><StatusPill status={val} label={getRoleLabel(val)} />,
     },
     {
-      key:'pharmacyId', label:'Branch',
-      render:(val)=><span style={{ fontSize:'11px' }}>{val ? getPharmacyName(val) : '—'}</span>,
+      key:'pharmacyId', label:'Scope',
+      render:(_, row)=>{
+        const scopeType = getRequiredScopeType(row.role)
+        if (scopeType === 'branch')   return <span style={{ fontSize:'11px' }}>{row.pharmacyId ? getPharmacyName(row.pharmacyId) : '—'}</span>
+        if (scopeType === 'district') return <span style={{ fontSize:'11px' }}>{row.districtId ? getDistrictName(row.districtId) : '—'}</span>
+        if (scopeType === 'region')   return <span style={{ fontSize:'11px' }}>{(row.regionIds||[])[0] ? getRegionName(row.regionIds[0]) : '—'}</span>
+        return <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>Organization-wide</span>
+      },
     },
     {
       key:'active', label:'Status', sortable:true, align:'center',
-      render:(val, row)=>{
-        const active = val!==false && row.status!=='inactive'
-        return <StatusPill status={active?'active':'inactive'} label={active?'Active':'Suspended'} />
+      render:(_, row)=>{
+        const st = identityState(row)
+        return <StatusPill status={st.tone} label={st.label} />
       },
     },
     {
@@ -478,13 +521,13 @@ export default function UsersPage() {
       {/* Stats strip */}
       <div style={{ display:'flex', gap:'2px' }}>
         {[
-          { role:'all',       label:'All',         count:stats.total,              color:'var(--text-muted)' },
-          { role:'admin',               label:'Admin',               count:stats.counts.admin||0,               color:'#f87171' },
-          { role:'manager',             label:'Manager',             count:stats.counts.manager||0,             color:'#fbbf24' },
-          { role:'branch_manager',      label:'Branch Mgr',          count:stats.counts.branch_manager||0,      color:'#fbbf24' },
-          { role:'district_supervisor', label:'District Sup',        count:stats.counts.district_supervisor||0, color:'#fb923c' },
-          { role:'regional_manager',    label:'Regional Mgr',        count:stats.counts.regional_manager||0,    color:'#a78bfa' },
-          { role:'pharmacist',          label:'Pharmacist',          count:stats.counts.pharmacist||0,          color:'var(--brand-400)' },
+          { role:'all', label:'All', count:stats.total, color:'var(--text-muted)' },
+          ...ROLE_METADATA.map((r) => ({
+            role: r.value,
+            label: getRoleLabel(r.value),
+            count: stats.counts[r.value] || 0,
+            color: ROLE_STAT_COLORS[r.value] || 'var(--text-muted)',
+          })),
         ].map((s) => (
           <button key={s.role}
             onClick={() => setFilterRole(s.role)}
@@ -514,13 +557,88 @@ export default function UsersPage() {
           style={{ paddingRight:'32px', fontSize:'13px', height:'34px' }} />
       </div>
 
+      {/* Mobile cards — PR-1E6: DataTable has no responsive variant and
+          previously rendered as a 1213px-wide horizontally-scrolling
+          table on a 375px viewport (measured), clipping the role/scope/
+          status columns off-screen. Maps the same `filtered` array, same
+          order, no recompute — only the shared DataTable stays desktop-only. */}
+      {!loading && filtered.length > 0 && (
+        <div className="sm:hidden" style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+          {filtered.map((row) => {
+            const st = identityState(row)
+            const scopeType = getRequiredScopeType(row.role)
+            const scopeLabel = scopeType === 'branch'   ? (row.pharmacyId ? getPharmacyName(row.pharmacyId) : '—')
+                              : scopeType === 'district' ? (row.districtId ? getDistrictName(row.districtId) : '—')
+                              : scopeType === 'region'   ? ((row.regionIds||[])[0] ? getRegionName(row.regionIds[0]) : '—')
+                              : 'Organization-wide'
+            return (
+              <div key={row.id || row.uid} className="card" style={{ padding:'12px' }}>
+                <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'8px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px', minWidth:0 }}>
+                    <div style={{
+                      width:'28px', height:'28px', borderRadius:'50%', flexShrink:0,
+                      background:'var(--brand-500)', color:'#09090b',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:'11px', fontWeight:700,
+                    }}>{row.displayName?.[0]||'?'}</div>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontSize:'13px', fontWeight:500, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {row.displayName}
+                      </div>
+                      <div style={{ fontSize:'11px', color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {row.email}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ flexShrink:0 }}><StatusPill status={st.tone} label={st.label} /></div>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginTop:'8px', flexWrap:'wrap' }}>
+                  <StatusPill status={row.role} label={getRoleLabel(row.role)} />
+                  <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>{scopeLabel}</span>
+                  {row.employeeId && (
+                    <span style={{ fontSize:'10px', color:'var(--text-muted)', fontFamily:'monospace' }}>#{row.employeeId}</span>
+                  )}
+                </div>
+                {(canEdit || canToggleRow(row) || canTransferRow(row) || canPromoteRow(row)) && (
+                  <div style={{ display:'flex', gap:'6px', marginTop:'10px', flexWrap:'wrap' }}>
+                    {canEdit && (
+                      <button onClick={() => openEdit(row)} className="btn btn-secondary btn-sm" style={{ fontSize:'11px' }}>Edit</button>
+                    )}
+                    {canToggleRow(row) && (
+                      <button onClick={() => requestToggle(row)} className="btn btn-secondary btn-sm" style={{ fontSize:'11px', color: row.active!==false ? '#f87171' : undefined }}>
+                        {row.active!==false ? 'Suspend' : 'Activate'}
+                      </button>
+                    )}
+                    {canTransferRow(row) && (
+                      <button onClick={() => requestTransfer(row)} className="btn btn-secondary btn-sm" style={{ fontSize:'11px' }}>Transfer</button>
+                    )}
+                    {canPromoteRow(row) && (
+                      <button onClick={() => requestPromotion(row)} className="btn btn-secondary btn-sm" style={{ fontSize:'11px' }}>
+                        {row.role==='pharmacist' ? 'Promote' : 'Demote'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Table */}
-      <DataTable
-        columns={columns} rows={filtered} loading={loading}
-        emptyText="No users found"
-        emptySubtext={search ? `No results for "${search}"` : 'Add your first user to get started'}
-        selectable
-      />
+      <div className="hidden sm:block">
+        <DataTable
+          columns={columns} rows={filtered} loading={loading}
+          emptyText="No users found"
+          emptySubtext={search ? `No results for "${search}"` : 'Add your first user to get started'}
+          selectable
+        />
+      </div>
+      {loading && (
+        <div className="sm:hidden">
+          <DataTable columns={columns} rows={filtered} loading={loading} />
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {showModal && (
@@ -572,9 +690,23 @@ export default function UsersPage() {
                     <code style={{ color:'var(--brand-400)', fontFamily:'monospace', fontSize:'10px' }}>{created.uid?.slice(0,16)}...</code>
                   </div>
                   <div style={{ display:'flex', justifyContent:'space-between' }}>
-                    <span style={{ color:'var(--text-muted)' }}>Branch</span>
-                    <span>{created.pharmacyId ? getPharmacyName(created.pharmacyId) : '—'}</span>
+                    <span style={{ color:'var(--text-muted)' }}>Scope</span>
+                    <span>
+                      {created.pharmacyId ? getPharmacyName(created.pharmacyId)
+                        : created.districtId ? getDistrictName(created.districtId)
+                        : (created.regionIds||[])[0] ? getRegionName(created.regionIds[0])
+                        : 'Organization-wide'}
+                    </span>
                   </div>
+                </div>
+                <div style={{
+                  display:'flex', alignItems:'flex-start', gap:'8px',
+                  background:'rgba(0,210,173,0.06)', border:'1px solid rgba(0,210,173,0.16)',
+                  borderRadius:'8px', padding:'10px 12px', marginBottom:'16px',
+                  fontSize:'11px', color:'var(--text-secondary)', textAlign:'left',
+                }}>
+                  <Mail style={{ width:13, height:13, color:'var(--brand-400)', flexShrink:0, marginTop:'1px' }} />
+                  <span>An invitation email was sent to <strong>{created.email}</strong> to set up their password. The admin never sees or sets the account password.</span>
                 </div>
                 <div style={{ display:'flex', gap:'8px' }}>
                   <button onClick={()=>{setStep('form');setForm(EMPTY);setErrors({})}} className="btn btn-secondary" style={{ flex:1, justifyContent:'center', fontSize:'12px' }}>
@@ -612,50 +744,15 @@ export default function UsersPage() {
                 </F>
 
                 {isNew && (
-                  <F label="Temporary password" required error={errors.password}>
-                    <div style={{ position:'relative' }}>
-                      <input type={showPass?'text':'password'} dir="ltr" value={form.password}
-                        onChange={(e)=>sf('password',e.target.value)} placeholder="••••••••"
-                        style={{ paddingLeft:'32px', height:'34px', fontSize:'13px' }} />
-                      <button type="button" onClick={()=>setShowPass(!showPass)}
-                        style={{ position:'absolute', left:'10px', top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)', background:'none', border:'none', cursor:'pointer', padding:0 }}>
-                        {showPass?<EyeOff style={{width:13,height:13}}/>:<Eye style={{width:13,height:13}}/>}
-                      </button>
-                    </div>
-                    {form.password && (
-                      <div style={{ marginTop:'5px', display:'flex', alignItems:'center', gap:'6px' }}>
-                        <div style={{ display:'flex', gap:'2px', flex:1 }}>
-                          {[1,2,3,4,5].map((i)=>(
-                            <div key={i} style={{
-                              flex:1, height:'2px', borderRadius:'99px',
-                              background: i<=pw.score ? pw.color : 'var(--border-subtle)',
-                              transition:'background 0.2s',
-                            }} />
-                          ))}
-                        </div>
-                        <span style={{ fontSize:'10px', color:pw.color, fontWeight:500, minWidth:'32px', textAlign:'left' }}>{pw.label}</span>
-                      </div>
-                    )}
-                    <label style={{ display:'flex', alignItems:'center', gap:'7px', marginTop:'7px', cursor:'pointer' }}>
-                      <button type="button" onClick={()=>sf('sendEmail',!form.sendEmail)}
-                        style={{
-                          width:'28px', height:'16px', borderRadius:'99px',
-                          background: form.sendEmail ? 'var(--brand-500)' : 'var(--bg-overlay)',
-                          border:'1px solid var(--border-default)', position:'relative',
-                          cursor:'pointer', transition:'background 0.2s', flexShrink:0,
-                        }}>
-                        <div style={{
-                          position:'absolute', top:'1px', width:'12px', height:'12px',
-                          borderRadius:'50%', background:'white', transition:'right 0.2s',
-                          right: form.sendEmail ? '1px' : 'calc(100% - 13px)',
-                          boxShadow:'0 1px 3px rgba(0,0,0,0.3)',
-                        }} />
-                      </button>
-                      <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>
-                        Send password reset email
-                      </span>
-                    </label>
-                  </F>
+                  <div style={{
+                    display:'flex', alignItems:'flex-start', gap:'8px',
+                    background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)',
+                    borderRadius:'8px', padding:'9px 11px', marginBottom:'12px',
+                    fontSize:'11px', color:'var(--text-muted)',
+                  }}>
+                    <Mail style={{ width:13, height:13, flexShrink:0, marginTop:'1px' }} />
+                    <span>The account is created without a password. An invitation email is sent to this address so the user sets their own password — no one else ever knows it.</span>
+                  </div>
                 )}
 
                 {(!isTerritoryRole || isNew) && (
@@ -679,8 +776,8 @@ export default function UsersPage() {
                 </F>
                 )}
 
-                {selectedRole?.needsPharmacy && (!isTerritoryRole || isNew) && (
-                  <F label="Branch" required={selectedRole.needsPharmacy} error={errors.pharmacyId}>
+                {requiredScopeType === 'branch' && (!isTerritoryRole || isNew) && (
+                  <F label="Branch" required error={errors.pharmacyId}>
                     <select value={form.pharmacyId} onChange={(e)=>sf('pharmacyId',e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
                       <option value="">Select branch...</option>
                       {pickablePharmacies.filter((p)=>p.active!==false).map((p)=>(
@@ -690,6 +787,38 @@ export default function UsersPage() {
                     {pickablePharmacies.length===0 && (
                       <p style={{ fontSize:'11px', color:'#fbbf24', marginTop:'4px' }}>
                         ⚠ No branches available — add branches first
+                      </p>
+                    )}
+                  </F>
+                )}
+
+                {requiredScopeType === 'district' && (!isTerritoryRole || isNew) && (
+                  <F label="District" required error={errors.districtId}>
+                    <select value={form.districtId} onChange={(e)=>sf('districtId',e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
+                      <option value="">Select district...</option>
+                      {districts.filter((d)=>d.active!==false).map((d)=>(
+                        <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                      ))}
+                    </select>
+                    {districts.length===0 && (
+                      <p style={{ fontSize:'11px', color:'#fbbf24', marginTop:'4px' }}>
+                        ⚠ No districts available — add districts first
+                      </p>
+                    )}
+                  </F>
+                )}
+
+                {requiredScopeType === 'region' && (!isTerritoryRole || isNew) && (
+                  <F label="Region" required error={errors.regionId}>
+                    <select value={form.regionId} onChange={(e)=>sf('regionId',e.target.value)} style={{ height:'34px', fontSize:'13px' }}>
+                      <option value="">Select region...</option>
+                      {regions.filter((r)=>r.active!==false).map((r)=>(
+                        <option key={r.id} value={r.id}>{r.name} ({r.code})</option>
+                      ))}
+                    </select>
+                    {regions.length===0 && (
+                      <p style={{ fontSize:'11px', color:'#fbbf24', marginTop:'4px' }}>
+                        ⚠ No regions available — add regions first
                       </p>
                     )}
                   </F>

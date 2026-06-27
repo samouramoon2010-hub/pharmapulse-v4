@@ -172,8 +172,11 @@ describe('4D-C test 10: KpiEntry write path uses sanitizeKpiEntryFields', async 
 describe('4D-C test 11: KpiEntry does not write targetField values', async () => {
   it('KpiEntry payload loop writes form[key] (engineKey), not any targetField', async () => {
     const src = await import('../../pages/pharmacist/KpiEntryPage.jsx?raw').then((m) => m.default)
-    // Payload loop: payload[key] = Number(form[key]) || 0
-    expect(src).toContain('payload[key] = Number(form[key]) || 0')
+    // PR-1D2: payload loop is keyed on form[key] (engineKey); the blank→0
+    // coercion ("|| 0") was removed so a blank field is omitted rather
+    // than silently written as zero. Still never writes a targetField.
+    expect(src).toContain('payload[key] = Number(form[key])')
+    expect(src).not.toContain('payload[key] = Number(form[key]) || 0')
     // Must not write any target field suffixes to the entry payload
     expect(src).not.toContain("payload['wasfatyTarget']")
     expect(src).not.toContain("payload['crossSellTarget']")
@@ -388,9 +391,14 @@ describe('4D-C test 25: no Reports calculation changes', async () => {
 })
 
 describe('4D-C test 26: no KpiEntry behavior changes', async () => {
-  it('KpiEntry save path unchanged — still uses payload[key] = Number(form[key]) || 0', async () => {
+  // PR-1D2 deliberately changed this one line: blank fields are no longer
+  // coerced to 0 (a verified UI-state bug — see KPI_REGISTRY_GOVERNANCE.md
+  // and the PR-1D closure report). The payload is still keyed on
+  // form[key]/engineKey; only the blank→0 coercion was removed.
+  it('KpiEntry save path keyed on form[key]/engineKey, no blank→0 coercion', async () => {
     const src = await import('../../pages/pharmacist/KpiEntryPage.jsx?raw').then((m) => m.default)
-    expect(src).toContain('payload[key] = Number(form[key]) || 0')
+    expect(src).toContain('payload[key] = Number(form[key])')
+    expect(src).not.toContain('payload[key] = Number(form[key]) || 0')
   })
 
   it('KpiEntry still calls saveEntry with liveRegistry for sanitizeKpiEntryFields', async () => {

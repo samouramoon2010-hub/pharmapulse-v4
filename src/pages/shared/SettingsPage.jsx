@@ -282,21 +282,17 @@ export default function SettingsPage() {
               KPIs active in your registry. Manage via Admin → KPI Registry.
             </p>
             <div className="space-y-1.5">
-              {registryKpiCards.map(({ key, label, labelAr, isCore }) => (
+              {registryKpiCards.map(({ key, labelAr }) => (
                 <div key={key}
                   className="flex items-center justify-between px-3 py-2 rounded-lg"
                   style={{ background:'var(--bg-hover)', border:'1px solid var(--border)' }}>
                   <div className="flex items-center gap-2.5 text-right">
-                    <div style={{ width:6, height:6, borderRadius:'50%', background: isCore ? 'var(--brand-500)' : '#a1a1aa', flexShrink:0 }} />
+                    <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--brand-500)', flexShrink:0 }} />
                     <div>
                       <div className="text-xs font-medium" style={{ color:'var(--text-primary)' }}>{labelAr}</div>
                       <div style={{ fontSize:'10px', color:'var(--text-muted)', fontFamily:'monospace' }}>{key}</div>
                     </div>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full"
-                        style={{ background: isCore ? 'rgba(0,210,173,0.10)' : 'rgba(161,161,170,0.10)', color: isCore ? 'var(--brand-400)' : '#a1a1aa', border: `1px solid ${isCore ? 'rgba(0,210,173,0.20)' : 'rgba(161,161,170,0.20)'}` }}>
-                    {isCore ? 'Core' : 'Custom'}
-                  </span>
                 </div>
               ))}
             </div>

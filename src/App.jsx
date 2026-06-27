@@ -13,6 +13,12 @@ import ThemeProvider  from './theme/ThemeProvider'
 
 // Auth
 import LoginPageV2      from './pages/auth/LoginPageV2'
+import LoginPageV3      from './pages/auth/LoginPageV3'
+import LoginConceptA    from './pages/auth/concepts/LoginConceptA'
+import LoginConceptB    from './pages/auth/concepts/LoginConceptB'
+import LoginConceptC    from './pages/auth/concepts/LoginConceptC'
+import LoginNetworkPreview from './pages/auth/LoginNetworkPreview'
+import LoginVortexPreview from './pages/auth/LoginVortexPreview'
 import UnauthorizedPage from './pages/auth/UnauthorizedPage'
 
 // Core
@@ -23,6 +29,8 @@ import KpiEntryPage   from './pages/pharmacist/KpiEntryPage'
 import PharmaciesPage   from './pages/admin/PharmaciesPage'
 import UsersPage        from './pages/admin/UsersPage'
 import ImportCenterPage from './pages/admin/ImportCenterPage'
+import DataExchangeStudioPage from './pages/admin/DataExchangeStudioPage'
+import ExportStudioPage from './pages/admin/ExportStudioPage'
 import AuditLogsPage       from './pages/admin/AuditLogsPage'
 import KpiManagementPage  from './pages/admin/KpiManagementPage'
 // RBAC Phase 1 — Territory Admin Pages
@@ -130,6 +138,27 @@ export default function App() {
         ) : (
           <Routes>
           <Route path="/login"        element={<LoginPageV2 />} />
+          {/* PR-1F Gate 2 — isolated static shell, reachable for evidence
+              capture only. /login still serves LoginPageV2 untouched;
+              cutover is an explicit, separate Gate 3 decision. */}
+          <Route path="/login-v3"     element={<LoginPageV3 />} />
+          {/* Login Design Exploration — visual-concept-only preview routes.
+              Static local form state, no auth wiring. Not linked from any
+              nav. See docs/production/LOGIN_DESIGN_EXPLORATION.md. */}
+          <Route path="/login-concept-a" element={<LoginConceptA />} />
+          <Route path="/login-concept-b" element={<LoginConceptB />} />
+          <Route path="/login-concept-c" element={<LoginConceptC />} />
+          {/* Login Network Preview — real animated background (code-built
+              SVG/CSS network, captured to MP4) + a real-structure login
+              panel. Local-only form state, no auth wiring. See
+              docs/production/LOGIN_STATIC_BACKGROUND_PREVIEW.md. */}
+          <Route path="/login-network-preview" element={<LoginNetworkPreview />} />
+          {/* Login Vortex Preview — cropped, text-free portion of the
+              rejected V3 reference artwork (glowing P + abstract spiral
+              only), composited as an inset graphic on a flat canvas.
+              Local-only form state, no auth wiring. See
+              docs/production/LOGIN_VORTEX_PREVIEW.md. */}
+          <Route path="/login-vortex-preview" element={<LoginVortexPreview />} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="/about"        element={<AboutPage />} />
           <Route path="/"             element={<HomeRedirect />} />
@@ -169,6 +198,10 @@ export default function App() {
             <Route path="/pharmacies" element={<PR roles={ADMIN}><PharmaciesPage /></PR>} />
             <Route path="/users"      element={<PR roles={USERS_ROLES}><UsersPage /></PR>} />
             <Route path="/import"     element={<PR roles={ADMIN}><ImportCenterPage /></PR>} />
+            {/* DX-2/DX-3 — Data Exchange Studio: Organization Onboarding (separate from Import Center) */}
+            <Route path="/data-exchange" element={<PR roles={ADMIN}><DataExchangeStudioPage /></PR>} />
+            {/* DX-10 — Export Studio: separate subsystem from Data Exchange (Import) Studio */}
+            <Route path="/export-studio" element={<PR roles={ADMIN}><ExportStudioPage /></PR>} />
             <Route path="/audit"      element={<PR roles={ADMIN}><AuditLogsPage /></PR>} />
             <Route path="/admin/kpis"      element={<PR roles={ADMIN}><KpiManagementPage /></PR>} />
             {/* RBAC Phase 1 — Territory Infrastructure (Admin only) */}

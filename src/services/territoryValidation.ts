@@ -159,7 +159,12 @@ export async function auditAllAssignedPharmacyIds(): Promise<AuditSummary> {
     reports: [],
   }
 
-  for (const userDoc of snap.docs) {
+  // Closure Patch Part 2: exclude CLAIMED pending-onboarding artifacts
+  // (see services/dataExchange/pharmacistActivationService.ts) — never
+  // an operational territory-role user to audit.
+  const docs = snap.docs.filter((d) => d.data().authStatus !== 'CLAIMED')
+
+  for (const userDoc of docs) {
     summary.total++
     const report = await validateAssignedPharmacyIds(userDoc.id)
     summary.reports.push(report)

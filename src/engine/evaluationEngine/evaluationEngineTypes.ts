@@ -103,6 +103,23 @@ export interface ElementResult {
   // Quality flags
   required:       boolean
   dataAvailable:  boolean  // false when kpiActuals[engineKey] is null/undefined
+
+  /**
+   * PR-1I — missing-data weight redistribution (Rule A).
+   * The element's weight after excluding inapplicable elements from the
+   * basket and redistributing their weight proportionally:
+   *   normalizedWeight = weight / Σ(weight of applicable elements in the basket)
+   * 0 when dataAvailable is false (its weight was redistributed away from it).
+   * Backwards-compatible: absent on ledger docs written before this field
+   * was added.
+   */
+  normalizedWeight?: number
+  /**
+   * PR-1I — why this element was excluded from the basket's weighted
+   * aggregate denominator. Currently only 'no-data' (dataAvailable=false).
+   * Undefined when the element is applicable. Backwards-compatible.
+   */
+  exclusionReason?: 'no-data'
 }
 
 // ── Basket result ─────────────────────────────────────────────
@@ -129,6 +146,17 @@ export interface BasketResult {
   // Validity
   isValid:       boolean   // false if any required element has no data
   invalidReason?: string
+
+  /**
+   * PR-1I — missing-data weight redistribution (Rule A).
+   * Sum of `weight` across elements with dataAvailable=true in this basket.
+   * Used as the denominator for each applicable element's normalizedWeight.
+   * 0 when no element in the basket has data (safe no-data state — the
+   * basket's aggregateAchievementPct is 0 in that case, never NaN).
+   * Backwards-compatible: absent on ledger docs written before this field
+   * was added.
+   */
+  applicableWeightSum?: number
 }
 
 // ── Capped KPI trace ──────────────────────────────────────────
@@ -179,6 +207,24 @@ export interface CalculationTrace {
    * before this field was added.
    */
   integrityWarnings?: string[]
+  /**
+   * PR-1I — final score rounding (Rule B).
+   * The unrounded finalScore exactly as computed by the engine, preserved
+   * for traceability. The official EvaluationResult.finalScore is rounded
+   * to 2 decimal places; this field retains full precision so the rounding
+   * step is auditable rather than silently lossy.
+   * Backwards-compatible: absent on ledger docs written before this field
+   * was added.
+   */
+  rawFinalScore?: number
+  /**
+   * PR-1I — final score rounding (Rule B).
+   * The unrounded normalizedFinalScorePct exactly as computed by the
+   * engine, preserved for traceability. normalizedFinalScorePct itself
+   * (above) is rounded to 2 decimal places, since it is the value read by
+   * ranking and reporting consumers. Backwards-compatible.
+   */
+  rawNormalizedFinalScorePct?: number
 }
 
 // ── Evaluation result ─────────────────────────────────────────

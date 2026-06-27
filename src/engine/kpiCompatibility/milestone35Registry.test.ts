@@ -222,7 +222,10 @@ describe('F — Registry health dashboard', () => {
     const src = (await import('../../pages/admin/KpiManagementPage.jsx?raw')).default
     expect(src).toContain('healthStats')
     expect(src).toContain('pilot_tracking')
-    expect(src).toContain('Validation Warnings')
+    // PR-1C: the flat "Validation Warnings" list was split into grouped
+    // Blockers / Recommendations sections.
+    expect(src).toContain('Blockers')
+    expect(src).toContain('Recommendations')
   })
 
   it('health counts include total KPI count', async () => {

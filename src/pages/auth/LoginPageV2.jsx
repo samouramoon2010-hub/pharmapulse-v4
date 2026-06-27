@@ -332,7 +332,7 @@ export default function LoginPageV2() {
                   <div style={{ position:'relative' }}>
                     <span className="lv3-icon-l"><Mail style={{ width:16, height:16 }}/></span>
                     <input type="email" required className="lv3-input"
-                      value={form.email} placeholder="samir@alathirpharmacy.com"
+                      value={form.email} placeholder="name@yourpharmacy.com"
                       onChange={e => { setForm(f => ({...f, email:e.target.value})); clearError() }}/>
                   </div>
                 </div>
@@ -470,7 +470,7 @@ export default function LoginPageV2() {
                   <div style={{ position:'relative' }}>
                     <span className="lv3-icon-l"><Mail style={{ width:16, height:16 }}/></span>
                     <input type="email" required className="lv3-input"
-                      value={resetEmail} placeholder="samir@alathirpharmacy.com"
+                      value={resetEmail} placeholder="name@yourpharmacy.com"
                       onChange={e => setResetEmail(e.target.value)}/>
                   </div>
                   <button type="submit" className="lv3-btn-primary">

@@ -17,9 +17,10 @@
 import type { GuardContext } from '../security/accessGuard'
 import { createImportJob, runValidation, commitJob } from './importJobEngine'
 import { computeRowsSignature } from './onboardingOrchestrator'
-import type { ImportDomain, ImportJob, StagedImportRow, ImportJobResult } from './importJobTypes'
+import type { ImportDomain, ImportJob, StagedImportRow, ImportJobResult, ImportFileMetadata } from './importJobTypes'
 import type { ImportValidationContext, ImportAuthorizationContext, ImportCommitContext } from './importDomainAdapter'
 import type { FirestoreStagingRepository } from './firestoreStagingRepository'
+import { stripUndefinedDeep } from './firestoreSanitize'
 
 import { fetchKpiRegistryOnce } from '../kpiRegistryService'
 import { fetchExistingOnboardingData } from './fetchExistingOnboardingData'
@@ -89,6 +90,10 @@ export interface KpiTargetsRunParams {
   actorRole:   string
   rawRows:     Record<string, unknown>[]
   existing:    KpiTargetsExistingData
+  /** Real, caller-supplied file metadata — see ActualsRunParams.fileMeta
+   *  for the full rationale. Optional; any missing property is simply
+   *  absent from the persisted job, never written as `undefined`. */
+  fileMeta?: ImportFileMetadata
 }
 
 type AnyKpiTargetsAdapter =
@@ -151,7 +156,12 @@ export async function validateKpiTargetsJob(
 ): Promise<KpiTargetsPreviewResult> {
   const { job, rows } = await runOneKpiTargetsDomain(params)
   const previewSignature = computeRowsSignature(rows)
-  const jobWithSignature: ImportJob = { ...job, previewSignature }
+  const cleanFileMeta = params.fileMeta ? stripUndefinedDeep(params.fileMeta) : undefined
+  const jobWithSignature: ImportJob = {
+    ...job,
+    previewSignature,
+    ...(cleanFileMeta && Object.keys(cleanFileMeta).length > 0 ? { fileMeta: cleanFileMeta } : {}),
+  }
 
   await repo.saveJob(jobWithSignature)
   if (rows.length > 0) await repo.saveStagedRows(job.jobId, rows)

@@ -111,6 +111,22 @@ const authCtx: ImportAuthorizationContext     = { actorUid: 'uid-1', actorRole: 
 const commitCtx: ImportCommitContext          = { actorUid: 'uid-1', actorRole: 'admin', jobId: 'job-x' }
 
 describe('DX-1 — Import Job Engine (domain-agnostic)', () => {
+  it('createImportJob omits fileMeta and mappingVersion entirely when not provided — never assigns them undefined', () => {
+    const job = createImportJob({ jobId: 'job-no-meta', domain: 'BRANCH', createdBy: 'uid-1' })
+    expect('fileMeta' in job).toBe(false)
+    expect('mappingVersion' in job).toBe(false)
+  })
+
+  it('createImportJob includes fileMeta/mappingVersion when explicitly provided', () => {
+    const job = createImportJob({
+      jobId: 'job-with-meta', domain: 'BRANCH', createdBy: 'uid-1',
+      fileMeta: { fileName: 'x.xlsx', sizeBytes: 10 },
+      mappingVersion: 'v1',
+    })
+    expect(job.fileMeta).toEqual({ fileName: 'x.xlsx', sizeBytes: 10 })
+    expect(job.mappingVersion).toBe('v1')
+  })
+
   it('classifies VALID, WARNING, and ERROR rows from a fake adapter', async () => {
     const adapter = makeFakeAdapter()
     const job = createImportJob({ jobId: 'job-x', domain: 'BRANCH', createdBy: 'uid-1' })

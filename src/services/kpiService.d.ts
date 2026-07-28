@@ -13,7 +13,10 @@ export interface SaveKpiEntryParams {
   registry?:  unknown
   /** DX-6 Actuals Import: write on behalf of another user (admin bulk import). */
   isDataExchangeImport?: boolean
-  /** Required when isDataExchangeImport is true — the import_jobs jobId. */
+  /** Required when isDataExchangeImport is true — the import_jobs jobId.
+   *  Must reference an existing import_jobs document; saveKpiEntry()
+   *  verifies this and throws before writing if the job is missing
+   *  (Maintenance Quick Wins — importBatchRef integrity). */
   importBatchRef?: string
   [kpiField: string]: unknown
 }

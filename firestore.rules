@@ -967,6 +967,30 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════
+    // SMART LIST — ITEM SALES AGGREGATES (DX-12)
+    // ════════════════════════════════════════════════════════
+    // Compact monthly summaries produced by the Smart List import
+    // (smartListCommitService.ts). Raw item rows are never stored —
+    // the uploaded Excel file remains the item-level source of truth.
+    //
+    // Write: admin only (import is an admin-gated Data Exchange flow).
+    //        setDoc replacement is intentional — the newest upload for
+    //        a branch+month is authoritative; the audit block inside
+    //        each doc records who/when/what file.
+    // Read:  managerial tiers; a pharmacist may read their own
+    //        matched monthly doc (matchedUserId == uid).
+    match /item_sales_monthly/{docId} {
+      allow read:   if isAnyMgr() || isGeneralMgr() || (isAny() && resource.data.matchedUserId == uid());
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    match /item_sales_branch_monthly/{docId} {
+      allow read:   if isAnyMgr() || isGeneralMgr();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════
     // EXPLICIT DENY-ALL FALLBACK
     // ════════════════════════════════════════════════════════
     // Any collection not listed above is denied by default (Firestore default)

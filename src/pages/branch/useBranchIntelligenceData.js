@@ -23,6 +23,7 @@ import { usePharmacyStore } from '../../store/pharmacyStore'
 import { getDayProgress, computeKpiStats, computePace, readKpiActual, readKpiTarget } from '../../engine/kpiAnalyticsEngine'
 import { generateTeamIntelligence } from '../../engine/teamIntelligence'
 import { generateBranchSummary } from '../../engine/executive'
+import { computeLiveMomentum } from '../../engine/liveAnalytics/liveMomentumEngine'
 import { buildBranchIntelligenceViewModel } from '../../engine/branchIntelligence/branchIntelligenceViewModelBuilder'
 import { DEFAULT_KPI_REGISTRY, getKpisForSurface } from '../../engine/kpiRegistry'
 import { subscribeKpiRegistry } from '../../services/kpiRegistryService'
@@ -190,6 +191,18 @@ export function useBranchIntelligenceData(branchId, month) {
     }
     if (!branchSummary) return { viewModel: null, teamIntelligence, expectedPace: null }
 
+    // ── Live momentum (Phase 4 — EMA-smoothed, anomaly-aware, per-KPI) ──
+    // Day-level signal, distinct from branchSummary.trend (week/month-level).
+    // Reads the exact same mtdEntries/target/now already assembled above —
+    // no new data fetch, no fabricated history.
+    let momentum
+    try {
+      momentum = computeLiveMomentum({ pharmacyId: branchId, mtdEntries, target: currentTarget, now }, liveRegistry)
+    } catch {
+      momentum = null
+    }
+    if (!momentum) return { viewModel: null, teamIntelligence, expectedPace: null }
+
     // ── expectedPace (Phase 4C) — same source as Dashboard/KPI Analytics ──
     const overallExpectedPct = Math.round(dp.ratio * 100)
     const kpiExpectedPct = {}
@@ -199,6 +212,7 @@ export function useBranchIntelligenceData(branchId, month) {
       branchSummary,
       teamIntelligence,
       teamSize: users.length,
+      momentum,
       branchRankSnapshot: null, // Phase 5A: ranking snapshots not wired yet
       expectedPace: { overallExpectedPct, kpiExpectedPct },
       metadata: {

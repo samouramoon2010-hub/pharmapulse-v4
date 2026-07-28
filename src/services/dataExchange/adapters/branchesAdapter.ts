@@ -12,7 +12,7 @@
 import { createPharmacy, updatePharmacy } from '../dxPharmacyTypes'
 import { assignPharmacyToDistrict } from '../../districtService'
 import type { GuardContext } from '../../security/accessGuard'
-import { pickField, parseStatusToActive } from './columnAliasUtils'
+import { pickField, parseStatusToActive, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -54,14 +54,14 @@ export interface ExistingBranchRecord {
   active: boolean
 }
 
-const HEADER_ALIASES = {
-  code:   ['code', 'branch code', 'كود الفرع', 'كود'],
-  name:   ['name', 'branch name', 'اسم الفرع', 'الاسم'],
-  region: ['region', 'المنطقة'],
+export const HEADER_ALIASES = {
+  code:   ['code', 'branch code', 'branch id', 'pharmacy code', 'store code', 'كود الفرع', 'كود'],
+  name:   ['name', 'branch name', 'pharmacy name', 'store name', 'اسم الفرع', 'الاسم'],
+  region: ['region', 'region code', 'المنطقة'],
   city:   ['city', 'المدينة'],
   group:  ['group', 'group code', 'district', 'district code', 'المجموعة', 'كود المجموعة'],
-  manager: ['manager', 'manager email', 'مدير الفرع'],
-  status:  ['status', 'الحالة'],
+  manager: ['manager', 'manager email', 'branch manager', 'مدير الفرع'],
+  status:  ['status', 'active', 'الحالة', 'نشط'],
 }
 
 export interface BranchesAdapterDeps {
@@ -89,9 +89,8 @@ export function createBranchesAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

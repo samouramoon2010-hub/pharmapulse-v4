@@ -13,7 +13,7 @@
 // NO Diff Viewer. NO Rollback. NO Restore. NO Evaluation Engine
 // changes. This file only asserts on what already exists.
 // ============================================================
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Kernel imports (Task 1 / Task 5) ───────────────────────────
 import { canTransitionProfileStatus, isTerminalStatus, assertProfileStatusTransition } from '../../profileStudio/lifecycle'
@@ -654,6 +654,23 @@ describe('Task 5 — Kernel parity: certified functions exist with the expected 
 })
 
 describe('Task 5 — Kernel parity: no behavior drift (idempotence / determinism)', () => {
+  // simulateProfile's trace embeds a live `new Date().toISOString()`
+  // timestamp (see profileStudio/simulationTrace.ts createProfileSimTrace)
+  // — correct production behavior (a simulation trace should record when
+  // it ran), but it means two back-to-back calls only produce identical
+  // JSON when they land in the same millisecond. The clock is frozen for
+  // the duration of this test only, so the two calls are guaranteed to
+  // see the same wall-clock instant — this proves the actual business
+  // logic (scores/baskets/elements/issues) is deterministic without
+  // weakening the assertion (still a full JSON.stringify equality check).
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it.each(['simulateProfile', 'calculateProfileHash', 'validatePublishReadiness'])(
     '%s is deterministic — same input produces the same output twice',
     (fnName) => {

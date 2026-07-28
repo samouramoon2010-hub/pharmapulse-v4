@@ -74,15 +74,12 @@ describe('Controlled Cutover Phase 1 — Proof 3: shadow parity UI is admin/inte
 
   it('the new page is imported from pages/admin (admin namespace)', async () => {
     const src = await appSrc()
-    expect(src).toContain("import DynamicKpiShadowPage       from './pages/admin/DynamicKpiShadowPage'")
+    expect(src).toContain("const DynamicKpiShadowPage       = lazy(() => import('./pages/admin/DynamicKpiShadowPage'))")
   })
 
-  it('sidebar entry for the new page only appears in the admin NAV_CONFIG section', async () => {
+  it('has no sidebar nav entry — adds no business-navigation value; reachable only by direct URL', async () => {
     const src = await sidebarSrc()
-    const adminSectionStart = src.indexOf('admin: [')
-    const nextRoleSection   = src.indexOf('\n  ', src.indexOf('Platform', adminSectionStart))
-    const adminSection      = src.slice(adminSectionStart, nextRoleSection === -1 ? undefined : nextRoleSection + 4000)
-    expect(adminSection).toContain('/admin/dynamic-kpi-shadow')
+    expect(src).not.toContain('/admin/dynamic-kpi-shadow')
   })
 
   it('the page itself contains no role check bypass (relies on route-level ProtectedRoute)', async () => {

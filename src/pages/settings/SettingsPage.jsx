@@ -17,12 +17,15 @@
 // ============================================================
 import React, { useState, useEffect, useMemo } from 'react'
 import {
-  SlidersHorizontal, Palette, Bot, Bell, ShieldCheck, Lock, Gauge, Info, Check, Target,
+  SlidersHorizontal, Palette, Bot, Bell, ShieldCheck, Lock, Gauge, Info, Check, Target, FlaskConical, DatabaseBackup,
 } from 'lucide-react'
 import SettingsHeader from '../../components/settings/SettingsHeader'
 import SettingsSidebar, { SETTINGS_SECTIONS } from '../../components/settings/SettingsSidebar'
 import SettingsSection, { ComingSoonNotice } from '../../components/settings/SettingsSection'
 import AppearanceSettings from '../../components/settings/AppearanceSettings'
+import PersonalAiSettingsSection from '../../components/settings/PersonalAiSettingsSection'
+import BackupSettingsSection from '../../components/settings/BackupSettingsSection'
+import DemoDataPage from '../admin/DemoDataPage'
 import { useSettingsStore, DASHBOARD_CARDS, SIDEBAR_MODE } from '../../store/settingsStore'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../components/ui/Toast'
@@ -241,6 +244,8 @@ function AboutSettings() {
 
 export default function SettingsPage() {
   const [activeId, setActiveId] = useState('appearance')
+  const { userProfile } = useAuthStore()
+  const isAdmin = userProfile?.role === 'admin'
 
   return (
     <div data-testid="settings-center" style={{
@@ -251,7 +256,7 @@ export default function SettingsPage() {
     }}>
       <SettingsHeader />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <SettingsSidebar activeId={activeId} onSelect={setActiveId} />
+        <SettingsSidebar activeId={activeId} onSelect={setActiveId} isAdmin={isAdmin} />
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
           {activeId === 'general' && (
             <SettingsSection icon={SlidersHorizontal} title="General" description="Language and general app preferences.">
@@ -264,9 +269,8 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
           {activeId === 'ai-providers' && (
-            <SettingsSection icon={Bot} title="AI Providers" description="Connect an AI provider to enhance the Assistant.">
-              <ComingSoonNotice icon={Bot} title="AI Providers — coming soon"
-                description="The Assistant already answers questions deterministically from your own data. Real provider connections and API key management arrive in a future update." />
+            <SettingsSection icon={Bot} title="AI Providers" description="Connect your own AI provider — your key stays on this device and is billed to your own account.">
+              <PersonalAiSettingsSection />
             </SettingsSection>
           )}
           {activeId === 'notifications' && (
@@ -287,6 +291,16 @@ export default function SettingsPage() {
           {activeId === 'performance' && (
             <SettingsSection icon={Gauge} title="Performance" description="Tune the app for your device.">
               <ComingSoonNotice icon={Gauge} title="Performance — coming soon" description="Performance tuning controls arrive in a future update." />
+            </SettingsSection>
+          )}
+          {activeId === 'admin-tools' && isAdmin && (
+            <SettingsSection icon={FlaskConical} title="Admin Tools" description="Demo data seeding for testing and demos — never affects real production data outside its own demo batches.">
+              <DemoDataPage />
+            </SettingsSection>
+          )}
+          {activeId === 'backup' && isAdmin && (
+            <SettingsSection icon={DatabaseBackup} title="Data Backup" description="Download an on-demand snapshot of production data.">
+              <BackupSettingsSection />
             </SettingsSection>
           )}
           {activeId === 'about' && (

@@ -117,9 +117,14 @@ describe('PR-1C — EvaluationRegistryPage folds older archived versions out of 
 // ── Diagnostics: dev-only nav gating ────────────────────────────
 
 describe('PR-1C — Sidebar hides developer-only diagnostics from production navigation', () => {
-  it('Dynamic KPI Shadow is marked devOnly and filtered out in production', async () => {
+  it('Dynamic KPI Shadow has no sidebar nav entry — route stays reachable by direct URL only', async () => {
     const s = await sidebarSrc()
-    expect(s).toMatch(/Dynamic KPI Shadow[^}]*devOnly:\s*true/)
+    expect(s).not.toContain('Dynamic KPI Shadow')
+    expect(s).not.toContain('/admin/dynamic-kpi-shadow')
+  })
+
+  it('devOnly nav-filtering mechanism still exists for any future dev-only diagnostics', async () => {
+    const s = await sidebarSrc()
     expect(s).toContain("process.env.NODE_ENV !== 'production'")
     expect(s).toContain('!item.devOnly')
   })
@@ -140,9 +145,9 @@ describe('PR-1C — Assistant capability wording stays honest', () => {
     expect(s).toContain('never invented')
   })
 
-  it('renders with no aiSettings — provider-disabled, deterministic-only mode', async () => {
+  it('renders with no org-wide aiSettings — only the user\'s own personalAi (BYOK) is ever passed through', async () => {
     const s = await assistantPageSrc()
-    expect(s).toContain('<AssistantPanel context={context} />')
+    expect(s).toContain('<AssistantPanel context={context} personalAi={personalAi} />')
     expect(s).not.toMatch(/aiSettings=\{/)
   })
 

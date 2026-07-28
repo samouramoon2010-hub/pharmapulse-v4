@@ -54,26 +54,40 @@ export const COL = {
 }
 
 // ── Config from .env ─────────────────────────────────────────
-const firebaseConfig = {
+// Guarded because this file gets transitively bundled into the
+// Netlify connector/MCP functions (they reuse Phase 1 adapters for
+// validation logic — see connectorIntakeService.ts). Those functions
+// never touch `auth`/`db` from here (they use the Admin SDK and their
+// own repository instead), but esbuild's CJS bundling still evaluates
+// this module's top-level code on cold start. `import.meta` is not
+// available there, so `import.meta.env` is `undefined` — reading it
+// directly used to crash the entire function before any request
+// handling ran. This guard makes the module a safe no-op outside a
+// real Vite/browser context, with zero behavior change for the actual
+// client app (`hasViteEnv` is always true there).
+const hasViteEnv = typeof import.meta !== 'undefined' && import.meta.env != null
+
+const firebaseConfig = hasViteEnv ? {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
-}
+} : null
 
-const app  = getApps().length ? getApps()[0] : initializeApp(firebaseConfig)
-export const auth = getAuth(app)
-setPersistence(auth, browserLocalPersistence).catch(() => {})
-
-let db
-try {
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  })
-} catch {
-  db = getFirestore(app)
+let app, auth, db
+if (hasViteEnv) {
+  app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig)
+  auth = getAuth(app)
+  setPersistence(auth, browserLocalPersistence).catch(() => {})
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    })
+  } catch {
+    db = getFirestore(app)
+  }
 }
-export { db }
+export { auth, db }
 export default app

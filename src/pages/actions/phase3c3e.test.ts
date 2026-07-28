@@ -252,7 +252,9 @@ describe('3C-3E — Sidebar Actions section', () => {
     const s = await sidebarSrc()
     const supIdx = s.indexOf('NAV_CONFIG.district_supervisor = [')
     expect(supIdx).toBeGreaterThan(-1)
-    const supBlock = s.slice(supIdx, supIdx + 800)
+    // Window 900: widened for the DX-12b Item Sales nav item (same
+    // precedent as the admin window below, no structural change).
+    const supBlock = s.slice(supIdx, supIdx + 900)
     expect(supBlock).toContain('/actions/my')
     expect(supBlock).toContain('/actions/tasks')
   })
@@ -261,8 +263,9 @@ describe('3C-3E — Sidebar Actions section', () => {
     const s = await sidebarSrc()
     const adminIdx = s.indexOf('admin: [')
     expect(adminIdx).toBeGreaterThan(-1)
-    // Window 2500: admin has Analytics + Administration (11 items) + Actions + System
-    const adminBlock = s.slice(adminIdx, adminIdx + 2500)
+    // Window 3500: admin has Analytics + Administration (11 items) + Actions + System
+    // (widened for Sidebar-1/2/3 consolidation comments, no structural change)
+    const adminBlock = s.slice(adminIdx, adminIdx + 3500)
     expect(adminBlock).toContain('/actions/my')
     expect(adminBlock).toContain('/actions/tasks')
   })

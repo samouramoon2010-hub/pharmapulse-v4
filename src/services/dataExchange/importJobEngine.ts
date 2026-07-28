@@ -52,8 +52,14 @@ export function createImportJob(params: CreateImportJobParams): ImportJob {
     createdBy:      params.createdBy,
     createdAt:      now,
     updatedAt:      now,
-    fileMeta:       params.fileMeta,
-    mappingVersion: params.mappingVersion,
+    // Optional fields are omitted entirely when not provided, never
+    // assigned `undefined` — Firestore's setDoc()/addDoc() reject any
+    // field whose value is `undefined`, including this one
+    // (`fileMeta`) specifically, which is the root cause of the
+    // production "Unsupported field value: undefined (found in field
+    // fileMeta...)" failure this guards against at the source.
+    ...(params.fileMeta !== undefined ? { fileMeta: params.fileMeta } : {}),
+    ...(params.mappingVersion !== undefined ? { mappingVersion: params.mappingVersion } : {}),
     rowCounts:      emptyRowCounts(),
     commitBatches:  [],
     rollbackStatus: 'NOT_ATTEMPTED',

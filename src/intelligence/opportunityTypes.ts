@@ -19,6 +19,12 @@ export type OpportunityCategory =
   | 'HIGHEST_CONTRIBUTING_KPI'
   | 'LARGEST_DECLINE'
   | 'LARGEST_IMPROVEMENT'
+  // Live-data-only categories — sourced from riskEngine/liveMomentumEngine
+  // via liveDataAdapter.ts, not from the Evaluation Ledger trace like the
+  // categories above. Additive: no existing switch/lookup over this union
+  // is exhaustive without a default case (verified before adding these).
+  | 'RISK_FLAG'
+  | 'MOMENTUM_SIGNAL'
 
 /** The structural level a finding refers to. */
 export type OpportunityTargetLevel = 'basket' | 'element' | 'rule' | 'profile'

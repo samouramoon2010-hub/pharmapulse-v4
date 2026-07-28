@@ -368,10 +368,11 @@ describe('8 — no credential exposure in source or storage', () => {
 })
 
 // ════════════════════════════════════════════════════════════
-// 9 — Regression: LoginPageV2 (production /login) remains untouched
+// 9 — Regression: LoginPageV2 source remains untouched (now the
+//     rollback page at /login-v2, no longer serving production /login)
 // ════════════════════════════════════════════════════════════
-describe('9 — LoginPageV2 is unaffected by Gate 3 wiring', () => {
-  it('still has no submitting-ref double-submit guard added (V3-only hardening, not backported into V2 this gate)', () => {
+describe('9 — LoginPageV2 source is unaffected by Gate 3 wiring (rollback path)', () => {
+  it('still has no submitting-ref double-submit guard added (V3-only hardening, not backported into V2)', () => {
     expect(loginPageV2Src).not.toContain('loginInFlightRef')
   })
 

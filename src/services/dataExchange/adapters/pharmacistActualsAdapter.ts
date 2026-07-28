@@ -26,7 +26,7 @@ import { saveKpiActualEntry } from '../dxKpiEntryTypes'
 import { getActualFieldName } from '../../../engine/kpiRegistry/kpiUiAdapter'
 import type { KpiRegistry } from '../../../engine/kpiRegistry'
 import type { ExistingPharmacistRecord } from './pharmacistsAdapter'
-import { pickField } from './columnAliasUtils'
+import { pickField, findAliasMatch } from './columnAliasUtils'
 import { normalizeDateInput } from './branchActualsAdapter'
 import type {
   ImportDomainAdapter,
@@ -65,12 +65,12 @@ export interface ExistingBranchRecordRef {
   active: boolean
 }
 
-const HEADER_ALIASES = {
-  date:         ['date', 'التاريخ'],
-  pharmacistId: ['pharmacist identifier', 'pharmacistidentifier', 'employee id', 'employeeid', 'الرقم الوظيفي'],
-  branch:       ['branch code', 'branchcode', 'كود الفرع'],
-  kpi:          ['kpi key', 'kpikey', 'مفتاح المؤشر'],
-  value:        ['actual value', 'actualvalue', 'القيمة الفعلية'],
+export const HEADER_ALIASES = {
+  date:         ['date', 'entry date', 'التاريخ'],
+  pharmacistId: ['pharmacist identifier', 'pharmacistidentifier', 'employee id', 'employeeid', 'staff id', 'الرقم الوظيفي'],
+  branch:       ['branch code', 'branchcode', 'branch', 'branch id', 'كود الفرع', 'الفرع'],
+  kpi:          ['kpi key', 'kpikey', 'kpi code', 'kpi', 'مفتاح المؤشر', 'المؤشر'],
+  value:        ['actual value', 'actualvalue', 'actual', 'value', 'القيمة الفعلية', 'القيمة'],
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -116,9 +116,8 @@ export function createPharmacistActualsAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

@@ -34,7 +34,7 @@ const VISIBLE_ROLES = ['admin', 'general_manager', 'district_supervisor', 'manag
 
 describe('Task 1 — Assistant route exists', () => {
   it('App.jsx imports AssistantPage', async () => {
-    expect(await appSrc()).toContain("import AssistantPage from './pages/assistant/AssistantPage'")
+    expect(await appSrc()).toContain("const AssistantPage = lazy(() => import('./pages/assistant/AssistantPage'))")
   })
   it('App.jsx defines the /assistant route', async () => {
     expect(await appSrc()).toContain("path=\"/assistant\"")
@@ -129,7 +129,7 @@ describe('Task 1 — AssistantPage is a thin, read-only shell', () => {
   })
 })
 
-describe('Task 1 — no real AI API call, no API key UI anywhere in the assistant surface', () => {
+describe('Task 1 — AssistantPage/AssistantPanel never make a network call or own a credential field themselves (BYOK key input lives only in PersonalAiSettingsSection.jsx)', () => {
   const SOURCES = [
     ['AssistantPage', assistantPageSrc],
     ['AssistantPanel', assistantPanelSrc],
@@ -141,15 +141,16 @@ describe('Task 1 — no real AI API call, no API key UI anywhere in the assistan
         expect(await getSrc()).not.toMatch(pattern)
       })
     }
-    it(`${name} has no apiKey/secret field or input`, async () => {
+    it(`${name} has no <input> field of its own (the apiKey it references is only ever read from personalAiKeyStore, never entered here)`, async () => {
       const s = await getSrc()
-      expect(s).not.toMatch(/apiKey|secretKey/i)
+      expect(s).not.toMatch(/<input/)
       expect(s).not.toMatch(/type=["']password["']/)
     })
   }
-  it('AssistantPanel only calls connectToProvider (existing mock-only connector), never a raw provider SDK', async () => {
+  it('AssistantPanel only calls connectToProvider/connectToPersonalAi (existing connector abstractions), never a raw provider SDK', async () => {
     const s = await assistantPanelSrc()
     expect(s).toContain('connectToProvider')
+    expect(s).toContain('connectToPersonalAi')
     expect(s).not.toMatch(/openai|anthropic|@google\/generative-ai/i)
   })
 })

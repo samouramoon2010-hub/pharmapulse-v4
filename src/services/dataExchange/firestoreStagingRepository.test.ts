@@ -156,3 +156,74 @@ describe('DX-2/DX-3 — FirestoreStagingRepository', () => {
     expect(await repo.loadJob('fjob-6')).not.toBeNull()
   })
 })
+
+// ============================================================
+// Regression coverage: the production "Function setDoc() called with
+// invalid data. Unsupported field value: undefined (found in field
+// fileMeta...)" failure. This mock (unlike real Firestore) does not
+// itself reject undefined values, so these tests assert directly on
+// what was captured by the setDoc mock to prove the sanitizer ran.
+// ============================================================
+function containsUndefinedDeep(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsUndefinedDeep)
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).some(
+      ([, v]) => v === undefined || containsUndefinedDeep(v),
+    )
+  }
+  return false
+}
+
+describe('FirestoreStagingRepository — write-boundary sanitization', () => {
+  it('saveJob never lets fileMeta (or anything else) reach setDoc as undefined', async () => {
+    const repo = new FirestoreStagingRepository()
+    // createImportJob already omits fileMeta when not provided — this
+    // reconstructs the exact pre-fix production shape to prove the
+    // write-boundary sanitizer is an independent safety net, not the
+    // only thing standing between this bug and a real Firestore error.
+    const job0 = createImportJob({ jobId: 'fjob-san-1', domain: 'BRANCH', createdBy: 'u1' })
+    const reintroducedBug = { ...job0, fileMeta: undefined, mappingVersion: undefined }
+    await repo.saveJob(reintroducedBug)
+
+    const stored = jobDocs.get('fjob-san-1')
+    expect(stored).toBeDefined()
+    expect(containsUndefinedDeep(stored)).toBe(false)
+    expect('fileMeta' in (stored as object)).toBe(false)
+  })
+
+  it('import job creation succeeds (no thrown error) when optional metadata is entirely missing', async () => {
+    const repo = new FirestoreStagingRepository()
+    const job0 = createImportJob({ jobId: 'fjob-san-2', domain: 'KPI_REGISTRY', createdBy: 'u1' })
+    await expect(repo.saveJob(job0)).resolves.toBeUndefined()
+    expect(await repo.loadJob('fjob-san-2')).not.toBeNull()
+  })
+
+  it('saveStagedRows never lets an undefined row field reach the Firestore batch mock', async () => {
+    const repo = new FirestoreStagingRepository<{ id: string }>()
+    const rowWithUndefined = {
+      rowId: 'fjob-san-3-0', jobId: 'fjob-san-3', rowIndex: 0, identityKey: 'a',
+      classification: 'VALID' as const, issues: [], state: 'STAGED' as const,
+      committedAt: undefined, failureReason: undefined,
+    }
+    await repo.saveStagedRows('fjob-san-3', [rowWithUndefined])
+
+    const rows = await repo.loadStagedRows('fjob-san-3')
+    expect(rows).toHaveLength(1)
+    expect(containsUndefinedDeep(rows[0])).toBe(false)
+    expect('committedAt' in rows[0]).toBe(false)
+    expect('failureReason' in rows[0]).toBe(false)
+  })
+
+  it('updateRowState never lets an undefined patch field reach setDoc', async () => {
+    const repo = new FirestoreStagingRepository<{ id: string }>()
+    await repo.saveStagedRows('fjob-san-4', [{
+      rowId: 'fjob-san-4-0', jobId: 'fjob-san-4', rowIndex: 0, identityKey: 'a',
+      classification: 'VALID', issues: [], state: 'STAGED',
+    }])
+    await repo.updateRowState('fjob-san-4', 'fjob-san-4-0', { state: 'COMMITTED', failureReason: undefined })
+
+    const rows = await repo.loadStagedRows('fjob-san-4')
+    expect(rows[0].state).toBe('COMMITTED')
+    expect(containsUndefinedDeep(rows[0])).toBe(false)
+  })
+})

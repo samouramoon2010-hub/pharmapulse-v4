@@ -1,6 +1,12 @@
 [build]
   publish = "dist"
   command = "npm run build"
+  # Universal AI Intake Phase 2 — the connector Function. Netlify
+  # routes /.netlify/functions/* before applying the SPA catch-all
+  # redirect below, so this does not conflict with it. Disabled by
+  # default at runtime via CONNECTOR_ENABLED (see .env.example) —
+  # adding this directory does not itself expose a working endpoint.
+  functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "20.19.0"

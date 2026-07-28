@@ -11,9 +11,12 @@
 // isolated evidence-gathering only, pending a deliberate Gate 3
 // cutover decision.
 //
-// Right panel: optimized image asset (LoginVisualPanel) replacing the
-// prior CSS/SVG DataOceanBackground + IdentityPulseLogo render for
-// this shell only — see Gate 1 closure for asset provenance.
+// Right panel: LoginLivePanel — an animated canvas scene (ambient
+// particle field + breathing halo) with a desktop-only product story
+// (headline + illustrative "Preview"-labeled KPI animation). Replaces
+// the Gate 1/2 static WebP LoginVisualPanel per the approved July 2026
+// redesign; the WebP assets and LoginVisualPanel component remain on
+// disk (still covered by the Gate 1 asset certification).
 //
 // Face ID / Passkey buttons are UI-ready placeholders only — no
 // WebAuthn/biometric backend exists, so both are rendered disabled
@@ -23,7 +26,7 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Eye, EyeOff, AlertCircle, Mail, Lock, ArrowRight, CheckCircle2, ArrowLeft, ShieldCheck, ScanFace, KeyRound, Globe } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
-import LoginVisualPanel from '../../components/login/LoginVisualPanel'
+import LoginLivePanel from '../../components/login/LoginLivePanel'
 
 const ROLE_HOME = {
   admin: 'dashboard', manager: 'dashboard', pharmacist: 'dashboard',
@@ -122,15 +125,6 @@ export default function LoginPageV3() {
           inset: 0;
           z-index: 0;
         }
-        .lgv3-visual-img {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          object-position: 50% 54%;
-          display: block;
-        }
         .lgv3-visual-overlay {
           position: absolute;
           inset: 0;
@@ -184,16 +178,33 @@ export default function LoginPageV3() {
           transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
         }
         .lgv3-input::placeholder { color: rgba(186,230,253,0.32); }
-        .lgv3-input:focus {
-          border-color: rgba(34,211,238,0.6);
+        /* index.css styles inputs via input:not([type=range]):not([type=checkbox]):not([type=radio])
+           — specificity (0,3,1) beats .lgv3-input's (0,1,0), so the global
+           padding/background/border silently won (pre-existing; only became
+           visible once the card switched to LTR and the placeholder collided
+           with the absolutely-positioned left icon). This selector matches
+           that specificity and, being later in the document, wins. */
+        input.lgv3-input:not([type=range]):not([type=checkbox]):not([type=radio]) {
+          padding: 0 42px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.10);
+          border-radius: 11px;
+        }
+        input.lgv3-input:not([type=range]):not([type=checkbox]):not([type=radio]):focus {
+          border-color: rgba(20,211,172,0.6);
           background: rgba(255,255,255,0.07);
-          box-shadow: 0 0 0 4px rgba(34,211,238,0.14);
+          box-shadow: 0 0 0 4px rgba(20,211,172,0.14);
+        }
+        .lgv3-input:focus {
+          border-color: rgba(20,211,172,0.6);
+          background: rgba(255,255,255,0.07);
+          box-shadow: 0 0 0 4px rgba(20,211,172,0.14);
         }
 
         .lgv3-btn-primary {
           width: 100%;
           height: 46px;
-          background: linear-gradient(120deg,#22d3ee 0%,#3b82f6 55%,#8b5cf6 100%);
+          background: linear-gradient(120deg,#0fbf9f 0%,#14b8a6 100%);
           border: none;
           border-radius: 11px;
           font-size: 14.5px;
@@ -244,7 +255,7 @@ export default function LoginPageV3() {
           padding: 4px 0;
           font-family: 'Inter', sans-serif;
           font-size: 12.5px;
-          color: #67e8f9;
+          color: #2ee6c3;
           font-weight: 500;
         }
         .lgv3-link:hover { opacity: 0.75; }
@@ -294,7 +305,7 @@ export default function LoginPageV3() {
 
         button:focus-visible,
         input:focus-visible {
-          outline: 2px solid rgba(34,211,238,0.8);
+          outline: 2px solid rgba(20,211,172,0.8);
           outline-offset: 2px;
         }
         .lgv3-alert:focus {
@@ -335,28 +346,25 @@ export default function LoginPageV3() {
         }
       `}</style>
 
-      <LoginVisualPanel />
+      <LoginLivePanel />
 
       <div className="lgv3-card-wrap">
-        <div className="lgv3-glass-card">
+        <div className="lgv3-glass-card" dir="ltr">
           <div className="lgv3-glass-inner">
 
             {/* 1–2: brand mark + wordmark */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '4px' }}>
-              <div style={{ width: 34, height: 34 }} aria-hidden="true">
-                <svg viewBox="0 0 200 200" width="34" height="34">
-                  <defs>
-                    <linearGradient id="lgv3MiniGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#22d3ee" />
-                      <stop offset="100%" stopColor="#8b5cf6" />
-                    </linearGradient>
-                  </defs>
-                  <path d="M70 36 L70 164 M70 36 L118 36 C140 36 154 50 154 72 C154 94 140 108 118 108 L70 108"
-                    fill="none" stroke="url(#lgv3MiniGrad)" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round" />
+              <div aria-hidden="true" style={{
+                width: 34, height: 34, borderRadius: '50%', border: '2px solid #14d3ac',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <svg viewBox="0 0 38 20" width="20" height="11">
+                  <path d="M0,10 L8,10 L11,4 L15,16 L19,2 L23,14 L26,10 L38,10"
+                    fill="none" stroke="#14d3ac" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
               <span style={{ fontSize: '19px', fontWeight: 700, fontFamily: "'Inter',sans-serif", color: '#F1F8FF' }}>
-                Pharma<span style={{ color: '#22d3ee' }}>Pulse</span>
+                Pharma<span style={{ color: '#14d3ac' }}>Pulse</span>
               </span>
             </div>
 
@@ -489,8 +497,8 @@ export default function LoginPageV3() {
                       Sign in with Passkey
                     </span>
                     <span style={{
-                      fontSize: '10px', fontWeight: 700, color: '#67e8f9',
-                      background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.3)',
+                      fontSize: '10px', fontWeight: 700, color: '#2ee6c3',
+                      background: 'rgba(20,211,172,0.12)', border: '1px solid rgba(20,211,172,0.3)',
                       borderRadius: '6px', padding: '2px 6px',
                     }}>Not yet available</span>
                   </button>
@@ -499,7 +507,7 @@ export default function LoginPageV3() {
                 {/* 12: security statement */}
                 <div style={{ marginTop: '16px', textAlign: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
-                    <ShieldCheck style={{ width: 14, height: 14, color: '#22d3ee' }} aria-hidden="true" />
+                    <ShieldCheck style={{ width: 14, height: 14, color: '#14d3ac' }} aria-hidden="true" />
                     <span style={{ fontSize: '12px', fontWeight: 600, color: 'rgba(226,242,255,0.75)', fontFamily: "'Inter',sans-serif" }}>
                       Protected by PharmaPulse Identity
                     </span>
@@ -532,12 +540,12 @@ export default function LoginPageV3() {
                   <div style={{ textAlign: 'center', padding: '16px 0' }}>
                     <div style={{
                       width: 52, height: 52, borderRadius: 14,
-                      background: 'rgba(34,211,238,0.10)',
-                      border: '1px solid rgba(34,211,238,0.28)',
+                      background: 'rgba(20,211,172,0.10)',
+                      border: '1px solid rgba(20,211,172,0.28)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       margin: '0 auto 12px',
                     }}>
-                      <CheckCircle2 style={{ width: 26, height: 26, color: '#22d3ee' }} aria-hidden="true" />
+                      <CheckCircle2 style={{ width: 26, height: 26, color: '#14d3ac' }} aria-hidden="true" />
                     </div>
                     <h3 style={{ fontWeight: 700, color: '#F1F8FF', marginBottom: 6, fontFamily: "'Inter',sans-serif" }}>Link sent</h3>
                     <p style={{ fontSize: 13, color: 'rgba(186,230,253,0.55)', marginBottom: 12, fontFamily: "'Inter',sans-serif" }}>

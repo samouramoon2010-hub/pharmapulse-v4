@@ -5,10 +5,10 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, TrendingUp, Users, Building2,
-  Map, Layers, UserCheck, ClipboardCheck, PlayCircle,
+  UserCheck, ClipboardCheck, PlayCircle,
   Target, BarChart2, FileSpreadsheet, ShieldCheck, Settings,
   LogOut, Bell, X, PanelLeftClose, PanelLeft, BarChart3, Database,
-  GitBranch, Trophy, FlaskConical, Sparkles, CheckSquare, ListTodo, BookOpen, Bot,
+  Trophy, Sparkles, CheckSquare, ListTodo, BookOpen, Bot, ShoppingBasket,
 } from 'lucide-react'
 import { useAuthStore }    from '../../store/authStore'
 import { useSettingsStore, SIDEBAR_MODE } from '../../store/settingsStore'
@@ -31,32 +31,39 @@ const NAV_CONFIG = {
     { group: 'Intelligence Operations', items: [
       { icon: BarChart3,  label: 'Executive BI', path: '/executive' },
       { icon: Trophy,     label: 'Rankings',     path: '/admin/rankings' },
+      // DX-12b — smart-list item-level analytics
+      { icon: ShoppingBasket, label: 'Item Sales', path: '/item-sales' },
       { icon: Bot,        label: 'Assistant',    path: '/assistant' },
     ]},
     { group: 'Data Architecture', items: [
       { icon: Database,        label: 'KPI Registry',          path: '/admin/kpis' },
-      // PR-1C: developer-only migration/parity diagnostic — not business
-      // navigation. Stays a real, reachable route for engineers in dev
-      // mode; filtered out of the rendered nav below in production.
-      { icon: FlaskConical,    label: 'Dynamic KPI Shadow',    path: '/admin/dynamic-kpi-shadow', devOnly: true },
+      // The developer-only parity diagnostic page (dynamic-kpi-shadow)
+      // was removed from this nav — adds no business value and the
+      // underlying engine modules (dynamicKpiFoundation.ts etc.) are
+      // still load-bearing production infra used by Dashboard/Branch/
+      // Team/Live-Analytics, untouched. Route stays reachable by direct
+      // URL, still ADMIN-gated, for engineers.
       { icon: BookOpen,        label: 'Profile Studio',        path: '/profile-studio' },
       // ER-0 — Evaluation Registry (Evaluation Ledger analog)
       { icon: ClipboardCheck,  label: 'Evaluation Registry',   path: '/admin/evaluation-registry' },
       // ER-2A — Evaluation execution
       { icon: PlayCircle,      label: 'Run Evaluation',        path: '/admin/evaluation-run' },
-      { icon: FileSpreadsheet, label: 'Import',                path: '/import' },
+      // Import Center (/import) is the pre-DX-1 ungoverned bulk importer —
+      // fully superseded by Data Exchange Studio below (Onboarding, KPI
+      // Registry/Targets, Branch/Pharmacist Actuals all covered there with
+      // a real Validate -> Preview -> Commit pipeline). Route stays
+      // reachable by direct URL; just removed from primary navigation.
       // DX-2/DX-3 — Data Exchange Studio: Organization Onboarding
       { icon: FileSpreadsheet, label: 'Data Exchange Studio',   path: '/data-exchange' },
+      { icon: Sparkles,        label: 'AI Data Intake',         path: '/ai-intake' },
       { icon: FileSpreadsheet, label: 'Export Studio',          path: '/export-studio' },
-      { icon: Building2,       label: 'Pharmacies',            path: '/pharmacies' },
       { icon: Users,           label: 'Users',                 path: '/users' },
-      // RBAC Phase 1 — Territory Infrastructure
-      { icon: Map,    label: 'Regions',   path: '/admin/regions' },
-      { icon: Layers, label: 'Districts', path: '/admin/districts' },
-      // RF-0 — Branch Classification Foundation
-      { icon: GitBranch, label: 'Branch Classifications', path: '/admin/classifications' },
-      // RF-0E — Demo Data Seeder
-      { icon: FlaskConical, label: 'Demo Data', path: '/admin/demo-data' },
+      // Sidebar-2: Pharmacies/Regions/Districts/Branch Classifications
+      // consolidated into one tabbed page — each route still exists and
+      // is reachable directly, just no longer 4 separate nav entries.
+      { icon: Building2, label: 'Organization', path: '/admin/organization' },
+      // Sidebar-3: Demo Data seeder moved to Settings -> Admin Tools
+      // (admin-only) — route stays reachable by direct URL.
     ]},
     { group: 'Actions / Work', items: [
       { icon: CheckSquare, label: 'My Actions', path: '/actions/my'    },
@@ -81,6 +88,7 @@ const NAV_CONFIG = {
     { group: 'Intelligence Operations', items: [
       { icon: BarChart3,  label: 'Executive BI', path: '/executive' },
       { icon: Users,      label: 'Team',         path: '/team' },
+      { icon: ShoppingBasket, label: 'Item Sales', path: '/item-sales' },
       { icon: Bot,        label: 'Assistant',    path: '/assistant' },
     ]},
     { group: 'Data Architecture', items: [
@@ -138,6 +146,7 @@ NAV_CONFIG.district_supervisor = [
   { group: 'Intelligence Operations', items: [
     { icon: BarChart3, label: 'Executive BI', path: '/executive' },
     { icon: Users, label: 'Team', path: '/team' },
+    { icon: ShoppingBasket, label: 'Item Sales', path: '/item-sales' },
     { icon: Bot, label: 'Assistant', path: '/assistant' },
   ]},
   { group: 'Data Architecture', items: [
@@ -171,6 +180,7 @@ NAV_CONFIG.general_manager = [
   { group: 'Intelligence Operations', items: [
     { icon: BarChart3,  label: 'Executive BI',   path: '/executive' },
     { icon: Users,      label: 'Team',           path: '/team' },
+    { icon: ShoppingBasket, label: 'Item Sales', path: '/item-sales' },
     { icon: Bot,        label: 'Assistant',      path: '/assistant' },
   ]},
   { group: 'Data Architecture', items: [

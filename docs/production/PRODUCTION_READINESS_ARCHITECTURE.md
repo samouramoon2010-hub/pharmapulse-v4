@@ -577,3 +577,227 @@ committed tree matches what was already validated.
 **No production mutation, no deploy, no reset.** See
 [`RC1_PACKAGING_REPORT.md`](RC1_PACKAGING_REPORT.md) for the full
 manifest, exclusions, secret-scan results, and rollback reference.
+
+## RC1 Controlled Deployment — Production Live
+
+**Status: deployed; full closure pending.** RC1 (commit
+`5f10971886e7b1aafa624282502f51370db79a4e`, tag `pharmapulse-rc1`) was
+deployed to the production Netlify site `pharmapluse`
+(`842fdc4a-ee93-44b7-9bc0-08d3804331fc`,
+`https://pharmapluse.netlify.app`) and is now live, superseding the
+previous production deploy (`6a235b65ece4e800088186ac`, commit
+`981a6dd...` on `main`, "Evaluation stabilization complete").
+
+**Deployment method:** the production site's Git integration is wired
+to branch `main` only, which does not contain the RC1 commit; merging
+branches was outside this phase's authorization. Instead, an isolated
+`git worktree` was created at the exact RC1 commit, built there
+(`npm ci` + `npm run build` via the Netlify CLI, pulling the site's
+real production environment variables without ever printing their
+values), deployed as a draft for verification, then promoted
+byte-for-byte to production via the Netlify API (`restoreSiteDeploy`,
+no rebuild) — so the artifact verified pre-promotion is identical to
+the artifact now live. The worktree was removed afterward. No Git
+branch, including `main`, was modified.
+
+**Findings:** one pre-existing, non-regression defect (PWA manifest
+references two icon files, `pwa-192x192.png`/`pwa-512x512.png`, that
+do not exist in `public/` — confirmed present in the *previous*
+production deploy too, not introduced by this deployment) and one
+pre-existing configuration gap (no CSP/`X-Frame-Options`/
+`X-Content-Type-Options` response headers — also unchanged from
+before). Neither was fixed in this phase, per its "no app code
+modification" boundary. No secret, credential, or personal-data
+leakage was found. No Firestore/Auth mutation occurred.
+
+**Smoke test:** HTTP-level availability, routing, SPA fallback, and
+preview-route isolation were verified live and passed. The 17-item
+authenticated smoke test, the 4-breakpoint responsive check, and
+live PWA runtime behavior were **not completed** — no test/owner
+credentials were supplied and no browser automation tool was
+connected in this session, so those rows are marked Blocked rather
+than a fabricated Pass.
+
+**No production data reset, no Firestore mutation, no Auth mutation,
+no rules/index deploy, no Login redesign, no tag move.** See
+[`RC1_DEPLOYMENT_BASELINE.md`](RC1_DEPLOYMENT_BASELINE.md),
+[`RC1_DEPLOYMENT_REPORT.md`](RC1_DEPLOYMENT_REPORT.md),
+[`RC1_DEPLOYMENT_SMOKE_TEST.md`](RC1_DEPLOYMENT_SMOKE_TEST.md),
+[`RC1_DEPLOYMENT_ISSUES.md`](RC1_DEPLOYMENT_ISSUES.md), and
+[`RC1_ROLLBACK_RUNBOOK.md`](RC1_ROLLBACK_RUNBOOK.md).
+
+## Maintenance Quick Wins (July 2026)
+
+Narrow, sequential maintenance phase following the July 2026 full
+technical review. Five parts, completed in order:
+
+**Part 1 — Baseline audit.** Classified all uncommitted work at phase
+start: 8 files (Assistant live-grounding branch-picker fix + DX-12b Item
+Sales Analytics feature), all confirmed intended product work, none
+temporary/suspicious. `.env` confirmed untracked; no secrets found in
+changed files. See
+[`MAINTENANCE_QUICK_WINS_BASELINE.md`](MAINTENANCE_QUICK_WINS_BASELINE.md).
+
+**Part 2 — Security & preview cleanup.** `src/data/dummyData.js` and the
+`/login-concept-a/b/c`, `/login-network-preview`, `/login-vortex-preview`
+routes/pages were already removed in a prior commit (`477121e`) — no
+action needed there. Found and removed a real leftover: ~1.46MB of
+orphaned static assets (`public/login-network-preview/`,
+`public/login-vortex-preview/`) still reachable by direct URL in the
+production build though their consuming pages were already deleted.
+`/login-v3` was explicitly **not** touched — it is the active,
+pending-cutover Login redesign candidate (PR-1F Gate 3), not dead
+preview code. Fixed a dangling `AGENTS.md` reference
+(`@Codex.design.md` → `@CLAUDE.design.md`, a copy/paste typo — no
+`Codex.design.md` was ever fabricated) with 4 new regression tests. See
+[`MAINTENANCE_QUICK_WINS_SECURITY.md`](MAINTENANCE_QUICK_WINS_SECURITY.md).
+
+**Part 3 — Flaky test stabilization.** Root-caused and fixed the single
+flaky test from the July 2026 review
+(`src/pages/profileStudio/phase4aCertification.test.ts`, not
+`phase3c3e.test.ts` as originally suspected): `simulateProfile()`'s
+trace embeds a live `new Date().toISOString()` timestamp (correct
+production behavior), so two back-to-back calls in the same test only
+matched byte-for-byte when they landed in the same millisecond. Fixed
+by freezing the clock for that one `describe` block only
+(`vi.useFakeTimers()`/`vi.setSystemTime()`), never weakening the
+assertion. 20/20 repeated runs clean; no leak into the surrounding
+1131-test file or the wider 5,245-test profileStudio suite. See
+[`MAINTENANCE_QUICK_WINS_FLAKY_TEST.md`](MAINTENANCE_QUICK_WINS_FLAKY_TEST.md).
+
+**Part 4 — `importBatchRef` integrity.** Closed the PR-1G-A P1-3 launch
+blocker: `saveKpiEntry()` (`kpiService.js`) now verifies an
+`isDataExchangeImport` write's `importBatchRef` references a real,
+existing `import_jobs` document before writing — previously any
+non-empty string was accepted. In the real production pipeline this was
+always latent, never triggered (the Preview step always persists the
+job before Commit can run), so no existing valid write is affected; the
+check exists to prevent any future or non-standard caller from creating
+a silent dangling reference. Two adapter-level test files
+(`branchActualsAdapter.test.ts`, `pharmacistActualsAdapter.test.ts`)
+had Firestore mocks that didn't model the `import_jobs` collection
+(since they exercise `commitJob()` directly, bypassing the full
+runner) — updated to pre-seed the job doc, matching the real system's
+invariant, not weakening any assertion. 10 new dedicated tests added.
+No schema migration, no Firestore rules deployed, no existing
+production record read or repaired. See
+[`MAINTENANCE_QUICK_WINS_IMPORT_INTEGRITY.md`](MAINTENANCE_QUICK_WINS_IMPORT_INTEGRITY.md).
+
+**Part 5 — Full validation.** 365 test files / 25,584 tests passed
+(0 failures), `tsc --noEmit` clean, production build succeeded (3.4MB
+`dist/`, confirmed the removed preview assets are absent from build
+output), no secrets staged, `.env` still untracked, `dist/` never
+touched by git.
+
+**No production data reset, no Firestore rules deployment, no Auth
+mutation, no billing changes, no Cloud Functions, no staging
+environment, no broad refactor, no Login redesign, no automatic
+deploy.** See
+[`MAINTENANCE_QUICK_WINS_RELEASE_DECISION.md`](MAINTENANCE_QUICK_WINS_RELEASE_DECISION.md).
+
+## KPI Registry Archive (July 2026)
+
+Owner-authorized, multi-pass retirement of the live `kpi_registry`
+collection — archive only, never delete (Firestore's own
+`allow delete: if false` rule on `kpi_registry` makes hard deletion
+structurally impossible; this was also refused once at the data-request
+level for the same reason). Full detail across all passes:
+[`KPI_REGISTRY_ARCHIVE_EXECUTION_REPORT.md`](KPI_REGISTRY_ARCHIVE_EXECUTION_REPORT.md)
+and [`KPI_CORE_ARCHIVE_COMPLETION_REPORT.md`](KPI_CORE_ARCHIVE_COMPLETION_REPORT.md).
+
+**Pass 1 (data-only).** 13 of 18 KPI definitions archived via the
+existing `isActive`/`uiStatus`/`lifecycleStage` lifecycle contract (no
+schema change), after archiving the 4 evaluation profiles (3 published +
+1 draft) that referenced them. 5 KPIs (`wasfaty`, `omnihealth`,
+`wellnessCard`, `basket`, `crossSelling`) were left active — blocked by
+the application's own pre-existing `PROTECTED_CORE_KEYS` guard in
+`src/services/kpiRegistryService.ts`.
+
+**Pass 2 (code + data).** Owner decision to lift the archival
+restriction for those 5 keys specifically. Code change: removed the
+`PROTECTED_CORE_KEYS` throw from `archiveKpiDefinition()` and
+`transitionKpiLifecycle()` (2 edits, same file) — `hideKpiDefinition()`'s
+restriction was deliberately left in place. While writing the
+tests-first proof for this change, a genuine, pre-existing, unrelated
+bug was found: `hideKpiDefinition()` referenced the bare
+`PROTECTED_CORE_KEYS` identifier, which is only *re-exported* (not
+locally bound) in that file — every call had always thrown
+`ReferenceError` regardless of key, confirmed via `git show HEAD` before
+this pass touched anything. Fixed with a one-line correction (use the
+already-imported local alias `_PROTECTED`), since leaving it broken
+would not "preserve" the safeguard as required — it would leave it
+non-functional. 165 new/extended focused tests + the full 366-file /
+25,651-test suite + a production build all passed before any Firestore
+write. All 5 KPIs then archived live.
+
+**Final state:** `kpi_registry` — 18 total, **0 active, 18 archived**.
+`evaluation_profiles` — 21 total, 0 published, 0 draft, 21 archived.
+`evaluation_results` (111), `users` (10), `pharmacies` (4) all
+unchanged throughout both passes. Zero documents deleted at any point.
+
+**Known limitation carried forward:** the `BSU` KPI has always lacked a
+`sortOrder` field; `subscribeKpiRegistry()`'s `orderBy('sortOrder')`
+query silently excludes documents missing that field, so `BSU` never
+appears in the `/admin/kpis` management page's live list (it shows "17
+definitions" instead of 18) even though its own document is correctly
+archived. Confirmed pre-existing (present before either pass), not
+touched — a one-field fix was explicitly out of scope for a data-only
+archive operation.
+
+**No document deletion, no Auth changes, no Firestore rules/index
+deployment, no unrelated refactor, no commit, no push, no deploy** at
+any point across both passes.
+
+## New KPI Setup — Foundation Preparation (July 2026)
+
+Third pass in the KPI Registry retirement sequence. With all 18 KPIs
+archived (0 active), this phase prepared the ground for a completely
+new KPI set without creating any new KPI yet. Full detail:
+[`NEW_KPI_SETUP_READINESS_REPORT.md`](NEW_KPI_SETUP_READINESS_REPORT.md).
+
+**BSU visibility fixed at the root cause.** `subscribeKpiRegistry()`
+and `fetchKpiRegistryOnce()` (`src/services/kpiRegistryService.ts`)
+both queried Firestore with `orderBy('sortOrder', 'asc')` — a
+server-side ordering clause that silently excludes any document
+missing that field entirely. `BSU` has never had a `sortOrder` field,
+so it was excluded not just from the admin UI but from the
+bulk-evaluation registry snapshot too (`fetchKpiRegistryOnce()` is the
+server-side equivalent used by bulk evaluation). Fixed by removing the
+server-side `orderBy` from both functions — the existing safe default
+(`sortOrder ?? 999` in `docToKpiDefinition()`) and the existing
+client-side sort in `KpiManagementPage.jsx` already handle ordering
+correctly without it. **Zero Firestore documents were mutated** — this
+was a pure query/code fix, verified live: `/admin/kpis` now shows "18
+definitions" instead of "17."
+
+**UI lifecycle controls aligned with the already-lifted backend
+restriction.** `KpiRegistryTable.jsx` and `KpiManagementPage.jsx` still
+silently blocked archiving a core KPI via the UI even after the
+service-layer restriction was lifted in the prior pass. Split the
+Archive and Hide gating: Archive now works for any active KPI
+regardless of `isCore`; Hide remains core-gated (that restriction was
+never lifted). No KPI-editor immutability rules, import-conflict
+rules, or permissions were touched — those are separate, deliberately
+out-of-scope protections.
+
+**New KPI schema, template, and onboarding plan documented** —
+[`NEW_KPI_SCHEMA_REFERENCE.md`](NEW_KPI_SCHEMA_REFERENCE.md),
+[`NEW_KPI_DEFINITION_TEMPLATE.md`](NEW_KPI_DEFINITION_TEMPLATE.md),
+[`NEW_KPI_ONBOARDING_PLAN.md`](NEW_KPI_ONBOARDING_PLAN.md) — grounded
+entirely in the existing `KpiDefinition` schema; several fields the
+task requested (`scope`, `input type`, parent/sub-element/composite
+relationships, effective date ranges, a dedicated owner/approval-status
+field) do not exist in the current architecture and are documented as
+gaps rather than invented.
+
+**Known limitation, not fixed:** the `isPrimary` invariant ("exactly
+one active KPI must be primary") is currently violated — 0 active KPIs
+exist. Surfaced only as a non-blocking health-check message in
+`KpiManagementPage.jsx`; self-resolves once the first new KPI is
+activated and marked primary (anticipated by the onboarding plan's
+step 10). Not treated as a defect requiring a fix in this pass, since
+it is the expected state of a deliberately emptied registry.
+
+**No new KPI created, no archived KPI reactivated, no evaluation
+profile created or published, no deployment.** Full test suite (368
+files / 25,666 tests) and production build both pass.

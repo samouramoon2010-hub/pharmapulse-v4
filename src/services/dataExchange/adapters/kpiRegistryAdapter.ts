@@ -59,7 +59,7 @@ import { canTransitionKpiLifecycle } from '../../../engine/kpiRegistry/kpiRegist
 import type { KpiDefinition, KpiRegistry, KpiCategory, KpiDirection } from '../../../engine/kpiRegistry'
 import type { KpiLifecycleStage } from '../../../engine/kpiRegistry/kpiRegistryTypes'
 import type { KpiUiStatus } from '../../../engine/kpiRegistry'
-import { pickField } from './columnAliasUtils'
+import { pickField, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -127,9 +127,9 @@ export interface KpiRegistryStaged {
   sortOrder:            number
 }
 
-const HEADER_ALIASES = {
-  key:           ['kpi key', 'key', 'مفتاح المؤشر'],
-  labelEn:       ['kpi name english', 'name english', 'label', 'الاسم بالإنجليزية'],
+export const HEADER_ALIASES = {
+  key:           ['kpi key', 'key', 'kpi code', 'مفتاح المؤشر', 'كود المؤشر'],
+  labelEn:       ['kpi name english', 'name english', 'label', 'kpi name', 'name', 'الاسم بالإنجليزية', 'الاسم'],
   labelAr:       ['kpi name arabic', 'name arabic', 'labelar', 'الاسم بالعربية'],
   descriptionEn: ['description english', 'description', 'الوصف بالإنجليزية'],
   descriptionAr: ['description arabic', 'الوصف بالعربية'],
@@ -180,9 +180,8 @@ export function createKpiRegistryAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

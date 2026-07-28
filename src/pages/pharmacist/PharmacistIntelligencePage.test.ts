@@ -31,7 +31,7 @@ async function branchHookSrc() {
 describe('1. Route registration', () => {
   it('registers /pharmacist/:userId/intelligence pointing at PharmacistIntelligencePage', async () => {
     const s = await appSrc()
-    expect(s).toContain('import PharmacistIntelligencePage')
+    expect(s).toContain('PharmacistIntelligencePage')
     expect(s).toContain('/pages/pharmacist/PharmacistIntelligencePage')
     expect(s).toContain('path="/pharmacist/:userId/intelligence"')
     expect(s).toContain('<PharmacistIntelligencePage />')
@@ -819,7 +819,7 @@ describe('Regression — Sections 0-5 still render unchanged', () => {
 describe('My Intelligence — first-class page', () => {
   it('App.jsx registers /my-intelligence, role-restricted to pharmacist, pointing at MyPharmacistIntelligenceRedirect', async () => {
     const s = await appSrc()
-    expect(s).toContain('import MyPharmacistIntelligenceRedirect')
+    expect(s).toContain('MyPharmacistIntelligenceRedirect')
     expect(s).toContain('path="/my-intelligence"')
     expect(s).toContain("roles={['pharmacist']}")
     expect(s).toContain('<MyPharmacistIntelligenceRedirect />')

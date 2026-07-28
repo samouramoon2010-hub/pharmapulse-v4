@@ -21,7 +21,7 @@ import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db, COL } from '../dxFirebaseTypes'
 import { logAction, AUDIT_ACTION } from '../dxAuditTypes'
 import type { GuardContext } from '../../security/accessGuard'
-import { pickField, parseStatusToActive } from './columnAliasUtils'
+import { pickField, parseStatusToActive, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -85,16 +85,16 @@ export interface ExistingPharmacistRecord {
   active:       boolean
 }
 
-const HEADER_ALIASES = {
-  employeeId: ['employee id', 'employeeid', 'الرقم الوظيفي'],
-  name:       ['name', 'full name', 'الاسم'],
-  email:      ['email', 'البريد الإلكتروني'],
-  phone:      ['phone', 'mobile', 'الهاتف'],
-  role:       ['role', 'الدور'],
-  branch:     ['branch', 'branch code', 'pharmacyid', 'الفرع', 'كود الفرع'],
-  joining:    ['joining date', 'joiningdate', 'تاريخ الالتحاق'],
-  leaving:    ['leaving date', 'leavingdate', 'تاريخ المغادرة'],
-  status:     ['status', 'employment status', 'الحالة'],
+export const HEADER_ALIASES = {
+  employeeId: ['employee id', 'employeeid', 'staff id', 'emp id', 'id', 'الرقم الوظيفي'],
+  name:       ['name', 'full name', 'employee name', 'pharmacist name', 'الاسم', 'اسم الموظف'],
+  email:      ['email', 'email address', 'البريد الإلكتروني', 'الايميل'],
+  phone:      ['phone', 'mobile', 'phone number', 'mobile number', 'tel', 'الهاتف', 'رقم الهاتف', 'الموبايل'],
+  role:       ['role', 'job role', 'position', 'الدور', 'الوظيفة'],
+  branch:     ['branch', 'branch code', 'branch id', 'pharmacyid', 'pharmacy code', 'الفرع', 'كود الفرع'],
+  joining:    ['joining date', 'joiningdate', 'hire date', 'start date', 'تاريخ الالتحاق', 'تاريخ التعيين'],
+  leaving:    ['leaving date', 'leavingdate', 'end date', 'termination date', 'تاريخ المغادرة', 'تاريخ الانتهاء'],
+  status:     ['status', 'employment status', 'active', 'الحالة', 'نشط'],
 }
 
 export interface PharmacistsAdapterDeps {
@@ -120,9 +120,8 @@ export function createPharmacistsAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

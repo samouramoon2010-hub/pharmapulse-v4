@@ -61,7 +61,10 @@ function makeAlert(
 ): LiveAlert {
   const fp = fingerprint(type, extras.kpiKey)
   return {
-    id:               `alert-${type}-${Date.now()}`,
+    // fp (not just type) disambiguates alerts generated within the same
+    // millisecond — e.g. several KPIs going critical in one pass used to
+    // all get "alert-KPI_CRITICAL-<sameMs>" and collide as React keys.
+    id:               `alert-${fp}-${Date.now()}`,
     type,
     priority,
     title,

@@ -68,8 +68,22 @@ export async function saveKpiEntry({
   if (isDataExchangeImport && !userId) {
     throw new Error('saveKpiEntry: isDataExchangeImport requires an explicit userId')
   }
-  if (isDataExchangeImport && (!importBatchRef || !String(importBatchRef).trim())) {
+  if (isDataExchangeImport && (!importBatchRef || typeof importBatchRef !== 'string' || !importBatchRef.trim())) {
     throw new Error('saveKpiEntry: isDataExchangeImport requires a non-empty importBatchRef')
+  }
+  // Maintenance Quick Wins — importBatchRef integrity: an import-attributed
+  // write must reference a real import_jobs document. Without this check,
+  // any caller could pass an arbitrary string and importBatchRef would
+  // silently become a dangling reference (see PR-1G-A referential-integrity
+  // finding). Runs before any Firestore write below — a rejected reference
+  // never reaches setDoc, so there is no partial commit. Manual entries
+  // (isDataExchangeImport false/omitted) never reach this branch and are
+  // completely unaffected.
+  if (isDataExchangeImport) {
+    const jobSnap = await getDoc(doc(db, COL.IMPORT_JOBS, importBatchRef.trim()))
+    if (!jobSnap.exists()) {
+      throw new Error(`saveKpiEntry: importBatchRef "${importBatchRef}" does not reference an existing import job`)
+    }
   }
   let resolvedUserId = auth?.currentUser?.uid || userId
   if (isDataExchangeImport) {

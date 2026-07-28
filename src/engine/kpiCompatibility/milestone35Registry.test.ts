@@ -87,7 +87,12 @@ describe('B — Validation Engine: isPrimary invariant', () => {
     expect(DEFAULT_KPI_REGISTRY.insuranceConversion.isPrimary).toBe(false)
   })
 
-  it('protected core keys cannot be archived', () => {
+  // 2026-07-07 owner decision: PROTECTED_CORE_KEYS no longer blocks
+  // archiveKpiDefinition()/transitionKpiLifecycle() — see
+  // kpiRegistryService.archiveCoreKeys.test.ts for that behavior.
+  // This test only verifies the unrelated, unchanged fact that these
+  // keys are still flagged isCore:true in the code-level defaults.
+  it('protected core keys are marked isCore:true in DEFAULT_KPI_REGISTRY', () => {
     PROTECTED_CORE_KEYS.forEach((key) => {
       expect(DEFAULT_KPI_REGISTRY[key]).toBeDefined()
       expect(DEFAULT_KPI_REGISTRY[key].isCore).toBe(true)

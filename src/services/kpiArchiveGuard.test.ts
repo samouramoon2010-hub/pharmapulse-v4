@@ -87,3 +87,52 @@ describe('PR-1C — checkKpiArchiveDependencies', () => {
     expect(result.safe).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// 2026-07-07 — Owner decision: PROTECTED_CORE_KEYS no longer blocks
+// archiveKpiDefinition() for wasfaty/omnihealth/wellnessCard/basket/
+// crossSelling. This guard function was never core-key-aware to begin
+// with (it treats every KPI key identically) — these tests make that
+// explicit for the 5 previously-protected keys specifically, since
+// they are the ones this decision applies to.
+// ─────────────────────────────────────────────────────────────
+describe('Core KPI keys — same guard behavior as any other KPI key', () => {
+  const coreKeys = ['wasfaty', 'omnihealth', 'wellnessCard', 'basket', 'crossSelling']
+
+  it.each(coreKeys)('"%s" is still blocked while referenced by an active (published) profile', async (key) => {
+    docsByCollection.set('evaluation_profiles', [
+      { status: 'published', baskets: { b1: { elements: [{ kpiKey: key }] } } },
+    ])
+    const result = await checkKpiArchiveDependencies(key)
+    expect(result.safe).toBe(false)
+    expect(result.dependencies.find((d) => d.type === 'active_profile')).toBeTruthy()
+  })
+
+  it.each(coreKeys)('"%s" is still blocked while referenced by a draft profile', async (key) => {
+    docsByCollection.set('evaluation_profiles', [
+      { status: 'draft', baskets: { b1: { elements: [{ kpiKey: key }] } } },
+    ])
+    const result = await checkKpiArchiveDependencies(key)
+    expect(result.safe).toBe(false)
+    expect(result.dependencies.find((d) => d.type === 'draft_profile')).toBeTruthy()
+  })
+
+  it.each(coreKeys)('"%s" is safe to archive once its only referencing profile is archived', async (key) => {
+    docsByCollection.set('evaluation_profiles', [
+      { status: 'archived', baskets: { b1: { elements: [{ kpiKey: key }] } } },
+    ])
+    const result = await checkKpiArchiveDependencies(key)
+    expect(result.safe).toBe(true)
+    expect(result.dependencies.find((d) => d.type === 'active_profile' || d.type === 'draft_profile')).toBeUndefined()
+  })
+
+  it.each(coreKeys)('"%s" historical targets/actuals/evaluation_results remain informational-only, never block archive', async (key) => {
+    docsByCollection.set('targets', [{ [key]: 100 }])
+    docsByCollection.set('kpi_entries', [{ [key]: 5 }])
+    docsByCollection.set('evaluation_results', [
+      { basketResults: [{ elements: [{ kpiKey: key }] }] },
+    ])
+    const result = await checkKpiArchiveDependencies(key)
+    expect(result.safe).toBe(true)
+  })
+})

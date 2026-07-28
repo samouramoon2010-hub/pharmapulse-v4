@@ -19,7 +19,7 @@ import { db, COL } from '../dxFirebaseTypes'
 import { saveTarget } from '../dxKpiTargetTypes'
 import { getTargetFieldName } from '../../../engine/kpiRegistry/kpiUiAdapter'
 import type { KpiRegistry } from '../../../engine/kpiRegistry'
-import { pickField } from './columnAliasUtils'
+import { pickField, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -76,11 +76,11 @@ export interface ExistingBranchRecord {
   active: boolean
 }
 
-const HEADER_ALIASES = {
-  month:  ['month', 'الشهر'],
-  branch: ['branch code', 'branchcode', 'كود الفرع'],
-  kpi:    ['kpi key', 'kpikey', 'مفتاح المؤشر'],
-  value:  ['target value', 'targetvalue', 'قيمة الهدف'],
+export const HEADER_ALIASES = {
+  month:  ['month', 'period', 'الشهر'],
+  branch: ['branch code', 'branchcode', 'branch', 'branch id', 'كود الفرع', 'الفرع'],
+  kpi:    ['kpi key', 'kpikey', 'kpi code', 'kpi', 'مفتاح المؤشر', 'المؤشر'],
+  value:  ['target value', 'targetvalue', 'target', 'value', 'قيمة الهدف', 'الهدف'],
 }
 
 export interface BranchTargetsAdapterDeps {
@@ -104,9 +104,8 @@ export function createBranchTargetsAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

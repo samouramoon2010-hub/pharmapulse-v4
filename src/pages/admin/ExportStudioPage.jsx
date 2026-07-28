@@ -14,7 +14,7 @@
 // ============================================================
 import React, { useState, useMemo, useEffect } from 'react'
 import { format } from 'date-fns'
-import { FileSpreadsheet, Download, AlertTriangle, CheckCircle2, Loader2, History } from 'lucide-react'
+import { FileSpreadsheet, Download, AlertTriangle, CheckCircle2, Loader2, History, MessageCircle } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../components/ui/Toast'
 import { useKpiStore } from '../../store/kpiStore'
@@ -39,6 +39,7 @@ import { downloadExportWorkbook } from '../../services/export/exportDownloadServ
 import { downloadCsv } from '../../services/export/csvExportService'
 import { buildExportFileName } from '../../services/export/workbookBuilder'
 import { recordExportAudit, listRecentExportAudits } from '../../services/export/exportAuditService'
+import { buildWhatsappSummary } from '../../services/export/whatsappSummaryService'
 
 function currentMonthStr() {
   return format(new Date(), 'yyyy-MM')
@@ -65,6 +66,9 @@ export default function ExportStudioPage() {
   const [status, setStatus] = useState('idle') // idle | generating | done | error
   const [validationResult, setValidationResult] = useState(null)
   const [history, setHistory] = useState(null)
+  // DX-11 — last successfully validated dataset, kept only so the user
+  // can explicitly share its summary via WhatsApp. Never sent automatically.
+  const [lastDataset, setLastDataset] = useState(null)
 
   const template = EXPORT_TEMPLATE_CATALOG.find((t) => t.id === templateId)
   const availableTemplates = getAvailableExportTemplates()
@@ -109,6 +113,7 @@ export default function ExportStudioPage() {
     if (!template || template.unavailableReason) return
     setStatus('generating')
     setValidationResult(null)
+    setLastDataset(null)
     try {
       let dataset
       const generatedBy = userProfile?.id ?? 'system'
@@ -152,7 +157,7 @@ export default function ExportStudioPage() {
         const fileName = buildExportFileName(dataset, 'csv')
         downloadCsv(sheet, fileName)
       } else {
-        downloadExportWorkbook(dataset)
+        await downloadExportWorkbook(dataset)
       }
 
       await recordExportAudit({
@@ -161,6 +166,7 @@ export default function ExportStudioPage() {
         rowCount: dataset.meta.rowCount, workbookVersion: dataset.meta.workbookVersion, status: 'SUCCESS',
         fileName: buildExportFileName(dataset, format_),
       })
+      setLastDataset(dataset)
       setStatus('done')
     } catch (err) {
       toast.error?.(err.message || 'Export failed')
@@ -266,8 +272,21 @@ export default function ExportStudioPage() {
       )}
 
       {status === 'done' && (
-        <div style={{ marginTop: 16, color: 'var(--text-success, #15803d)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <CheckCircle2 size={16} /> Export downloaded.
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text-success, #15803d)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckCircle2 size={16} /> Export downloaded.
+          </span>
+          {lastDataset && (
+            <button
+              onClick={() => {
+                const { shareUrl } = buildWhatsappSummary(lastDataset)
+                window.open(shareUrl, '_blank', 'noopener')
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <MessageCircle size={16} /> Share summary via WhatsApp
+            </button>
+          )}
         </div>
       )}
 

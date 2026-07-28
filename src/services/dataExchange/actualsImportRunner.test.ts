@@ -379,3 +379,102 @@ describe('DX-7 — Actuals Import Runner (chunked, checkpointed, resumable, canc
     expect(final.staleReason).toMatch(/retried/)
   })
 })
+
+// ============================================================
+// Regression coverage for the production "Function setDoc() called
+// with invalid data. Unsupported field value: undefined (found in
+// field fileMeta in document import_jobs/...-pharmacist-actuals)"
+// failure — reproduced for both BRANCH_ACTUALS and PHARMACIST_ACTUALS.
+// Root cause: createImportJob always assigned `fileMeta:
+// params.fileMeta` (frequently undefined), and validateActualsJob's
+// only fallback was a hardcoded `fileName: 'upload.xlsx'` placeholder
+// gated on a `fileChecksum` the UI never actually passed.
+// ============================================================
+function containsUndefinedDeep(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsUndefinedDeep)
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).some(
+      ([, v]) => v === undefined || containsUndefinedDeep(v),
+    )
+  }
+  return false
+}
+
+describe('DX-7 — Actuals Import Runner — fileMeta hygiene (no undefined reaches Firestore)', () => {
+  it('persists a Branch Actuals job with no fileMeta key at all when the caller supplies none', async () => {
+    await validateActualsJob({
+      jobIdPrefix: 'fm-act-1', domain: 'BRANCH_ACTUALS', guardCtx: ADMIN, actorRole: 'admin',
+      rawRows: rowsFor(['wasfaty']), existing: EXISTING,
+    }, repo)
+
+    const jobId = jobIdForActualsDomain('fm-act-1', 'BRANCH_ACTUALS')
+    const stored = jobDocs.get(jobId) as Record<string, unknown>
+    expect('fileMeta' in stored).toBe(false)
+    expect(containsUndefinedDeep(stored)).toBe(false)
+  })
+
+  it('reproduces the exact production scenario: Pharmacist Actuals tab, real upload, no Firestore error', async () => {
+    const preview = await validateActualsJob({
+      jobIdPrefix: 'fm-act-2', domain: 'PHARMACIST_ACTUALS', guardCtx: ADMIN, actorRole: 'admin',
+      rawRows: [{ date: '2026-06-27', 'employee id': 'EMP1', 'kpi key': 'wasfaty', 'actual value': '100' }],
+      existing: EXISTING,
+      fileMeta: {
+        fileName: 'PharmaPulse_Al_Atheer_5074_Pharmacist_Actuals_2026-06-27.xlsx',
+        sizeBytes: 18432, checksum: 'def456', sheetName: 'Pharmacist Actuals',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+    }, repo)
+
+    const jobId = jobIdForActualsDomain('fm-act-2', 'PHARMACIST_ACTUALS')
+    const stored = jobDocs.get(jobId) as Record<string, unknown>
+    expect(stored).toBeDefined()
+    expect(containsUndefinedDeep(stored)).toBe(false)
+    expect(stored.fileMeta).toEqual({
+      fileName: 'PharmaPulse_Al_Atheer_5074_Pharmacist_Actuals_2026-06-27.xlsx',
+      sizeBytes: 18432, checksum: 'def456', sheetName: 'Pharmacist Actuals',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    expect(preview.job.fileMeta).toEqual(stored.fileMeta)
+  })
+
+  it('a mobile-Safari-like fileMeta (no checksum, no mimeType) persists cleanly for Pharmacist Actuals', async () => {
+    await validateActualsJob({
+      jobIdPrefix: 'fm-act-3', domain: 'PHARMACIST_ACTUALS', guardCtx: ADMIN, actorRole: 'admin',
+      rawRows: rowsFor(['wasfaty']),
+      existing: EXISTING,
+      fileMeta: { fileName: 'upload.xlsx', sizeBytes: 9001 },
+    }, repo)
+
+    const jobId = jobIdForActualsDomain('fm-act-3', 'PHARMACIST_ACTUALS')
+    const stored = jobDocs.get(jobId) as Record<string, unknown>
+    expect(stored.fileMeta).toEqual({ fileName: 'upload.xlsx', sizeBytes: 9001 })
+    expect(containsUndefinedDeep(stored)).toBe(false)
+  })
+
+  it('falls back to the legacy checksum-only shape when only fileChecksum is supplied (no fileMeta object)', async () => {
+    await validateActualsJob({
+      jobIdPrefix: 'fm-act-4', domain: 'BRANCH_ACTUALS', guardCtx: ADMIN, actorRole: 'admin',
+      rawRows: rowsFor(['wasfaty']), existing: EXISTING,
+      fileChecksum: 'legacy-checksum-only',
+    }, repo)
+
+    const jobId = jobIdForActualsDomain('fm-act-4', 'BRANCH_ACTUALS')
+    const stored = jobDocs.get(jobId) as Record<string, unknown>
+    expect(stored.fileMeta).toEqual({ fileName: 'upload.xlsx', sizeBytes: 0, checksum: 'legacy-checksum-only' })
+    expect(containsUndefinedDeep(stored)).toBe(false)
+  })
+
+  it('a fileMeta object that strips down to nothing is omitted entirely, never written as {} or undefined', async () => {
+    const degenerateFileMeta = { fileName: undefined, sizeBytes: undefined } as unknown as { fileName: string; sizeBytes: number }
+    await validateActualsJob({
+      jobIdPrefix: 'fm-act-5', domain: 'BRANCH_ACTUALS', guardCtx: ADMIN, actorRole: 'admin',
+      rawRows: rowsFor(['wasfaty']), existing: EXISTING,
+      fileMeta: degenerateFileMeta,
+    }, repo)
+
+    const jobId = jobIdForActualsDomain('fm-act-5', 'BRANCH_ACTUALS')
+    const stored = jobDocs.get(jobId) as Record<string, unknown>
+    expect('fileMeta' in stored).toBe(false)
+    expect(containsUndefinedDeep(stored)).toBe(false)
+  })
+})

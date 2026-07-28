@@ -9,13 +9,15 @@
 //   - Only admins can write / archive / hide
 //   - No hard delete — status transitions only
 //   - Default registry is the fallback when Firestore is empty
-//   - Protected core KPI keys cannot be changed (enforced here +
-//     in Firestore rules)
+//   - PROTECTED_CORE_KEYS still blocks hideKpiDefinition() (hiding a
+//     core KPI from input forms). Archival was intentionally unblocked
+//     for these keys on 2026-07-07 (owner decision) — see
+//     archiveKpiDefinition()/transitionKpiLifecycle() below.
 // ============================================================
 
 import {
   collection, doc, setDoc, getDoc, getDocs,
-  onSnapshot, serverTimestamp, query, orderBy, addDoc,
+  onSnapshot, serverTimestamp, addDoc,
 } from 'firebase/firestore'
 import { db, auth, COL } from './firebase'
 import { logAction, AUDIT_ACTION } from './auditService'
@@ -86,10 +88,17 @@ export function subscribeKpiRegistry(
   onUpdate: (registry: KpiRegistry, uiStatuses: Record<string, KpiUiStatus>) => void,
   onError?: (err: Error) => void,
 ): () => void {
-  const q = query(registryCol(), orderBy('sortOrder', 'asc'))
-
+  // 2026-07-07 fix: no server-side orderBy here. Firestore's orderBy()
+  // silently excludes any document missing the ordered field — a KPI
+  // written before `sortOrder` was introduced (or any other legacy/
+  // malformed doc) would never reach onUpdate() at all, not even as an
+  // "unknown" entry. docToKpiDefinition() already defaults a missing
+  // sortOrder to 999 (see kpiRegistryLogic.ts), and every consumer
+  // (KpiManagementPage.jsx) sorts the resulting array client-side by
+  // that same field — so ordering stays deterministic without needing
+  // Firestore to enforce it, and no document is ever silently dropped.
   return onSnapshot(
-    q,
+    registryCol(),
     (snapshot) => {
       const remote: KpiRegistry                   = {}
       const uiStatuses: Record<string, KpiUiStatus> = {}
@@ -232,15 +241,15 @@ export async function saveKpiDefinition(
 
 /**
  * Archive a KPI (set isActive=false, uiStatus=ARCHIVED).
- * Protected core KPIs cannot be archived.
  *
- * @throws Error if key is a protected core KPI
+ * Owner decision (2026-07-07): PROTECTED_CORE_KEYS no longer blocks archival —
+ * a core KPI can be archived like any other, once no active/draft evaluation
+ * profile references it (enforced separately by kpiArchiveGuard.ts, called by
+ * the UI before this function runs). PROTECTED_CORE_KEYS still governs other
+ * safeguards (e.g. hideKpiDefinition, editor-field immutability) — this
+ * function is the only lifted restriction.
  */
 export async function archiveKpiDefinition(key: string): Promise<void> {
-  if (PROTECTED_CORE_KEYS.has(key)) {
-    throw new Error(`KPI "${key}" is a protected core KPI and cannot be archived.`)
-  }
-
   const existingSnap = await getDoc(registryDoc(key))
   if (!existingSnap.exists()) {
     // Key not in Firestore yet — check defaults
@@ -285,7 +294,12 @@ export async function archiveKpiDefinition(key: string): Promise<void> {
  * Protected core KPIs cannot be hidden from input.
  */
 export async function hideKpiDefinition(key: string): Promise<void> {
-  if (PROTECTED_CORE_KEYS.has(key)) {
+  // Pre-existing bug fixed 2026-07-07: this previously referenced the bare
+  // `PROTECTED_CORE_KEYS` name, which is only re-exported (not locally bound)
+  // from kpiRegistryLogic.ts — every call threw ReferenceError regardless of
+  // key. Using the already-imported local alias `_PROTECTED` restores the
+  // intended behavior (see kpiRegistryService.archiveCoreKeys.test.ts).
+  if (_PROTECTED.has(key)) {
     throw new Error(`KPI "${key}" is a protected core KPI and cannot be hidden from input.`)
   }
 
@@ -349,8 +363,12 @@ export async function resetKpiRegistryToDefaults(): Promise<void> {
  */
 export async function fetchKpiRegistryOnce(): Promise<KpiRegistry> {
   try {
-    const q    = query(registryCol(), orderBy('sortOrder', 'asc'))
-    const snap = await getDocs(q)
+    // 2026-07-07 fix: same reasoning as subscribeKpiRegistry() above — no
+    // server-side orderBy, so a KPI document missing `sortOrder` is never
+    // silently excluded from this snapshot (this function is used by
+    // bulk evaluation, so a dropped document here would mean a KPI is
+    // silently missing from evaluation runs, not just an admin UI list).
+    const snap = await getDocs(registryCol())
     const remote: KpiRegistry = {}
     snap.forEach((docSnap) => {
       const data = docSnap.data() as Record<string, unknown>
@@ -408,9 +426,10 @@ export async function logKpiAudit(entry: Omit<KpiAuditEntry, 'changedAt'>): Prom
  * Enforces canTransitionKpiLifecycle — no duplicate transition logic.
  * Writes the new lifecycleStage to Firestore and creates an audit entry.
  *
+ * Owner decision (2026-07-07): archiving a PROTECTED_CORE_KEYS KPI via this
+ * path is no longer blocked — see archiveKpiDefinition() above for rationale.
+ *
  * @throws Error if the transition is blocked
- * @throws Error if the KPI is a protected core KPI and the target stage
- *         would prevent it from being evaluated (archived → protected core)
  */
 export async function transitionKpiLifecycle(
   key:       string,
@@ -430,11 +449,6 @@ export async function transitionKpiLifecycle(
     : (DEFAULT_KPI_REGISTRY[key] as unknown as Record<string, unknown>)
 
   const fromStage = (data.lifecycleStage ?? 'production_evaluation') as KpiLifecycleStage
-
-  // Guard: protected core KPIs cannot be archived
-  if (PROTECTED_CORE_KEYS.has(key) && toStage === 'archived') {
-    throw new Error(`KPI "${key}" is a protected core KPI and cannot be archived.`)
-  }
 
   // Enforce transition rules — no duplicate logic here
   if (!canTransitionKpiLifecycle(fromStage, toStage)) {

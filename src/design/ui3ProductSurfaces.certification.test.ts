@@ -308,12 +308,12 @@ describe('UI3-2E — Assistant no-context state uses EmptyState instead of a bar
     expect(assistantPageSrc).toContain("import EmptyState from '../../components/ui/EmptyState'")
   })
   it('AssistantPage conditionally renders EmptyState (tone=neutral, compact) when context is not yet ready', () => {
-    expect(assistantPageSrc).toContain('{context ? (')
+    expect(assistantPageSrc).toContain('{context && !isPreparingContext ? (')
     expect(assistantPageSrc).toContain('tone="neutral"')
     expect(assistantPageSrc).toContain('Preparing your context')
   })
-  it('does not introduce a new AI behavior — AssistantPanel/context wiring is unchanged otherwise', () => {
-    expect(assistantPageSrc).toContain('AssistantPanel context={context}')
+  it('AssistantPanel is rendered with the live-grounded context (and personalAi, for BYOK)', () => {
+    expect(assistantPageSrc).toContain('AssistantPanel context={context} personalAi={personalAi}')
   })
 })
 

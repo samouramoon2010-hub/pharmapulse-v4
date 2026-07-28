@@ -13,6 +13,7 @@
 // One entry per import domain from the approved architecture (Part 2,
 // A–I). Only KPI_ACTUALS has an adapter implementation in DX-1.
 export type ImportDomain =
+  | 'REGION'
   | 'GROUP'
   | 'BRANCH'
   | 'PHARMACIST'
@@ -50,7 +51,10 @@ export type ImportJobStatus =
 export interface ImportFileMetadata {
   fileName:    string
   sizeBytes:   number
-  checksum:    string          // sha256 of file content — drives re-upload detection
+  /** sha256 of file content — drives re-upload detection. Optional:
+   *  checksum computation is best-effort (browser Web Crypto API) and
+   *  must never block or fail an import if it cannot be computed. */
+  checksum?:   string
   sheetName?:  string
   mimeType?:   string
 }
@@ -238,6 +242,22 @@ export interface ImportJob {
    *  to enforce DX7_CONFIG.MAX_RETRY_ATTEMPTS — never read by the
    *  state machine or the commit logic itself. */
   retryCount?: number
+
+  /** Universal AI Intake (Phase 1) additions — all optional/additive,
+   *  same convention as previewSignature/retryCount above. A job that
+   *  never goes through the AI Intake page never sets these; the
+   *  existing Data Exchange Studio flow is unaffected. See
+   *  intakeSessionTypes.ts for the derived helpers that read them. */
+  intakeSourceType?:       'EXCEL' | 'CSV' | 'TEXT' | 'PDF' | 'IMAGE'
+    | 'chatgpt_structured' | 'excel_extracted' | 'csv_extracted' | 'pdf_extracted' | 'image_extracted' | 'plain_text_extracted'
+  intakeSourceFileName?:   string
+  intakeSourceMimeType?:   string
+  intakeSelectedSheet?:    string
+  intakeDetectionConfidence?: number
+  intakeSchemaVersion?:    string
+  intakeParserVersion?:    string
+  approvedAt?:             string
+  executedAt?:             string
 }
 
 export function emptyRowCounts() {

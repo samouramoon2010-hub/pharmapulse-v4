@@ -27,4 +27,4 @@ Avoid:
 - Duplicate cards
 - Too many colors
 
-@Codex.design.md
+@CLAUDE.design.md

@@ -58,9 +58,9 @@ describe('PR-1E4 — KPI Registry: table converts to cards, no Core badge, actio
     const s = await kpiRegistryTable()
     expect(s).not.toContain('function ProtectedBadge')
   })
-  it('protected/core KPIs show the blocked-archive reason, not a silently missing action', async () => {
+  it('protected/core KPIs show the blocked-hide reason, not a silently missing action (2026-07-07: archive is no longer blocked for core KPIs, only hide is)', async () => {
     const s = await kpiRegistryTable()
-    expect(s).toContain('Protected system KPI — cannot be archived or hidden')
+    expect(s).toContain('Protected system KPI — cannot be hidden from input forms')
   })
 })
 
@@ -138,9 +138,9 @@ describe('PR-1E4 — Data Exchange Studio: import history cards, sheet mapping d
   })
   it('sheet → domain mapping no longer uses a <table> with a <select> per cell', async () => {
     const s = await dataExchangeStudio()
-    const idx = s.indexOf('<div className="space-y-2">\n            {sheetMappings.map')
+    const idx = s.indexOf('{sheetMappings.map')
     expect(idx).toBeGreaterThan(-1)
-    const block = s.slice(idx, idx + 800)
+    const block = s.slice(idx - 50, idx + 1200)
     expect(block).not.toContain('<table>')
     expect(block).toContain('sheetMappings.map')
   })

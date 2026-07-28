@@ -9,12 +9,13 @@ import {
   Globe, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, AlertTriangle,
   Activity, Zap, ShieldAlert, RotateCcw,
-  LayoutGrid,
+  LayoutGrid, Mail, Loader2,
 } from 'lucide-react'
 import Heatmap from '../heatmap/Heatmap'
 import { buildBranchKpiMatrix } from '../../engine/regionalIntelligence/heatmapSelectors'
 import { getProductionEngineKeys } from '../../engine/kpiAnalyticsEngine'
 import { DEFAULT_KPI_REGISTRY } from '../../engine/kpiRegistry'
+import { selectCriticalRiskBranches } from '../../services/alerts/criticalRiskAlertBuilder'
 
 const URGENCY_CFG = {
   CRITICAL: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)', label: 'Critical' },
@@ -76,9 +77,11 @@ function SectionRow({ icon: Icon, iconColor, label, children, noBorder }) {
 
 // ── Main component ─────────────────────────────────────────────
 
-export default function RegionalIntelligencePanel({ intelligence, branchRollups = [], liveRegistry }) {
+export default function RegionalIntelligencePanel({ intelligence, branchRollups = [], liveRegistry, isAdmin = false, onSendCriticalRiskAlert, sendingAlert = false }) {
   const [open, setOpen] = useState(false)
   const [heatmapOpen, setHeatmapOpen] = useState(false)
+
+  const criticalBranches = useMemo(() => selectCriticalRiskBranches(branchRollups), [branchRollups])
 
   if (!intelligence) return null
 
@@ -212,11 +215,33 @@ export default function RegionalIntelligencePanel({ intelligence, branchRollups 
           {/* Region classification rows */}
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <SectionRow icon={AlertTriangle} iconColor="#ef4444" label="Highest Risk">
-              <RegionList
-                names={p.highestRiskRegions}
-                color="#ef4444" bg="rgba(239,68,68,0.08)" border="rgba(239,68,68,0.2)"
-                emptyText="None"
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <RegionList
+                  names={p.highestRiskRegions}
+                  color="#ef4444" bg="rgba(239,68,68,0.08)" border="rgba(239,68,68,0.2)"
+                  emptyText="None"
+                />
+                {isAdmin && criticalBranches.length > 0 && onSendCriticalRiskAlert && (
+                  <button
+                    onClick={() => onSendCriticalRiskAlert(criticalBranches)}
+                    disabled={sendingAlert}
+                    data-testid="send-critical-risk-alert-btn"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '5px',
+                      fontSize: '10px', fontWeight: 600, padding: '3px 9px',
+                      borderRadius: '99px', cursor: sendingAlert ? 'default' : 'pointer',
+                      background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      opacity: sendingAlert ? 0.7 : 1,
+                    }}
+                  >
+                    {sendingAlert
+                      ? <Loader2 style={{ width: 11, height: 11 }} className="animate-spin" />
+                      : <Mail style={{ width: 11, height: 11 }} strokeWidth={1.75} />}
+                    Send alert email ({criticalBranches.length})
+                  </button>
+                )}
+              </div>
             </SectionRow>
             <SectionRow icon={TrendingUp} iconColor="#22c55e" label="Strongest">
               <RegionList

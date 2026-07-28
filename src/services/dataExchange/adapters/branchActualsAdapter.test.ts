@@ -1,21 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const entryDocs = new Map<string, Record<string, unknown>>()
+// Maintenance Quick Wins — importBatchRef integrity: saveKpiEntry() now
+// verifies the referenced import_jobs doc exists before writing. In real
+// production this is always true (validateActualsJob()/repo.saveJob()
+// persists the job before any commit) — this map + the pre-seeded
+// 'job-1' entry below models that same invariant for this adapter-level
+// test, which exercises commitJob() directly without the full runner.
+const jobDocs   = new Map<string, Record<string, unknown>>()
 const auditCalls: Array<Record<string, unknown>> = []
 
 vi.mock('../../firebase', () => ({
   db: {}, auth: { currentUser: { uid: 'admin-1' } },
-  COL: { KPI_ENTRIES: 'kpi_entries', AUDIT_LOGS: 'audit_logs' },
+  COL: { KPI_ENTRIES: 'kpi_entries', AUDIT_LOGS: 'audit_logs', IMPORT_JOBS: 'import_jobs' },
 }))
+
+function storeFor(col: string) {
+  return col === 'import_jobs' ? jobDocs : entryDocs
+}
 
 vi.mock('firebase/firestore', () => ({
   collection:      vi.fn(() => ({})),
-  doc:             vi.fn((_db, _col, id) => ({ id })),
-  setDoc:          vi.fn(async (ref: { id: string }, data: Record<string, unknown>) => {
-    entryDocs.set(ref.id, { ...(entryDocs.get(ref.id) ?? {}), ...data })
+  doc:             vi.fn((_db, col, id) => ({ col, id })),
+  setDoc:          vi.fn(async (ref: { col: string; id: string }, data: Record<string, unknown>) => {
+    const store = storeFor(ref.col)
+    store.set(ref.id, { ...(store.get(ref.id) ?? {}), ...data })
   }),
-  getDoc:          vi.fn(async (ref: { id: string }) => {
-    const data = entryDocs.get(ref.id)
+  getDoc:          vi.fn(async (ref: { col: string; id: string }) => {
+    const data = storeFor(ref.col).get(ref.id)
     return { exists: () => data != null, data: () => data, id: ref.id }
   }),
   serverTimestamp: vi.fn(() => ({ _type: 'serverTimestamp' })),
@@ -43,7 +55,12 @@ const BRANCH_ACTIVE       = { id: 'ph-1', code: 'B1', name: 'Branch One', active
 const BRANCH_INACTIVE     = { id: 'ph-2', code: 'B2', name: 'Branch Two', active: false, managerUid: 'mgr-2' }
 const BRANCH_NO_MANAGER   = { id: 'ph-3', code: 'B3', name: 'Branch Three', active: true, managerUid: null }
 
-beforeEach(() => { entryDocs.clear(); auditCalls.length = 0 })
+beforeEach(() => {
+  entryDocs.clear()
+  auditCalls.length = 0
+  jobDocs.clear()
+  jobDocs.set('job-1', { jobId: 'job-1', status: 'READY' }) // pre-seeded: see comment above
+})
 
 async function runRow(row: Record<string, unknown>, actorRole = 'admin', today?: string) {
   const adapter = createBranchActualsAdapter({

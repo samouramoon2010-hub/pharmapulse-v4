@@ -8,21 +8,28 @@
 // ============================================================
 import React from 'react'
 import {
-  SlidersHorizontal, Palette, Bot, Bell, ShieldCheck, Lock, Gauge, Info,
+  SlidersHorizontal, Palette, Bot, Bell, ShieldCheck, Lock, Gauge, Info, FlaskConical, DatabaseBackup,
 } from 'lucide-react'
 
 export const SETTINGS_SECTIONS = [
   { id: 'general',       label: 'General',       icon: SlidersHorizontal, functional: true  },
   { id: 'appearance',    label: 'Appearance',     icon: Palette,           functional: true  },
-  { id: 'ai-providers',  label: 'AI Providers',   icon: Bot,               functional: false },
+  { id: 'ai-providers',  label: 'AI Providers',   icon: Bot,               functional: true  },
   { id: 'notifications', label: 'Notifications',  icon: Bell,              functional: false },
   { id: 'security',      label: 'Security',       icon: ShieldCheck,       functional: false },
   { id: 'privacy',       label: 'Privacy',        icon: Lock,              functional: false },
   { id: 'performance',   label: 'Performance',    icon: Gauge,             functional: false },
+  // Sidebar-3: Demo Data seeder, moved here from the primary sidebar —
+  // admin-only, not a business-facing settings concept like the rest.
+  { id: 'admin-tools',   label: 'Admin Tools',    icon: FlaskConical,      functional: true, adminOnly: true },
+  // Manual on-demand Firestore export — real automated backup needs
+  // GCP billing enabled first (see FIRESTORE_BACKUP_QUICK_RUNBOOK.md).
+  { id: 'backup',        label: 'Data Backup',    icon: DatabaseBackup,    functional: true, adminOnly: true },
   { id: 'about',         label: 'About',          icon: Info,              functional: true  },
 ]
 
-export default function SettingsSidebar({ activeId, onSelect }) {
+export default function SettingsSidebar({ activeId, onSelect, isAdmin = false }) {
+  const sections = SETTINGS_SECTIONS.filter((s) => !s.adminOnly || isAdmin)
   return (
     <nav style={{
       width: '220px', flexShrink: 0,
@@ -31,7 +38,7 @@ export default function SettingsSidebar({ activeId, onSelect }) {
       display: 'flex', flexDirection: 'column', gap: '2px',
       overflowY: 'auto',
     }}>
-      {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
+      {sections.map(({ id, label, icon: Icon }) => {
         const active = id === activeId
         return (
           <button

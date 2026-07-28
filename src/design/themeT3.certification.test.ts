@@ -537,7 +537,7 @@ describe('Guardrails — App.jsx routes/permissions unchanged by Theme T3', () =
     expect(appSrc.match(/<ThemeProvider>/g)?.length).toBe(1)
   })
   it('App.jsx /settings route is unchanged (still points at pages/settings/SettingsPage)', () => {
-    expect(appSrc).toContain("import SettingsPage         from './pages/settings/SettingsPage'")
+    expect(appSrc).toContain("const SettingsPage         = lazy(() => import('./pages/settings/SettingsPage'))")
   })
   it('App.jsx role arrays (ADMIN/EXEC_ROLES/MGR_UP/ALL) are still present, untouched in spirit by this bundle', () => {
     expect(appSrc).toContain("const ADMIN  = ['admin']")

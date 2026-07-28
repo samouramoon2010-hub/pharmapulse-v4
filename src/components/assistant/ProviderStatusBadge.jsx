@@ -6,12 +6,15 @@
 // when AI is fully disabled). No connection logic performed here.
 // ============================================================
 import React from 'react'
-import { Plug, PlugZap, AlertOctagon } from 'lucide-react'
+import { Plug, PlugZap, AlertOctagon, Sparkles } from 'lucide-react'
 
 const STATUS_CONFIG = {
   disabled:             { icon: Plug, label: 'AI disabled', color: 'var(--text-muted)' },
   mocked:               { icon: PlugZap, label: 'AI mock mode', color: '#60a5fa' },
   provider_unavailable: { icon: AlertOctagon, label: 'Provider unavailable', color: '#f87171' },
+  live:                 { icon: Sparkles, label: 'Your AI (live)', color: '#34d399' },
+  invalid_response:     { icon: AlertOctagon, label: 'Response rejected', color: '#fbbf24' },
+  model_unavailable:    { icon: AlertOctagon, label: 'Model unavailable', color: '#fbbf24' },
 }
 
 export default function ProviderStatusBadge({ status }) {

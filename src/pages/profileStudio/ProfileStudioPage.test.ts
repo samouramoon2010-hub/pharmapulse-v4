@@ -670,7 +670,7 @@ describe('App.jsx — Profile Studio route', () => {
   })
 
   it('imports ProfileStudioPage', () => {
-    expect(appSrc).toContain("import ProfileStudioPage from './pages/profileStudio/ProfileStudioPage'")
+    expect(appSrc).toContain("const ProfileStudioPage = lazy(() => import('./pages/profileStudio/ProfileStudioPage'))")
   })
 
   it('has /profile-studio route', () => {

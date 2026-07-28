@@ -7,10 +7,18 @@
 // in one place instead of four slightly different implementations.
 // ============================================================
 
+// Case-insensitive AND separator-insensitive: "Branch Code", "branch_code",
+// "BranchCode", and "branch-code" all normalize to the same key, so alias
+// lists only need one canonical spelling per language instead of every
+// spacing/punctuation variant a source file might use.
+export function normalizeHeader(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s_\-./]+/g, '')
+}
+
 export function pickField(row: Record<string, unknown>, aliases: string[]): string | undefined {
-  const lowerAliases = aliases.map((a) => a.trim().toLowerCase())
+  const normalizedAliases = aliases.map(normalizeHeader)
   for (const key of Object.keys(row)) {
-    if (lowerAliases.includes(key.trim().toLowerCase())) {
+    if (normalizedAliases.includes(normalizeHeader(key))) {
       const v = row[key]
       if (v == null) continue
       const s = String(v).trim()
@@ -18,6 +26,14 @@ export function pickField(row: Record<string, unknown>, aliases: string[]): stri
     }
   }
   return undefined
+}
+
+/** Resolves a single source header to its target field name using the same
+ *  normalized comparison as pickField. Returns undefined when unresolved. */
+export function findAliasMatch(header: string, aliasMap: Record<string, string[]>): string | undefined {
+  const normalized = normalizeHeader(header)
+  const entry = Object.entries(aliasMap).find(([, aliases]) => aliases.some((a) => normalizeHeader(a) === normalized))
+  return entry?.[0]
 }
 
 const STATUS_ACTIVE_VALUES   = ['active', 'نشط', '1', 'true', 'yes']

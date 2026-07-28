@@ -6,7 +6,7 @@
 // Does NOT modify existing KPI calculations or Firestore data.
 // ============================================================
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
-import { Database, Plus, RefreshCw, AlertTriangle, Info, X, Loader2, ChevronDown } from 'lucide-react'
+import { Database, Plus, RefreshCw, AlertTriangle, Info, X, Loader2, ChevronDown, Eye, EyeOff } from 'lucide-react'
 
 import {
   DEFAULT_KPI_REGISTRY,
@@ -54,6 +54,18 @@ export default function KpiManagementPage() {
     Object.values(mergedRegistry).sort((a, b) => a.sortOrder - b.sortOrder),
     [mergedRegistry],
   )
+
+  // Archived KPIs are hidden from this admin table by default — an
+  // explicit toggle brings them back into view for management (e.g.
+  // to unarchive one later). This is a view-only filter: archived
+  // KPIs are never removed from the registry itself, and were already
+  // excluded from every non-admin surface (target input, dashboard,
+  // entry) via isActive/lifecycleStage filtering.
+  const [showArchived, setShowArchived] = useState(false)
+  const visibleKpis = useMemo(() => {
+    if (showArchived) return allKpis
+    return allKpis.filter((k) => (uiStatuses[k.key] ?? (k.isActive ? 'ACTIVE' : 'ARCHIVED')) !== 'ARCHIVED')
+  }, [allKpis, uiStatuses, showArchived])
 
   // ── Registry health stats ──────────────────────────────────
   // PR-1C: warnings are split into blockers (prevent correct evaluation —
@@ -119,8 +131,12 @@ export default function KpiManagementPage() {
   // dependency check first and opens a modal showing exactly what would be
   // affected. Archiving itself only proceeds from the modal, and only when
   // the check reports safe:true.
+  //
+  // 2026-07-07: the PROTECTED_CORE_KEYS early-return here was removed —
+  // archiving a core KPI is now permitted (kpiRegistryService.ts no longer
+  // blocks it). The dependency check below still applies uniformly to
+  // every key, core or not.
   const requestArchive = useCallback(async (key) => {
-    if (PROTECTED_CORE_KEYS.has(key) && mergedRegistry[key]?.isCore) return
     setArchiveCheck({ key, loading: true })
     try {
       const result = await checkKpiArchiveDependencies(key)
@@ -182,6 +198,18 @@ export default function KpiManagementPage() {
           </p>
         </div>
         <div style={{ display:'flex', gap:'8px' }}>
+          <button
+            onClick={() => setShowArchived((s) => !s)}
+            style={{
+              height:'32px', padding:'0 12px', borderRadius:'8px', fontSize:'12px', fontWeight:500,
+              cursor:'pointer', background: showArchived ? 'rgba(96,165,250,0.10)' : 'transparent',
+              border:'1px solid var(--border-default)',
+              color: showArchived ? '#60a5fa' : 'var(--text-muted)', display:'flex', alignItems:'center', gap:'6px',
+            }}
+          >
+            {showArchived ? <Eye style={{ width:12, height:12 }} /> : <EyeOff style={{ width:12, height:12 }} />}
+            {showArchived ? 'Hide archived' : `Show archived (${healthStats.counts.archived})`}
+          </button>
           <button
             onClick={handleReset}
             style={{
@@ -297,7 +325,7 @@ export default function KpiManagementPage() {
 
       {/* Table */}
       <KpiRegistryTable
-        kpis={allKpis}
+        kpis={visibleKpis}
         uiStatuses={uiStatuses}
         onEdit={openEdit}
         onArchive={requestArchive}

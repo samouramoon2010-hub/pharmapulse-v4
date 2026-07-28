@@ -7,21 +7,26 @@
 // component fetches nothing itself).
 //
 // The deterministic buildAnswer() kernel is ALWAYS computed first and
-// is always the fallback. AI enhancement is strictly optional and
-// only ever attempted when aiSettings/usage/actor are supplied and
-// AI is enabled:
-//   1. checkUsageLimit() — existing Phase 8E kernel
-//   2. connectToProvider() — existing Phase 8B kernel (mock-only,
-//      never a real network call in this bundle)
-//   3. validateAiResponse() — existing Phase 8D kernel
-// If any step is unavailable, disabled, over-limit, or fails
-// validation, the original deterministic text is shown instead — the
-// AI path can only ever replace the displayed text, never the
-// grounding behind it.
+// is always the fallback. AI enhancement is strictly optional. Two
+// independent, mutually-exclusive enhancement paths exist:
+//   - Personal AI (BYOK): when `personalAi` is supplied and enabled,
+//     the question is sent directly from this browser to the user's
+//     own provider account with the user's own key, via
+//     connectToPersonalAi() — never through our backend.
+//   - Org-wide AI (legacy/mock): when aiSettings/usage/actor are
+//     supplied instead, the original Phase 8 flow runs:
+//       1. checkUsageLimit() — existing Phase 8E kernel
+//       2. connectToProvider() — existing Phase 8B kernel (mock-only,
+//          never a real network call in this bundle)
+//       3. validateAiResponse() — existing Phase 8D kernel
+// If either path is unavailable, disabled, over-limit, or fails
+// validation, the original deterministic text is shown instead — AI
+// can only ever replace the displayed text, never the grounding
+// behind it.
 //
 // Read-only. No writes. No Firestore import. No profile mutation.
 // No auto-send. No direct provider calls from this component (only
-// through the existing connector abstraction).
+// through the connector abstractions).
 // ============================================================
 import React, { useState } from 'react'
 import { Bot } from 'lucide-react'
@@ -38,6 +43,7 @@ import { buildAnswer } from '../../assistant/answerBuilder'
 import { checkUsageLimit } from '../../assistant/aiUsageLimiter'
 import { connectToProvider } from '../../assistant/aiProviderConnector'
 import { validateAiResponse } from '../../assistant/aiResponseValidator'
+import { connectToPersonalAi } from '../../assistant/personalAiConnector'
 
 const SUGGESTED_QUESTIONS = [
   'Why is the score what it is?',
@@ -48,11 +54,11 @@ const SUGGESTED_QUESTIONS = [
   'What happens if the top KPI improves?',
 ]
 
-export default function AssistantPanel({ context, aiSettings, usage, actor }) {
+export default function AssistantPanel({ context, aiSettings, usage, actor, personalAi }) {
   const [inputValue, setInputValue] = useState('')
   const [answers, setAnswers] = useState([])
 
-  const handleAsk = () => {
+  const handleAsk = async () => {
     const question = inputValue.trim()
     if (!question) return
 
@@ -65,7 +71,18 @@ export default function AssistantPanel({ context, aiSettings, usage, actor }) {
     let remainingDaily
     let remainingMonthly
 
-    if (aiSettings?.enabled && actor) {
+    if (personalAi?.enabled && personalAi?.apiKey) {
+      const personalResponse = await connectToPersonalAi({ settings: personalAi, question, context })
+      providerStatus = personalResponse.status
+
+      if (personalResponse.status === 'live') {
+        mode = 'ai_personal'
+        safetyStatus = 'validated'
+        finalText = personalResponse.text
+      } else if (personalResponse.status === 'invalid_response') {
+        safetyStatus = 'fallback'
+      }
+    } else if (aiSettings?.enabled && actor) {
       const limitCheck = checkUsageLimit(usage ?? { dailyCount: 0, monthlyCount: 0 }, aiSettings, actor.role)
       remainingDaily = limitCheck.remainingDaily
       remainingMonthly = limitCheck.remainingMonthly

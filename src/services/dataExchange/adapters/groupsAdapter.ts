@@ -24,7 +24,7 @@
 import { createDistrict, updateDistrict } from '../../districtService'
 import { guardDistrictAccess } from '../../security/accessGuard'
 import type { GuardContext, TerritoryGuardContext } from '../../security/accessGuard'
-import { pickField, parseStatusToActive } from './columnAliasUtils'
+import { pickField, parseStatusToActive, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -69,12 +69,12 @@ export interface ExistingRegionRecord {
   code: string
 }
 
-const HEADER_ALIASES = {
-  code:   ['code', 'group code', 'group id', 'كود المجموعة', 'كود'],
-  name:   ['name', 'group name', 'اسم المجموعة', 'الاسم'],
-  region: ['region', 'region code', 'parent', 'parent organization', 'المنطقة', 'كود المنطقة'],
-  manager: ['manager', 'manager uid', 'manageruid', 'المدير'],
-  status:  ['status', 'الحالة'],
+export const HEADER_ALIASES = {
+  code:   ['code', 'group code', 'group id', 'district code', 'district id', 'كود المجموعة', 'كود'],
+  name:   ['name', 'group name', 'district name', 'اسم المجموعة', 'الاسم'],
+  region: ['region', 'region code', 'region id', 'parent', 'parent organization', 'parent region', 'المنطقة', 'كود المنطقة'],
+  manager: ['manager', 'manager uid', 'manager id', 'supervisor', 'supervisor uid', 'المدير', 'المشرف'],
+  status:  ['status', 'active', 'الحالة', 'نشط'],
 }
 
 export interface GroupsAdapterDeps {
@@ -99,11 +99,10 @@ export function createGroupsAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
+        const match = findAliasMatch(header, HEADER_ALIASES)
         return {
           sourceHeader: header,
-          targetField:  match ? match[0] : header,
+          targetField:  match ?? header,
           matchedVia:   match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED',
         }
       })

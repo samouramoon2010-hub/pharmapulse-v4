@@ -22,6 +22,7 @@ import {
 import { db, COL } from './dxFirebaseTypes'
 import type { StagingRepository } from './stagingRepository'
 import type { ImportJob, StagedImportRow, ImportDomain } from './importJobTypes'
+import { stripUndefinedDeep } from './firestoreSanitize'
 
 function jobsCol() {
   return collection(db, COL.IMPORT_JOBS)
@@ -32,10 +33,10 @@ function rowsCol(jobId: string) {
 
 export class FirestoreStagingRepository<TStaged = unknown> implements StagingRepository<TStaged> {
   async saveJob(job: ImportJob): Promise<void> {
-    await setDoc(doc(db, COL.IMPORT_JOBS, job.jobId), {
+    await setDoc(doc(db, COL.IMPORT_JOBS, job.jobId), stripUndefinedDeep({
       ...job,
       updatedAt: serverTimestamp(),
-    }, { merge: false })
+    }), { merge: false })
   }
 
   async loadJob(jobId: string): Promise<ImportJob | null> {
@@ -51,7 +52,7 @@ export class FirestoreStagingRepository<TStaged = unknown> implements StagingRep
     for (let i = 0; i < rows.length; i += CHUNK) {
       const batch = writeBatch(db)
       for (const row of rows.slice(i, i + CHUNK)) {
-        batch.set(doc(rowsCol(jobId), row.rowId), row, { merge: false })
+        batch.set(doc(rowsCol(jobId), row.rowId), stripUndefinedDeep(row), { merge: false })
       }
       await batch.commit()
     }
@@ -63,7 +64,7 @@ export class FirestoreStagingRepository<TStaged = unknown> implements StagingRep
   }
 
   async updateRowState(jobId: string, rowId: string, patch: Partial<StagedImportRow<TStaged>>): Promise<void> {
-    await setDoc(doc(rowsCol(jobId), rowId), patch, { merge: true })
+    await setDoc(doc(rowsCol(jobId), rowId), stripUndefinedDeep(patch), { merge: true })
   }
 
   async loadLastConfirmedBatchIndex(jobId: string): Promise<number> {

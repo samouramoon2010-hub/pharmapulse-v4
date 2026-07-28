@@ -19,7 +19,7 @@
 
 import { transferUser } from '../dxUserTypes'
 import type { GuardContext } from '../../security/accessGuard'
-import { pickField } from './columnAliasUtils'
+import { pickField, findAliasMatch } from './columnAliasUtils'
 import type {
   ImportDomainAdapter,
   ImportMappingContext,
@@ -49,12 +49,12 @@ export interface AssignmentStaged {
   endDate:     string | null
 }
 
-const HEADER_ALIASES = {
-  employeeId: ['employee id', 'employeeid', 'الرقم الوظيفي'],
-  branch:     ['branch', 'branch code', 'الفرع', 'كود الفرع'],
+export const HEADER_ALIASES = {
+  employeeId: ['employee id', 'employeeid', 'staff id', 'emp id', 'الرقم الوظيفي'],
+  branch:     ['branch', 'branch code', 'branch id', 'الفرع', 'كود الفرع'],
   type:       ['assignment type', 'type', 'primary/secondary', 'نوع التكليف'],
-  start:      ['start date', 'startdate', 'effective start', 'تاريخ البدء'],
-  end:        ['end date', 'enddate', 'effective end', 'تاريخ الانتهاء'],
+  start:      ['start date', 'startdate', 'effective start', 'effective start date', 'تاريخ البدء'],
+  end:        ['end date', 'enddate', 'effective end', 'effective end date', 'تاريخ الانتهاء'],
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -90,9 +90,8 @@ export function createAssignmentsAdapter(
 
     resolveColumns(headerRow: string[], _ctx: ImportMappingContext): ColumnMapping[] {
       return headerRow.map((header) => {
-        const lower = header.trim().toLowerCase()
-        const match = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(lower))
-        return { sourceHeader: header, targetField: match ? match[0] : header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
+        const match = findAliasMatch(header, HEADER_ALIASES)
+        return { sourceHeader: header, targetField: match ?? header, matchedVia: match ? 'STRUCTURAL_ALIAS' : 'UNRESOLVED' }
       })
     },
 

@@ -105,9 +105,9 @@ describe('2 — LoginPageV3 reuses the exact existing auth contract', () => {
 })
 
 // ════════════════════════════════════════════════════════════
-// 3 — LoginPageV2.jsx (production /login) is completely untouched
+// 3 — LoginPageV2.jsx source file is preserved unmodified (rollback path)
 // ════════════════════════════════════════════════════════════
-describe('3 — production /login (LoginPageV2) is untouched by this gate', () => {
+describe('3 — LoginPageV2 source is preserved unmodified for rollback', () => {
   it('still uses its own CSS/SVG DataOceanBackground + IdentityPulseLogo right panel', () => {
     expect(loginPageV2Src).toContain("import DataOceanBackground   from '../../components/login/DataOceanBackground'")
     expect(loginPageV2Src).toContain("import IdentityPulseLogo     from '../../components/login/IdentityPulseLogo'")
@@ -119,20 +119,25 @@ describe('3 — production /login (LoginPageV2) is untouched by this gate', () =
 })
 
 // ════════════════════════════════════════════════════════════
-// 4 — Routing is additive: /login still serves LoginPageV2
+// 4 — Routing: Gate 3 cutover — /login now serves LoginPageV3;
+//     LoginPageV2 remains reachable at /login-v2 for rollback
 // ════════════════════════════════════════════════════════════
-describe('4 — App.jsx routing change is additive only', () => {
-  it('still routes /login to LoginPageV2', () => {
-    expect(appSrc).toContain('<Route path="/login"        element={<LoginPageV2 />} />')
+describe('4 — App.jsx routing reflects the approved Gate 3 cutover', () => {
+  it('routes /login to LoginPageV3 (cutover complete)', () => {
+    expect(appSrc).toContain('<Route path="/login"        element={<LoginPageV3 />} />')
   })
 
-  it('adds /login-v3 as a new, separate route to LoginPageV3', () => {
+  it('keeps /login-v3 as an equivalent alias route to LoginPageV3', () => {
     expect(appSrc).toContain('<Route path="/login-v3"     element={<LoginPageV3 />} />')
   })
 
-  it('imports LoginPageV3 alongside, not instead of, LoginPageV2', () => {
-    expect(appSrc).toContain("import LoginPageV2      from './pages/auth/LoginPageV2'")
-    expect(appSrc).toContain("import LoginPageV3      from './pages/auth/LoginPageV3'")
+  it('keeps LoginPageV2 reachable at /login-v2 for rollback/reference', () => {
+    expect(appSrc).toContain('<Route path="/login-v2"     element={<LoginPageV2 />} />')
+  })
+
+  it('imports both LoginPageV2 and LoginPageV3', () => {
+    expect(appSrc).toContain("const LoginPageV2      = lazy(() => import('./pages/auth/LoginPageV2'))")
+    expect(appSrc).toContain("import LoginPageV3 from './pages/auth/LoginPageV3'")
   })
 })
 

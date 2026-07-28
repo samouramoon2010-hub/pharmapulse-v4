@@ -36,7 +36,7 @@ async function appSrc() {
 describe('1. Route registration', () => {
   it('registers /branch/:branchId/intelligence pointing at BranchIntelligencePage', async () => {
     const s = await appSrc()
-    expect(s).toContain("import BranchIntelligencePage")
+    expect(s).toContain("BranchIntelligencePage")
     expect(s).toContain('/pages/branch/BranchIntelligencePage')
     expect(s).toContain('path="/branch/:branchId/intelligence"')
     expect(s).toContain('<BranchIntelligencePage />')
@@ -121,6 +121,17 @@ describe('3. Executive Summary Band (Section 1)', () => {
     const s = await pageSrc()
     expect(s).toContain("from '../../engine/executive'")
     expect(s).toContain('GRADE_COLORS')
+  })
+
+  it('renders risk flag evidence chips reading viewModel.branchSummary.riskFlags, reusing SEVERITY_COLORS', async () => {
+    const s = await pageSrc()
+    expect(s).toContain('viewModel.branchSummary.riskFlags')
+    expect(s).toContain('viewModel.branchSummary.riskCriticalCount')
+    expect(s).toContain('viewModel.branchSummary.riskWarningCount')
+    // Evidence chips reuse the same severity palette as Section 6's
+    // supervisor action cards — no new color system for risk severity.
+    expect(s).toContain('SEVERITY_COLORS.critical')
+    expect(s).toContain('SEVERITY_COLORS.medium')
   })
 })
 
@@ -300,6 +311,39 @@ describe('8. Empty / loading / error states', () => {
     // same early-exit behavior, different return shape.
     expect(s).toContain('if (!teamIntelligence) return { viewModel: null, teamIntelligence: null, expectedPace: null }')
     expect(s).toContain('if (!branchSummary) return { viewModel: null, teamIntelligence, expectedPace: null }')
+  })
+
+  it('computes live momentum from computeLiveMomentum and fails closed like branchSummary/teamIntelligence', async () => {
+    const s = await hookSrc()
+    expect(s).toContain("import { computeLiveMomentum } from '../../engine/liveAnalytics/liveMomentumEngine'")
+    expect(s).toContain('computeLiveMomentum({ pharmacyId: branchId, mtdEntries, target: currentTarget, now }, liveRegistry)')
+    expect(s).toContain('momentum = null')
+    expect(s).toContain('if (!momentum) return { viewModel: null, teamIntelligence, expectedPace: null }')
+    // Fed into the same builder input as branchSummary/teamIntelligence —
+    // no separate/duplicate data path.
+    expect(s).toContain('momentum,')
+  })
+
+  it('renders a Momentum summary card and per-KPI evidence chips reading viewModel.momentum', async () => {
+    const s = await pageSrc()
+    expect(s).toContain('label="Momentum"')
+    expect(s).toContain('viewModel.momentum.overallDirection')
+    expect(s).toContain('viewModel.momentum.dominantKpi')
+    expect(s).toContain('viewModel.momentum.kpiMomentum')
+    // Distinct label map from the pharmacist-level MOMENTUM_LABELS —
+    // liveMomentumEngine uses a different enum (surging/stalling vs
+    // accelerating/needs_support), so it must not be conflated.
+    expect(s).toContain('LIVE_MOMENTUM_LABELS')
+  })
+
+  it('renders per-KPI trend evidence reading viewModel.branchSummary.kpiTrends, reusing TREND_LABELS', async () => {
+    const s = await pageSrc()
+    expect(s).toContain('viewModel.branchSummary.kpiTrends')
+    // Reuses the existing branch-level TREND_LABELS map (same TrendDirection
+    // enum) rather than inventing a second one.
+    const idx = s.indexOf('Trend evidence')
+    const block = s.slice(idx, idx + 1200)
+    expect(block).toContain('TREND_LABELS[t.direction]')
   })
 })
 

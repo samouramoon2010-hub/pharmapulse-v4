@@ -19,6 +19,7 @@ import type {
   TeamIntelligenceResult,
 } from '../teamIntelligence/teamIntelligenceTypes'
 import type { BranchExecutiveSummary, KpiScoreBreakdown } from '../executive/executiveTypes'
+import type { BranchMomentum } from '../liveAnalytics/liveAnalyticsTypes'
 import type { KpiKey } from '../kpiAnalyticsEngine'
 import { KPI_KEYS } from '../kpiAnalyticsEngine'
 
@@ -128,6 +129,7 @@ function makeBranchSummary(overrides: {
   riskFlags?: BranchExecutiveSummary['riskProfile']['flags']
   riskLevel?: BranchExecutiveSummary['riskProfile']['riskLevel']
   direction?: BranchExecutiveSummary['trend']['direction']
+  kpiTrends?: BranchExecutiveSummary['trend']['kpiTrends']
 } = {}): BranchExecutiveSummary {
   return {
     pharmacyId: 'branch-1',
@@ -157,7 +159,7 @@ function makeBranchSummary(overrides: {
       pharmacyId: 'branch-1',
       overallMomentum: 2,
       direction: overrides.direction ?? 'STABLE',
-      kpiTrends: [],
+      kpiTrends: overrides.kpiTrends ?? [],
     },
     insights: [],
     recommendations: [],
@@ -196,10 +198,22 @@ function makeTeamIntelligence(overrides: {
   }
 }
 
+function makeMomentum(overrides: Partial<BranchMomentum> = {}): BranchMomentum {
+  return {
+    pharmacyId: 'branch-1',
+    overallDirection: 'stable',
+    overallDelta: 0,
+    kpiMomentum: [],
+    dominantKpi: 'wasfaty',
+    ...overrides,
+  }
+}
+
 function makeBuilderInput(overrides: {
   branchSummary?: BranchExecutiveSummary
   teamIntelligence: TeamIntelligenceResult
   teamSize?: number
+  momentum?: BranchMomentum
   branchRankSnapshot?: BranchIntelligenceBuilderInput['branchRankSnapshot']
   hasTargets?: boolean
 }): BranchIntelligenceBuilderInput {
@@ -207,6 +221,7 @@ function makeBuilderInput(overrides: {
     branchSummary: overrides.branchSummary ?? makeBranchSummary(),
     teamIntelligence: overrides.teamIntelligence,
     teamSize: overrides.teamSize ?? overrides.teamIntelligence.pharmacistSummaries.length,
+    momentum: overrides.momentum ?? makeMomentum(),
     branchRankSnapshot: overrides.branchRankSnapshot ?? null,
     metadata: {
       pharmacyId: 'branch-1',
@@ -398,6 +413,63 @@ describe('buildBranchIntelligenceViewModel', () => {
     expect(vm.coachingOpportunities.topPerformer?.userId).toBe('u1')
     expect(vm.supervisorActions.length).toBeGreaterThan(0)
     expect(vm.metadata.pharmacyId).toBe('branch-1')
+  })
+
+  it('surfaces riskProfile flags as evidence, sorted HIGH severity first', () => {
+    const teamIntelligence = makeTeamIntelligence({ pharmacistSummaries: [] })
+    const branchSummary = makeBranchSummary({
+      riskLevel: 'HIGH_RISK',
+      riskFlags: [
+        { category: 'SUBMISSION', severity: 'MEDIUM', description: 'Only 40% submitted today' },
+        { category: 'PACE', severity: 'HIGH', description: 'Omnichannel pace critically behind' },
+      ],
+    })
+    const input = makeBuilderInput({ branchSummary, teamIntelligence, teamSize: 0 })
+
+    const vm = buildBranchIntelligenceViewModel(input)
+
+    expect(vm.branchSummary.riskFlags).toHaveLength(2)
+    expect(vm.branchSummary.riskFlags[0]).toEqual({ category: 'PACE', severity: 'HIGH', description: 'Omnichannel pace critically behind' })
+    expect(vm.branchSummary.riskFlags[1]).toEqual({ category: 'SUBMISSION', severity: 'MEDIUM', description: 'Only 40% submitted today' })
+    expect(vm.branchSummary.riskCriticalCount).toBe(0) // from riskProfile.criticalCount, not derived from flags
+    expect(vm.branchSummary.riskWarningCount).toBe(1)
+  })
+
+  it('riskFlags is an empty array (never undefined) when the branch has no active flags', () => {
+    const teamIntelligence = makeTeamIntelligence({ pharmacistSummaries: [] })
+    const branchSummary = makeBranchSummary()
+    const input = makeBuilderInput({ branchSummary, teamIntelligence, teamSize: 0 })
+
+    const vm = buildBranchIntelligenceViewModel(input)
+
+    expect(vm.branchSummary.riskFlags).toEqual([])
+  })
+
+  it('surfaces per-KPI trend detail sorted by strongest momentum first', () => {
+    const teamIntelligence = makeTeamIntelligence({ pharmacistSummaries: [] })
+    const branchSummary = makeBranchSummary({
+      kpiTrends: [
+        { kpiKey: 'wasfaty', label: 'Wasfaty', direction: 'STABLE', momentum: 2, rollingAvg7: 10, changePct7d: 1, changePct30d: 3, dataPoints: 14 },
+        { kpiKey: 'omni', label: 'Omnichannel', direction: 'DETERIORATING', momentum: -18, rollingAvg7: 5, changePct7d: -20, changePct30d: -25, dataPoints: 14 },
+      ],
+    })
+    const input = makeBuilderInput({ branchSummary, teamIntelligence, teamSize: 0 })
+
+    const vm = buildBranchIntelligenceViewModel(input)
+
+    expect(vm.branchSummary.kpiTrends).toHaveLength(2)
+    expect(vm.branchSummary.kpiTrends[0]).toEqual({ kpiKey: 'omni', label: 'Omnichannel', direction: 'DETERIORATING', momentum: -18, changePct7d: -20, changePct30d: -25 })
+    expect(vm.branchSummary.kpiTrends[1].kpiKey).toBe('wasfaty')
+  })
+
+  it('kpiTrends is an empty array (never undefined) when trendEngine found no data', () => {
+    const teamIntelligence = makeTeamIntelligence({ pharmacistSummaries: [] })
+    const branchSummary = makeBranchSummary()
+    const input = makeBuilderInput({ branchSummary, teamIntelligence, teamSize: 0 })
+
+    const vm = buildBranchIntelligenceViewModel(input)
+
+    expect(vm.branchSummary.kpiTrends).toEqual([])
   })
 
   it('Rule 7 (no data) is reflected end-to-end when pharmacistSummaries is empty', () => {

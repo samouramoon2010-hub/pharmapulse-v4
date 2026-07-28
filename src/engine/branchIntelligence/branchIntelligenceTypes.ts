@@ -15,6 +15,7 @@ import type {
   TeamIntelligenceResult,
 } from '../teamIntelligence/teamIntelligenceTypes'
 import type { BranchExecutiveSummary } from '../executive/executiveTypes'
+import type { BranchMomentum } from '../liveAnalytics/liveAnalyticsTypes'
 
 // ══════════════════════════════════════════════════════════════
 // 1. KPI CONTRIBUTION ENTRY
@@ -212,7 +213,35 @@ export interface BranchSummaryViewModel {
    */
   forecastPct:   number | null
   forecastTrend: string   // TrendDirection
+  /**
+   * Evidence behind forecastTrend — the per-KPI trend detail
+   * (trendEngine.ts) that forecastTrend collapses into one branch-level
+   * arrow. Week-over-week momentum + 7d/30d % change per KPI, sorted by
+   * |momentum| descending so the most-moving KPI leads.
+   */
+  kpiTrends: Array<{
+    kpiKey:       string
+    label:        string
+    direction:    string  // TrendDirection
+    momentum:     number
+    changePct7d:  number
+    changePct30d: number
+  }>
   riskLevel:     string   // RiskLevel
+  /**
+   * Evidence behind riskLevel — the actual flags riskEngine raised for
+   * this branch (category/severity/description), sorted HIGH severity
+   * first. Empty when the branch has no active risk flags. Surfaced so
+   * riskLevel is never a bare "Action" label with no "Evidence" to
+   * drill into (CLAUDE.design.md: Action → Evidence → Drill Down).
+   */
+  riskFlags: Array<{
+    category:    string  // RiskCategory
+    severity:    'HIGH' | 'MEDIUM' | 'LOW'
+    description: string
+  }>
+  riskCriticalCount: number
+  riskWarningCount:  number
   branchRank: {
     currentRank:  number
     cohortSize:   number
@@ -266,6 +295,10 @@ export interface BranchIntelligenceViewModel {
 
   supervisorActions: SupervisorAction[]
 
+  /** Passed through unchanged from the builder input — see
+   *  BranchIntelligenceBuilderInput.momentum. */
+  momentum: BranchMomentum
+
   weakKpiAttribution: WeakKpiAttribution | null
 
   metadata: {
@@ -306,6 +339,14 @@ export interface BranchIntelligenceBuilderInput {
 
   /** Active roster size for this branch (e.g. getUsersByPharmacy(pharmacyId).length). */
   teamSize: number
+
+  /**
+   * Pre-computed by liveAnalytics.computeLiveMomentum(momentumInput, registry).
+   * EMA-smoothed, anomaly-aware momentum per KPI plus a branch-level
+   * overall direction — a different, more sensitive signal than
+   * branchSummary.trend (which is week/month-level, not day-level).
+   */
+  momentum: BranchMomentum
 
   /**
    * Branch ranking snapshot for this period, if one exists.

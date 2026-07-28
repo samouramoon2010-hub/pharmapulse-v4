@@ -244,6 +244,20 @@ describe('Alert quality — false positive suppression', () => {
     })
   })
 
+  it('multiple KPI_CRITICAL alerts generated in the same pass get distinct ids (regression: React duplicate-key warning)', () => {
+    const signals: KpiHealthSignal[] = [
+      { kpiKey:'wasfaty', state:'critical', achievementPct:10, expectedPct:50, delta:-40, paceRatio:0.2, forecastAchPct:20, todayValue:1, mtdValue:10, target:100, pulse:'down', pulseValue:5, label:'Wasfaty' },
+      { kpiKey:'omni',    state:'critical', achievementPct:8,  expectedPct:50, delta:-42, paceRatio:0.15,forecastAchPct:15, todayValue:1, mtdValue:8,  target:100, pulse:'down', pulseValue:5, label:'OmniHealth' },
+      { kpiKey:'wellness',state:'critical', achievementPct:5,  expectedPct:50, delta:-45, paceRatio:0.1, forecastAchPct:10, todayValue:0, mtdValue:5,  target:100, pulse:'down', pulseValue:5, label:'Wellness' },
+    ]
+    const input  = buildInput([], [], makeTarget())
+    const alerts = generateLiveAlerts(input, signals, [])
+    const critical = alerts.filter((a) => a.type === 'KPI_CRITICAL')
+    expect(critical.length).toBe(3)
+    const ids = critical.map((a) => a.id)
+    expect(new Set(ids).size).toBe(ids.length)  // every id is unique, even though Date.now() ties
+  })
+
   it('cooldown suppresses same fingerprint alert', () => {
     const input = buildInput([], [], makeTarget())
     // Use real current time minus 5 min for cooldown check

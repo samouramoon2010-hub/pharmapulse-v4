@@ -33,6 +33,9 @@ import ExecutiveTeamRollup        from '../../components/executive/ExecutiveTeam
 import ExecutiveSummaryPanel      from '../../components/executive/ExecutiveSummaryPanel'
 
 import { useExecutiveTeamRollup } from '../../hooks/useExecutiveTeamRollup'
+import { buildCriticalRiskAlert } from '../../services/alerts/criticalRiskAlertBuilder'
+import { auth } from '../../services/firebase'
+import { useToastStore } from '../../components/ui/Toast'
 
 /** @typedef {import('../../engine/executive').BranchExecutiveSummary} BranchExecutiveSummary */
 
@@ -59,6 +62,35 @@ export default function ExecutiveDashboard() {
   // ── Phase 2G-3: scope-aware labels ──────────────────────
   const { userProfile } = useAuthStore()
   const { scope }       = useScopeProfile()
+
+  // ── Critical risk alert email trigger ──────────────────
+  // RegionalIntelligencePanel stays presentational (no Firestore/
+  // network access) — the actual send lives here, same pattern as
+  // every other page-level data-fetch in this file.
+  const toast = useToastStore()
+  const [sendingAlert, setSendingAlert] = useState(false)
+  const handleSendCriticalRiskAlert = async (criticalBranches) => {
+    if (!auth.currentUser) return
+    const periodLabel = criticalBranches[0]?.period?.month ?? new Date().toISOString().slice(0, 7)
+    const payload = buildCriticalRiskAlert(criticalBranches, periodLabel)
+    if (!payload) return
+    setSendingAlert(true)
+    try {
+      const idToken = await auth.currentUser.getIdToken()
+      const res = await fetch('/.netlify/functions/pharmapulse-send-alert', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: payload.subject, html: payload.html, text: payload.text }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`)
+      toast.show(`Alert sent to ${body.recipients} recipient(s)`, 'success')
+    } catch (err) {
+      toast.show(err.message || 'Failed to send alert', 'error')
+    } finally {
+      setSendingAlert(false)
+    }
+  }
 
   // Single-scope covers manager + branch_manager (one branch only).
   const isManager = scope?.type === 'single'
@@ -254,7 +286,12 @@ export default function ExecutiveDashboard() {
 
       {/* Row 5: Regional Intelligence — hidden for single-branch scope */}
       {scope?.type !== 'single' && intelligence && (
-        <RegionalIntelligencePanel intelligence={intelligence} branchRollups={branchRollups ?? []} liveRegistry={liveRegistry} />
+        <RegionalIntelligencePanel
+          intelligence={intelligence} branchRollups={branchRollups ?? []} liveRegistry={liveRegistry}
+          isAdmin={userProfile?.role === 'admin'}
+          onSendCriticalRiskAlert={handleSendCriticalRiskAlert}
+          sendingAlert={sendingAlert}
+        />
       )}
 
     </div>

@@ -36,10 +36,11 @@ import { createImportJob, runValidation, commitJob } from './importJobEngine'
 import { computeRowsSignature } from './onboardingOrchestrator'
 import { db, COL } from './dxFirebaseTypes'
 import { DX7_CONFIG } from './dx7Config'
-import type { ImportDomain, ImportJob, StagedImportRow, ImportJobResult, CommitBatchResult, ValidationIssue } from './importJobTypes'
+import type { ImportDomain, ImportJob, StagedImportRow, ImportJobResult, CommitBatchResult, ValidationIssue, ImportFileMetadata } from './importJobTypes'
 import type { ImportValidationContext, ImportAuthorizationContext, ImportCommitContext } from './importDomainAdapter'
 import type { FirestoreStagingRepository } from './firestoreStagingRepository'
 import { findJobByChecksum } from './firestoreStagingRepository'
+import { stripUndefinedDeep } from './firestoreSanitize'
 
 import { fetchKpiRegistryOnce } from '../kpiRegistryService'
 import { fetchExistingOnboardingData } from './fetchExistingOnboardingData'
@@ -150,6 +151,15 @@ export interface ActualsRunParams {
   actorRole:   string
   rawRows:     Record<string, unknown>[]
   existing:    ActualsExistingData
+  /** Real, caller-supplied file metadata (name/size/mimeType/sheet/
+   *  checksum) captured from the actual uploaded File object — see
+   *  DataExchangeStudioPage.jsx. Takes precedence over the legacy
+   *  `fileChecksum`-only shape below when present. Any field this
+   *  object is missing (e.g. an empty `mimeType` on mobile Safari, a
+   *  checksum that failed to compute) is simply absent — never
+   *  written as `undefined` (see firestoreSanitize.ts and §"fileMeta
+   *  assembly" below). */
+  fileMeta?: ImportFileMetadata
   fileChecksum?: string
 }
 
@@ -230,12 +240,21 @@ export async function validateActualsJob(
 
   const { job, rows } = await runOneActualsDomain(params)
   const previewSignature = computeRowsSignature(rows)
+
+  // Prefer the real, caller-supplied file metadata. Fall back to the
+  // legacy checksum-only shape only when the caller passed a bare
+  // checksum without the fuller object. Never assign `fileMeta` (or
+  // any of its properties) `undefined` — see firestoreSanitize.ts.
+  const rawFileMeta: ImportFileMetadata | undefined =
+    params.fileMeta ?? (params.fileChecksum
+      ? { fileName: 'upload.xlsx', sizeBytes: 0, checksum: params.fileChecksum }
+      : undefined)
+  const cleanFileMeta = rawFileMeta ? stripUndefinedDeep(rawFileMeta) : undefined
+
   const jobWithSignature: ImportJob = {
     ...job,
     previewSignature,
-    fileMeta: params.fileChecksum
-      ? { fileName: 'upload.xlsx', sizeBytes: 0, checksum: params.fileChecksum }
-      : job.fileMeta,
+    ...(cleanFileMeta && Object.keys(cleanFileMeta).length > 0 ? { fileMeta: cleanFileMeta } : {}),
   }
 
   await repo.saveJob(jobWithSignature)

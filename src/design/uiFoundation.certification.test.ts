@@ -272,11 +272,17 @@ describe('UI3-D — sidebar uses the Intelligence Operations / Data Architecture
 })
 
 describe('UI3-D — sidebar route permissions preserved (every pre-existing route still present)', () => {
+  // Sidebar-1/2/3 consolidation: '/import', '/pharmacies', '/admin/regions',
+  // '/admin/districts', '/admin/classifications', and '/admin/demo-data'
+  // were intentionally removed from primary navigation (superseded by
+  // Data Exchange Studio, the consolidated '/admin/organization' page, and
+  // Settings -> Admin Tools respectively). Each route still exists and is
+  // reachable by direct URL in App.jsx — only the Sidebar nav entry moved.
   const PRESERVED_ROUTES = [
-    '/dashboard', '/reports', '/targets', '/personal-targets', '/executive', '/pharmacies',
-    '/users', '/import', '/admin/kpis', '/admin/evaluation-registry', '/admin/evaluation-run',
-    '/admin/regions', '/admin/districts', '/admin/classifications', '/admin/rankings',
-    '/admin/demo-data', '/profile-studio', '/actions/my', '/actions/tasks', '/audit',
+    '/dashboard', '/reports', '/targets', '/personal-targets', '/executive',
+    '/users', '/admin/kpis', '/admin/evaluation-registry', '/admin/evaluation-run',
+    '/admin/organization', '/admin/rankings',
+    '/profile-studio', '/actions/my', '/actions/tasks', '/audit',
     '/notifications', '/settings', '/entry', '/team', '/performance', '/my-intelligence',
   ]
   for (const route of PRESERVED_ROUTES) {

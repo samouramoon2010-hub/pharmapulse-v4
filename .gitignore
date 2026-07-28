@@ -33,3 +33,9 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# Local render/capture scratch artifacts (login background compositing)
+.render-tmp/
+
+# Local-only pre-mutation data snapshots (never commit — may contain full document content)
+local-backups/

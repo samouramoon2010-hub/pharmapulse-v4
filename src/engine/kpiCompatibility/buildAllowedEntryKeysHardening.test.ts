@@ -243,3 +243,51 @@ describe('7 — 5 core production KPIs remain in allowed keys', () => {
     expect(keys.size).toBe(productionKpis.length)
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// Test 8 — formerly-protected core KPIs are excluded from KPI Entry
+// and Target creation once archived (2026-07-07 owner decision:
+// PROTECTED_CORE_KEYS no longer blocks archival in
+// kpiRegistryService.ts; buildAllowedEntryKeys itself never had a
+// core-key exception — the existing isActive/lifecycleStage checks
+// already apply uniformly. This test proves that continues to hold
+// once these specific 5 keys are archived.)
+// ─────────────────────────────────────────────────────────────
+describe('8 — previously-protected core KPIs are excluded once archived', () => {
+  const coreKeys = ['wasfaty', 'omnihealth', 'wellnessCard', 'basket', 'crossSelling']
+
+  it.each(coreKeys)('%s excluded from allowed entry keys once archived', (key) => {
+    const base = DEFAULT_KPI_REGISTRY[key]
+    const archived = { ...base, isActive: false, lifecycleStage: 'archived' as KpiLifecycleStage }
+    const keys = buildAllowedEntryKeys(registryWith(archived))
+    const engineKey = archived.aliasFor ?? archived.key
+    expect(keys.has(engineKey)).toBe(false)
+  })
+
+  it('archiving all 5 core keys together leaves the allowed set empty (no other KPIs in registry)', () => {
+    const archivedRegistry = registryWith(
+      ...coreKeys.map((key) => ({
+        ...DEFAULT_KPI_REGISTRY[key],
+        isActive: false,
+        lifecycleStage: 'archived' as KpiLifecycleStage,
+      })),
+    )
+    const keys = buildAllowedEntryKeys(archivedRegistry)
+    expect(keys.size).toBe(0)
+  })
+
+  it('a Target-form-relevant field (targetInputEnabled) does not override archived exclusion', () => {
+    // Targets UI reads the same live merged registry as KPI Entry. A KPI
+    // that still has targetInputEnabled:true from its pre-archive state
+    // must still be excluded once isActive/lifecycleStage mark it archived —
+    // there is no separate "targets" allowlist that could disagree.
+    const archivedWasfaty = {
+      ...DEFAULT_KPI_REGISTRY.wasfaty,
+      isActive: false,
+      lifecycleStage: 'archived' as KpiLifecycleStage,
+    }
+    expect(archivedWasfaty.visibility.targetInputEnabled).toBe(true) // unchanged historical flag
+    const keys = buildAllowedEntryKeys(registryWith(archivedWasfaty))
+    expect(keys.has('wasfaty')).toBe(false) // still excluded — isActive/lifecycleStage wins
+  })
+})

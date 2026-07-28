@@ -11,7 +11,7 @@ import {
 } from 'recharts'
 import {
   Target, TrendingUp, TrendingDown, Users, Activity,
-  Award, RefreshCw, Calendar, AlertTriangle, Star, ClipboardList,
+  Award, RefreshCw, Calendar, AlertTriangle, Star, ClipboardList, ArrowRight,
 } from 'lucide-react'
 import { useAuthStore }     from '../../store/authStore'
 import { useKpiStore }      from '../../store/kpiStore'
@@ -21,6 +21,7 @@ import { filterAllowedPharmacies } from '../../services/scopeResolver'
 import {
   SkeletonStatCard, SkeletonChart,
 } from '../../components/ui/SkeletonCard'
+import EmptyState from '../../components/ui/EmptyState'
 import {
   EmptyTodayEntries, EmptyNoForecast, ErrorState,
 } from '../../components/ui/EmptyState'
@@ -68,6 +69,18 @@ import KpiCard from '../../components/kpi/KpiCard'
 import { formatNumber } from '../../utils/helpers'
 
 // (color fallback uses getKpiColor from kpiVisualHelpers — Phase 4D-B migration)
+
+// liveMomentumEngine's MomentumDirection — day-level, EMA-smoothed signal
+// already computed inside liveAnalytics (generateLiveAnalytics) but, until
+// now, never rendered here (only .alerts/.kpiHealth/.activityFeed were).
+// Same label set as BranchIntelligencePage's LIVE_MOMENTUM_LABELS.
+const LIVE_MOMENTUM_LABELS = {
+  surging:   { label: 'Surging',   arrow: '↑↑', color: '#22c55e' },
+  improving: { label: 'Improving', arrow: '↑',  color: '#22c55e' },
+  stable:    { label: 'Steady',    arrow: '→',  color: 'var(--text-muted)' },
+  cooling:   { label: 'Cooling',   arrow: '↓',  color: '#f59e0b' },
+  stalling:  { label: 'Stalling',  arrow: '↓↓', color: '#ef4444' },
+}
 
 // ── Premium Chart Tooltip ─────────────────────────────────────
 const ChartTip = ({ active, payload, label }) => {
@@ -371,8 +384,20 @@ export default function DashboardPage() {
   const overallColors = TRAFFIC_COLORS[overallStatus]
 
   // ── Engine V1 — weakest / strongest KPI ──────────────────────
-  const weakestKpi  = useMemo(() => findWeakestKpi(kpiStats),   [kpiStats])
-  const strongestKpi = useMemo(() => findStrongestKpi(kpiStats), [kpiStats])
+  // 2026-07-07 fix: pass liveRegistry so these correctly resolve against
+  // only active, weighted production KPIs instead of silently falling
+  // back to the hardcoded legacy 5-key list (wasfaty/omni/wellness/
+  // basket/crossSelling) when no registry is supplied. See
+  // hasActiveKpis below for the guard against the sentinel-default
+  // return value when zero active KPIs exist.
+  const weakestKpi  = useMemo(() => findWeakestKpi(kpiStats, liveRegistry),   [kpiStats, liveRegistry])
+  const strongestKpi = useMemo(() => findStrongestKpi(kpiStats, liveRegistry), [kpiStats, liveRegistry])
+
+  // Canonical "are there any active KPIs" check — reuses registryKpis
+  // (already the single source of truth for active/production_evaluation
+  // KPIs elsewhere on this page, e.g. KPI Distribution) rather than
+  // duplicating lifecycle-stage/isActive filtering logic here.
+  const hasActiveKpis = registryKpis.length > 0
 
   // ── Engine V1 — risk level ────────────────────────────────────
   const riskLevel = useMemo(() => {
@@ -485,7 +510,14 @@ export default function DashboardPage() {
         myEntries,
         currentTarget,
       )
-      const result = generateLiveAnalytics(input, prevAlertsRef.current)
+      // 2026-07-07 fix: pass liveRegistry so computeKpiHealth() (and the
+      // other sub-engines) resolve KPI health against only active,
+      // production_evaluation KPIs. Without a registry, they silently
+      // fall back to the hardcoded legacy 5-key list (wasfaty/omni/
+      // wellness/basket/crossSelling) regardless of the live registry's
+      // archived state — that was the root cause of "Live KPI Health"
+      // showing archived KPI names.
+      const result = generateLiveAnalytics(input, prevAlertsRef.current, liveRegistry)
       // Store alerts for next render's cooldown check
       prevAlertsRef.current = result.alerts.slice(0, 20)
       return result
@@ -493,7 +525,7 @@ export default function DashboardPage() {
       console.warn('[Dashboard] Live analytics error:', e)
       return null
     }
-  }, [uid, pharmacyId, role, myEntries, currentTarget, loading, pharmacies])
+  }, [uid, pharmacyId, role, myEntries, currentTarget, loading, pharmacies, liveRegistry])
 
   // ── Team Intelligence (single/list scope, no extra Firestore reads) ──
   const teamIntelligence = useMemo(() => {
@@ -908,6 +940,18 @@ export default function DashboardPage() {
                         transition:'width 0.8s ease',
                       }} />
                     </div>
+                    {/* Sidebar-4: same metric is shown in full historical
+                        detail on Reports — link there instead of growing
+                        this glance card. */}
+                    <button onClick={() => navigate('/reports')} style={{
+                      display:'flex', alignItems:'center', gap:'3px', marginTop:'10px',
+                      fontSize:'10px', fontWeight:500, color:'var(--text-muted)',
+                      background:'none', border:'none', padding:0, cursor:'pointer',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.color='var(--brand-400)'}
+                    onMouseLeave={(e) => e.currentTarget.style.color='var(--text-muted)'}>
+                      View full report <ArrowRight style={{ width:10, height:10 }} />
+                    </button>
                   </div>
                 )
               })()}
@@ -1285,16 +1329,40 @@ export default function DashboardPage() {
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}
            className="xl:grid-cols-3">
-        <KpiHealthHeatmap kpiHealth={liveAnalytics?.kpiHealth ?? []} />
+        {/* 2026-07-07 fix: with 0 active KPIs, Live KPI Health and
+            Executive Summary must not render archived-KPI-derived
+            content (including the legacy fallback names this section
+            used to show). Show one restrained, explicit empty state
+            instead of two separately-empty panels. */}
+        {hasActiveKpis ? (
+          <>
+            <KpiHealthHeatmap kpiHealth={liveAnalytics?.kpiHealth ?? []} />
 
-        <ExecutiveSummaryPanel
-          overallScore={overallAch}
-          bestKpi={kpiStats[strongestKpi]?._label ?? strongestKpi}
-          focusKpi={kpiStats[weakestKpi]?._label ?? weakestKpi}
-          primaryRisk={weakestKpi ? `${kpiStats[weakestKpi]?._label ?? weakestKpi} is behind pace at ${kpiStats[weakestKpi]?.achievementPct ?? 0}%` : undefined}
-          topOpportunity={strongestKpi ? `${kpiStats[strongestKpi]?._label ?? strongestKpi} is leading at ${kpiStats[strongestKpi]?.achievementPct ?? 0}%` : undefined}
-          narrative={mission?.action}
-        />
+            {/* findWeakestKpi()/findStrongestKpi() return a non-null
+                sentinel default ('wasfaty') when no active weighted KPI
+                exists — that default must never be displayed as if it
+                were real data. Gated on hasActiveKpis (see above) so
+                this branch only renders once at least one active KPI
+                is confirmed to exist. */}
+            <ExecutiveSummaryPanel
+              overallScore={overallAch}
+              bestKpi={kpiStats[strongestKpi]?._label ?? strongestKpi}
+              focusKpi={kpiStats[weakestKpi]?._label ?? weakestKpi}
+              primaryRisk={weakestKpi ? `${kpiStats[weakestKpi]?._label ?? weakestKpi} is behind pace at ${kpiStats[weakestKpi]?.achievementPct ?? 0}%` : undefined}
+              topOpportunity={strongestKpi ? `${kpiStats[strongestKpi]?._label ?? strongestKpi} is leading at ${kpiStats[strongestKpi]?.achievementPct ?? 0}%` : undefined}
+              narrative={mission?.action}
+            />
+          </>
+        ) : (
+          <div className="card card-p" data-testid="dashboard-no-active-kpis" style={{ gridColumn: '1 / -1' }}>
+            <EmptyState
+              icon={Activity}
+              title="No active KPIs configured"
+              description="Add and activate a KPI in KPI Registry to see Live KPI Health and Executive Summary here."
+              tone="neutral"
+            />
+          </div>
+        )}
 
         <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
           <ActivityFeedPanel items={liveAnalytics?.activityFeed ?? []} maxVisible={5} />
@@ -1353,6 +1421,56 @@ export default function DashboardPage() {
           <EmptyNoForecast />
         )}
       </div>
+
+      {/* ── Live Momentum — compact supplementary ──────────────
+          liveAnalytics.momentum was already computed by
+          generateLiveAnalytics() above (same call that already
+          powers Smart Alerts/KPI Health/Activity Feed) but never
+          rendered. Day-level, EMA-smoothed per-KPI signal — distinct
+          from the week/month-level forecast panel just above it. */}
+      {liveAnalytics?.momentum && liveAnalytics.momentum.kpiMomentum.length > 0 && (
+        <div style={{ marginBottom:'20px' }}>
+          <div className="op-feed">
+            <div className="op-feed-header">
+              <span style={{ fontSize:'10px', fontWeight:600, color:'var(--text-primary)', letterSpacing:'0.04em', textTransform:'uppercase', fontFamily:"'Inter',sans-serif" }}>
+                Live Momentum
+              </span>
+              <span className="status-dot" style={{
+                fontSize:'9px', fontFamily:"'Inter',sans-serif",
+                color: LIVE_MOMENTUM_LABELS[liveAnalytics.momentum.overallDirection]?.color || 'var(--text-muted)',
+              }}>
+                {LIVE_MOMENTUM_LABELS[liveAnalytics.momentum.overallDirection]?.arrow ?? ''} {LIVE_MOMENTUM_LABELS[liveAnalytics.momentum.overallDirection]?.label ?? liveAnalytics.momentum.overallDirection}
+              </span>
+            </div>
+            {liveAnalytics.momentum.kpiMomentum.map((m) => {
+              const lm = LIVE_MOMENTUM_LABELS[m.direction] ?? LIVE_MOMENTUM_LABELS.stable
+              const streakLabel = m.streakDays > 1 && m.streakDirection !== 'none'
+                ? ` · ${m.streakDays}d ${m.streakDirection}`
+                : ''
+              return (
+                <div key={m.kpiKey} className="op-feed-item" title={`Confidence ${Math.round(m.momentumConfidence * 100)}%${m.isAnomaly ? ' · today flagged as an anomaly' : ''}`}>
+                  <div className="op-feed-dot" style={{ background: lm.color }} />
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                      <span style={{ fontSize:'11px', color:'var(--text-secondary)' }}>{m.label}</span>
+                      <span style={{ fontSize:'11px', fontWeight:600, color:lm.color, fontVariantNumeric:'tabular-nums' }}>
+                        {lm.arrow} {lm.label}
+                      </span>
+                    </div>
+                    {streakLabel && (
+                      <div style={{ fontSize:'8px', color:'var(--text-muted)', marginTop:'2px',
+                                    letterSpacing:'0.04em', textTransform:'uppercase',
+                                    fontFamily:"'Inter',sans-serif", textAlign:'right' }}>
+                        {streakLabel.replace(' · ', '')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Branch ranking (admin) or Month vs Target ───────── */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:'12px', marginBottom:'20px' }}

@@ -43,6 +43,17 @@ const MOMENTUM_LABELS = {
   needs_support: { label: 'Needs Support',arrow: '↓↓', color: '#ef4444' },
 }
 
+// liveMomentumEngine's MomentumDirection — a DIFFERENT enum from the
+// pharmacist-level MOMENTUM_LABELS above (different value set: surging/
+// stalling vs accelerating/needs_support). Day-level, EMA-smoothed signal.
+const LIVE_MOMENTUM_LABELS = {
+  surging:   { label: 'Surging',   arrow: '↑↑', color: '#22c55e' },
+  improving: { label: 'Improving', arrow: '↑',  color: '#22c55e' },
+  stable:    { label: 'Steady',    arrow: '→',  color: 'var(--text-muted)' },
+  cooling:   { label: 'Cooling',   arrow: '↓',  color: '#f59e0b' },
+  stalling:  { label: 'Stalling',  arrow: '↓↓', color: '#ef4444' },
+}
+
 // Section 6 severity → existing 5-tier status colors (no new color system)
 const SEVERITY_COLORS = {
   critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.28)',  label: 'Critical' },
@@ -337,6 +348,9 @@ export default function BranchIntelligencePage() {
               <SummaryCard
                 label="Risk"
                 value={RISK_LABELS[viewModel.branchSummary.riskLevel]?.label ?? viewModel.branchSummary.riskLevel}
+                sub={(viewModel.branchSummary.riskCriticalCount + viewModel.branchSummary.riskWarningCount) > 0
+                  ? `${viewModel.branchSummary.riskCriticalCount} critical · ${viewModel.branchSummary.riskWarningCount} warning`
+                  : 'No active flags'}
                 color={RISK_LABELS[viewModel.branchSummary.riskLevel]?.color}
               />
 
@@ -363,7 +377,96 @@ export default function BranchIntelligencePage() {
                 value={viewModel.branchSummary.teamSize}
                 sub="active"
               />
+
+              {/* 6. Momentum — day-level, EMA-smoothed signal from
+                  liveMomentumEngine, distinct from the week/month-level
+                  Forecast trend above. Newly surfaced (Phase 4). */}
+              <SummaryCard
+                label="Momentum"
+                value={`${LIVE_MOMENTUM_LABELS[viewModel.momentum.overallDirection]?.arrow ?? ''} ${LIVE_MOMENTUM_LABELS[viewModel.momentum.overallDirection]?.label ?? viewModel.momentum.overallDirection}`}
+                sub={`Led by ${getKpiMetaForKey(viewModel.momentum.dominantKpi).en}`}
+                color={LIVE_MOMENTUM_LABELS[viewModel.momentum.overallDirection]?.color}
+              />
             </div>
+
+            {/* Momentum evidence — per-KPI direction/streak behind the
+                Momentum stat above. Same Action → Evidence → Drill Down
+                pattern as the risk chips below. */}
+            {viewModel.momentum.kpiMomentum.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                {viewModel.momentum.kpiMomentum.map((m) => {
+                  const lm = LIVE_MOMENTUM_LABELS[m.direction] ?? LIVE_MOMENTUM_LABELS.stable
+                  const streakLabel = m.streakDays > 1 && m.streakDirection !== 'none'
+                    ? ` · ${m.streakDays}d ${m.streakDirection}`
+                    : ''
+                  return (
+                    <span key={m.kpiKey} title={`Confidence ${Math.round(m.momentumConfidence * 100)}%${m.isAnomaly ? ' · today flagged as an anomaly' : ''}`} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '5px',
+                      fontSize: '11px', padding: '4px 9px', borderRadius: '999px',
+                      background: 'var(--bg-elevated)', border: `1px solid ${lm.color}40`, color: 'var(--text-secondary)',
+                    }}>
+                      <strong style={{ fontWeight: 700 }}>{m.label}</strong>
+                      <span style={{ color: lm.color }}>{lm.arrow} {lm.label}{streakLabel}</span>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Trend evidence — the "why" behind the Forecast stat's
+                trend arrow above. That arrow is one branch-level
+                direction; this is the per-KPI week-over-week momentum
+                and 7d/30d % change it collapses (trendEngine.ts),
+                sorted by strongest-moving KPI first. Distinct from the
+                Momentum chips above: this is week/month-level, that is
+                day-level EMA-smoothed. */}
+            {viewModel.branchSummary.kpiTrends.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                {viewModel.branchSummary.kpiTrends.slice(0, 6).map((t) => {
+                  const tl = TREND_LABELS[t.direction]
+                  return (
+                    <span key={t.kpiKey} title={`7d: ${t.changePct7d > 0 ? '+' : ''}${t.changePct7d}% · 30d: ${t.changePct30d > 0 ? '+' : ''}${t.changePct30d}%`} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '5px',
+                      fontSize: '11px', padding: '4px 9px', borderRadius: '999px',
+                      background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)',
+                    }}>
+                      <strong style={{ fontWeight: 700 }}>{t.label}</strong>
+                      <span>{tl ? `${tl.arrow} ${tl.label}` : t.direction} · {t.momentum > 0 ? '+' : ''}{t.momentum}pt</span>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Risk evidence — the "why" behind the Risk stat above.
+                Drill-down layer for Action → Evidence → Drill Down;
+                the Risk card alone was a bare label with nothing to
+                inspect. Reuses the same severity chip language as the
+                supervisor action cards further down this page. */}
+            {viewModel.branchSummary.riskFlags.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                {viewModel.branchSummary.riskFlags.slice(0, 6).map((flag, i) => {
+                  const sev = flag.severity === 'HIGH' ? SEVERITY_COLORS.critical
+                    : flag.severity === 'MEDIUM' ? SEVERITY_COLORS.medium
+                    : SEVERITY_COLORS.low
+                  return (
+                    <span key={i} title={flag.description} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '5px',
+                      fontSize: '11px', padding: '4px 9px', borderRadius: '999px',
+                      background: sev.bg, border: `1px solid ${sev.border}`, color: sev.color,
+                    }}>
+                      <strong style={{ fontWeight: 700 }}>{flag.category}</strong>
+                      <span style={{ color: 'var(--text-secondary)' }}>{flag.description}</span>
+                    </span>
+                  )
+                })}
+                {viewModel.branchSummary.riskFlags.length > 6 && (
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', alignSelf: 'center' }}>
+                    +{viewModel.branchSummary.riskFlags.length - 6} more
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Section 2: KPI Intelligence — UI3 migration ───────

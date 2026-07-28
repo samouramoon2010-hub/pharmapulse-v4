@@ -1,19 +1,27 @@
 // ============================================================
-// Export Studio — Workbook Builder (DX-10)
+// Export Studio — Workbook Builder (DX-10, exceljs migration)
 //
-// Pure: ExportDataset -> XLSX.WorkBook. Never writes a file itself
+// Pure: ExportDataset -> ExcelJS.Workbook. Never writes a file itself
 // (see exportDownloadService.ts) and never decides whether the
 // workbook is safe to download (see exportValidation.ts) — those are
 // separate steps in the pipeline by design.
+//
+// exceljs is dynamically imported rather than statically, so it lands
+// in its own chunk instead of the main bundle every user downloads on
+// first load — it's only needed on the admin-only Export Studio page.
+// This makes buildExportWorkbook() async (it wasn't under the old
+// SheetJS-CE writer); its only caller, exportDownloadService.ts, was
+// already async for the same reason (buffer serialization).
 // ============================================================
-import * as XLSX from 'xlsx'
+import type ExcelJS from 'exceljs'
 import type { ExportDataset, ExportSheetData } from './exportTypes'
 import { applySheetQuality, applyColumnFormat, formatForUnit } from './exportStyling'
 
 const WORKBOOK_GENERATOR = 'PharmaPulse Export Studio'
 
-function buildCoverSheet(dataset: ExportDataset): XLSX.WorkSheet {
-  return XLSX.utils.aoa_to_sheet([
+function buildCoverSheet(wb: ExcelJS.Workbook, dataset: ExportDataset): void {
+  const sheet = wb.addWorksheet('Cover')
+  const rows: Array<[string, string | number]> = [
     ['Field', 'Value'],
     ['Report Title', dataset.meta.templateName],
     ['Scope', dataset.meta.scopeLabel],
@@ -24,44 +32,55 @@ function buildCoverSheet(dataset: ExportDataset): XLSX.WorkSheet {
     ['Generator', WORKBOOK_GENERATOR],
     ['Confidentiality', 'Internal — Management Use Only'],
     ['Row Count', dataset.meta.rowCount],
-    ...(dataset.meta.warnings.length ? [['Warnings', dataset.meta.warnings.join(' | ')]] : []),
-  ])
+  ]
+  if (dataset.meta.warnings.length) rows.push(['Warnings', dataset.meta.warnings.join(' | ')])
+  rows.forEach((r) => sheet.addRow(r))
+  applySheetQuality(sheet, ['Field', 'Value'])
 }
 
-function buildDataSheet(sheet: ExportSheetData): XLSX.WorkSheet {
+function buildDataSheet(wb: ExcelJS.Workbook, sheet: ExportSheetData): void {
+  const ws = wb.addWorksheet(sheet.sheetName.slice(0, 31))
   const headers = sheet.columns.map((c) => c.header)
-  const aoa = [headers, ...sheet.rows.map((row) => sheet.columns.map((c) => row[c.key] ?? ''))]
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws.addRow(headers)
+  for (const row of sheet.rows) {
+    ws.addRow(sheet.columns.map((c) => row[c.key] ?? ''))
+  }
   applySheetQuality(ws, headers)
   sheet.columns.forEach((col, idx) => {
     const format = formatForUnit(col.unit)
-    if (format) applyColumnFormat(ws, idx, sheet.rows.length, format)
+    if (format) applyColumnFormat(ws, idx, format)
   })
-  return ws
 }
 
-function buildDefinitionsSheet(dataset: ExportDataset): XLSX.WorkSheet {
+function buildDefinitionsSheet(wb: ExcelJS.Workbook, dataset: ExportDataset): void {
   const headers = ['Metric', 'Definition', 'Formula', 'Unit', 'Source', 'Exclusions', 'Cap Behavior', 'Missing Target Behavior', 'Ranking Scope', 'Period Logic', 'Notes']
-  const aoa = [headers, ...dataset.definitions.map((d) => [
-    d.metric, d.definition, d.formula, d.unit, d.source, d.exclusions, d.capBehavior, d.missingTargetBehavior, d.rankingScope, d.periodLogic, d.notes,
-  ])]
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  const ws = wb.addWorksheet('Definitions')
+  ws.addRow(headers)
+  for (const d of dataset.definitions) {
+    ws.addRow([
+      d.metric, d.definition, d.formula, d.unit, d.source, d.exclusions, d.capBehavior, d.missingTargetBehavior, d.rankingScope, d.periodLogic, d.notes,
+    ])
+  }
   applySheetQuality(ws, headers)
-  return ws
 }
 
-/** Builds a complete XLSX.WorkBook from an ExportDataset. Sheet order:
- *  Cover -> each analytical sheet -> Raw Data (if present) -> Definitions. */
-export function buildExportWorkbook(dataset: ExportDataset): XLSX.WorkBook {
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, buildCoverSheet(dataset), 'Cover')
+/** Builds a complete ExcelJS.Workbook from an ExportDataset. Sheet
+ *  order: Cover -> each analytical sheet -> Raw Data (if present) ->
+ *  Definitions. */
+export async function buildExportWorkbook(dataset: ExportDataset): Promise<ExcelJS.Workbook> {
+  const { default: ExcelJSRuntime } = await import('exceljs')
+  const wb = new ExcelJSRuntime.Workbook()
+  wb.creator = WORKBOOK_GENERATOR
+  wb.created = new Date(dataset.meta.generatedAt)
+
+  buildCoverSheet(wb, dataset)
   for (const sheet of dataset.sheets) {
-    XLSX.utils.book_append_sheet(wb, buildDataSheet(sheet), sheet.sheetName.slice(0, 31))
+    buildDataSheet(wb, sheet)
   }
   if (dataset.rawData) {
-    XLSX.utils.book_append_sheet(wb, buildDataSheet(dataset.rawData), dataset.rawData.sheetName.slice(0, 31))
+    buildDataSheet(wb, dataset.rawData)
   }
-  XLSX.utils.book_append_sheet(wb, buildDefinitionsSheet(dataset), 'Definitions')
+  buildDefinitionsSheet(wb, dataset)
   return wb
 }
 

@@ -199,7 +199,7 @@ export function buildBranchIntelligenceViewModel(
   input: BranchIntelligenceBuilderInput,
 ): BranchIntelligenceViewModel {
   const warnings: string[] = []
-  const { branchSummary, teamIntelligence, teamSize, branchRankSnapshot, metadata } = input
+  const { branchSummary, teamIntelligence, teamSize, branchRankSnapshot, metadata, momentum } = input
   const summaries = teamIntelligence.pharmacistSummaries
 
   // ── Focus KPI ──────────────────────────────────────────────
@@ -248,7 +248,18 @@ export function buildBranchIntelligenceViewModel(
     healthGrade:   branchSummary.score.grade,
     forecastPct,
     forecastTrend: branchSummary.trend.direction,
+    kpiTrends: [...branchSummary.trend.kpiTrends]
+      .sort((a, b) => Math.abs(b.momentum) - Math.abs(a.momentum))
+      .map((t) => ({
+        kpiKey: t.kpiKey, label: t.label, direction: t.direction,
+        momentum: t.momentum, changePct7d: t.changePct7d, changePct30d: t.changePct30d,
+      })),
     riskLevel:     branchSummary.riskProfile.riskLevel,
+    riskFlags: [...branchSummary.riskProfile.flags]
+      .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'HIGH' ? -1 : b.severity === 'HIGH' ? 1 : 0))
+      .map((f) => ({ category: f.category, severity: f.severity, description: f.description })),
+    riskCriticalCount: branchSummary.riskProfile.criticalCount,
+    riskWarningCount:  branchSummary.riskProfile.warningCount,
     branchRank: branchRankSnapshot
       ? {
           currentRank:  branchRankSnapshot.currentRank,
@@ -317,6 +328,7 @@ export function buildBranchIntelligenceViewModel(
     contributionByKpi,
     coachingOpportunities,
     supervisorActions,
+    momentum,
     weakKpiAttribution,
     metadata,
     warnings,

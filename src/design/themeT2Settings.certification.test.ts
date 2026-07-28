@@ -63,7 +63,7 @@ const NEW_SETTINGS_FILES: Record<string, string> = {
 // ════════════════════════════════════════════════════════════
 describe('T2-A — /settings route points at the new Settings Center', () => {
   it('App.jsx imports SettingsPage from pages/settings (the new shell)', () => {
-    expect(appSrc).toContain("import SettingsPage         from './pages/settings/SettingsPage'")
+    expect(appSrc).toContain("const SettingsPage         = lazy(() => import('./pages/settings/SettingsPage'))")
   })
   it('App.jsx still registers the /settings route', () => {
     expect(appSrc).toContain('path="/settings"')
@@ -84,11 +84,15 @@ describe('T2-A — /settings route points at the new Settings Center', () => {
   })
 })
 
-describe('T2-A — Settings sidebar exposes exactly the 8 spec sections, in order', () => {
-  const EXPECTED = ['general', 'appearance', 'ai-providers', 'notifications', 'security', 'privacy', 'performance', 'about']
-  it('SETTINGS_SECTIONS has exactly 8 entries', () => {
+describe('T2-A — Settings sidebar exposes exactly the 10 spec sections, in order', () => {
+  // Sidebar-3: 'admin-tools' (Demo Data, admin-only) added between
+  // 'performance' and 'about' — moved here from the primary sidebar.
+  // Backup-2: 'backup' (manual on-demand Firestore export, admin-only)
+  // added right after 'admin-tools' — see BackupSettingsSection.jsx.
+  const EXPECTED = ['general', 'appearance', 'ai-providers', 'notifications', 'security', 'privacy', 'performance', 'admin-tools', 'backup', 'about']
+  it('SETTINGS_SECTIONS has exactly 10 entries', () => {
     const matches = settingsSidebarSrc.match(/id: '([a-z-]+)'/g) ?? []
-    expect(matches.length).toBe(8)
+    expect(matches.length).toBe(10)
   })
   for (const id of EXPECTED) {
     it(`includes section "${id}"`, () => {
@@ -99,9 +103,9 @@ describe('T2-A — Settings sidebar exposes exactly the 8 spec sections, in orde
     const ids = Array.from(settingsSidebarSrc.matchAll(/id: '([a-z-]+)'/g)).map((m) => m[1])
     expect(ids).toEqual(EXPECTED)
   })
-  it('only general, appearance, and about are marked functional: true', () => {
+  it('only general, appearance, ai-providers, admin-tools, backup, and about are marked functional: true', () => {
     const functionalIds = Array.from(settingsSidebarSrc.matchAll(/id: '([a-z-]+)',\s*label: '[^']+',\s*icon: \w+,\s*functional: true/g)).map((m) => m[1])
-    expect(functionalIds.sort()).toEqual(['about', 'appearance', 'general'].sort())
+    expect(functionalIds.sort()).toEqual(['about', 'admin-tools', 'ai-providers', 'appearance', 'backup', 'general'].sort())
   })
   it('renders as an always-visible nav list, not a dropdown (button elements, no <select>)', () => {
     expect(settingsSidebarSrc).not.toContain('<select')
@@ -115,12 +119,17 @@ describe('T2-A — SettingsPage renders every section behind its own SettingsSec
       expect(settingsPageSrc).toContain(`activeId === '${id}'`)
     })
   }
-  it('AI Providers / Notifications / Security / Privacy / Performance render ComingSoonNotice', () => {
-    for (const section of ['ai-providers', 'notifications', 'security', 'privacy', 'performance']) {
+  it('Notifications / Security / Privacy / Performance render ComingSoonNotice', () => {
+    for (const section of ['notifications', 'security', 'privacy', 'performance']) {
       const idx = settingsPageSrc.indexOf(`activeId === '${section}'`)
       const block = settingsPageSrc.slice(idx, idx + 400)
       expect(block).toContain('<ComingSoonNotice')
     }
+  })
+  it('AI Providers renders the BYOK PersonalAiSettingsSection (no longer a coming-soon stub)', () => {
+    const idx = settingsPageSrc.indexOf(`activeId === 'ai-providers'`)
+    const block = settingsPageSrc.slice(idx, idx + 400)
+    expect(block).toContain('<PersonalAiSettingsSection')
   })
   it('General and Appearance and About render real functional content, not ComingSoonNotice', () => {
     for (const section of ['general', 'appearance', 'about']) {
@@ -573,20 +582,20 @@ describe('T2-I — header quick toggle and Settings Appearance share one source 
 // ════════════════════════════════════════════════════════════
 // K — Guardrails
 // ════════════════════════════════════════════════════════════
-describe('Guardrails — no Firestore, no AI connection, no API key UI, no marketplace', () => {
+describe('Guardrails — no Firestore in SettingsPage.jsx itself, no marketplace (BYOK AI connection UI is intentional, see PersonalAiSettingsSection tests)', () => {
   it('no Settings Center file references Firestore/Firebase', () => {
     for (const [name, src] of Object.entries(NEW_SETTINGS_FILES)) {
       expect(src, name).not.toMatch(/from ['"].*firestore|from ['"].*firebase/i)
     }
   })
-  it('AI Providers section has no API key input field (no <input> in that section, and copy explicitly defers it)', () => {
+  it('AI Providers section renders the BYOK component, which owns its own key input (not SettingsPage.jsx itself)', () => {
     const idx = settingsPageSrc.indexOf("activeId === 'ai-providers'")
-    const block = settingsPageSrc.slice(idx, idx + 600)
+    const block = settingsPageSrc.slice(idx, idx + 400)
     expect(block).not.toContain('<input')
-    expect(block.toLowerCase()).toContain('api key management arrive')
+    expect(block).toContain('<PersonalAiSettingsSection')
   })
-  it('AI Providers section does not call a real AI provider connector', () => {
-    expect(settingsPageSrc).not.toMatch(/connectToProvider|openai|anthropic\.messages/i)
+  it('SettingsPage.jsx itself never calls a real AI provider connector directly (delegated to PersonalAiSettingsSection)', () => {
+    expect(settingsPageSrc).not.toMatch(/connectToProvider|connectToPersonalAi|callRealAiProvider|openai|anthropic\.messages/i)
   })
   it('no Settings Center file references a "marketplace" concept', () => {
     for (const [name, src] of Object.entries(NEW_SETTINGS_FILES)) {

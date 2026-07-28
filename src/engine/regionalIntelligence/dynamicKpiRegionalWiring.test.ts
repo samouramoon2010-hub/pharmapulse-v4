@@ -247,7 +247,7 @@ describe('F — RegionalIntelligencePanel: registry-driven column list', () => {
 
   it('panel accepts liveRegistry as prop', async () => {
     const src = (await import('../../components/executive/RegionalIntelligencePanel.jsx?raw')).default
-    expect(src).toContain('liveRegistry }')
+    expect(src).toContain('liveRegistry,')
   })
 
   it('ExecutiveDashboard passes liveRegistry to RegionalIntelligencePanel', async () => {

@@ -88,20 +88,22 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                   <button onClick={() => onEdit(kpi)} className="btn btn-ghost btn-sm gap-1 text-xs">
                     <Pencil className="w-3.5 h-3.5" /> Edit
                   </button>
-                  {!kpi.isCore && uiStatus === 'ACTIVE' && (
+                  {uiStatus === 'ACTIVE' && (
                     <>
-                      <button onClick={() => onHide(kpi.key)} className="btn btn-ghost btn-sm gap-1 text-xs">
-                        <EyeOff className="w-3.5 h-3.5" /> Hide
-                      </button>
+                      {!kpi.isCore && (
+                        <button onClick={() => onHide(kpi.key)} className="btn btn-ghost btn-sm gap-1 text-xs">
+                          <EyeOff className="w-3.5 h-3.5" /> Hide
+                        </button>
+                      )}
                       <button onClick={() => onArchive(kpi.key)} className="btn btn-ghost btn-sm gap-1 text-xs">
                         <Archive className="w-3.5 h-3.5" /> Archive
                       </button>
+                      {kpi.isCore && (
+                        <span title="Protected system KPI — cannot be hidden from input forms" className="flex items-center gap-1 text-[11px]" style={{ color: 'rgba(96,165,250,0.7)' }}>
+                          <Shield className="w-3 h-3" /> Protected
+                        </span>
+                      )}
                     </>
-                  )}
-                  {kpi.isCore && (
-                    <span title="Protected system KPI — cannot be archived or hidden" className="flex items-center gap-1 text-[11px]" style={{ color: 'rgba(96,165,250,0.7)' }}>
-                      <Shield className="w-3 h-3" /> Protected
-                    </span>
                   )}
                 </>
               )}
@@ -239,22 +241,25 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                       <Pencil style={{ width:13, height:13 }} />
                     </button>
 
-                    {/* Archive / Hide — disabled for core protected KPIs */}
-                    {!kpi.isCore && uiStatus === 'ACTIVE' && (
+                    {/* Archive: allowed for all active KPIs, including former core-protected keys.
+                        Hide: still restricted to non-core keys (that restriction was not lifted). */}
+                    {uiStatus === 'ACTIVE' && (
                       <>
-                        <button
-                          onClick={() => onHide(kpi.key)}
-                          title="Hide from input forms"
-                          style={{
-                            width:26, height:26, borderRadius:'6px', border:'none',
-                            background:'transparent', cursor:'pointer', color:'var(--text-muted)',
-                            display:'flex', alignItems:'center', justifyContent:'center',
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background='var(--bg-overlay)'; e.currentTarget.style.color='#f59e0b' }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--text-muted)' }}
-                        >
-                          <EyeOff style={{ width:13, height:13 }} />
-                        </button>
+                        {!kpi.isCore && (
+                          <button
+                            onClick={() => onHide(kpi.key)}
+                            title="Hide from input forms"
+                            style={{
+                              width:26, height:26, borderRadius:'6px', border:'none',
+                              background:'transparent', cursor:'pointer', color:'var(--text-muted)',
+                              display:'flex', alignItems:'center', justifyContent:'center',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background='var(--bg-overlay)'; e.currentTarget.style.color='#f59e0b' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--text-muted)' }}
+                          >
+                            <EyeOff style={{ width:13, height:13 }} />
+                          </button>
+                        )}
                         <button
                           onClick={() => onArchive(kpi.key)}
                           title="Archive KPI"
@@ -268,12 +273,12 @@ export default function KpiRegistryTable({ kpis, uiStatuses, onEdit, onArchive, 
                         >
                           <Archive style={{ width:13, height:13 }} />
                         </button>
+                        {kpi.isCore && (
+                          <span title="Protected system KPI — cannot be hidden from input forms" style={{ width:26, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+                            <Shield style={{ width:11, height:11, color:'rgba(96,165,250,0.4)' }} />
+                          </span>
+                        )}
                       </>
-                    )}
-                    {kpi.isCore && (
-                      <span title="Protected system KPI — cannot be archived or hidden" style={{ width:26, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
-                        <Shield style={{ width:11, height:11, color:'rgba(96,165,250,0.4)' }} />
-                      </span>
                     )}
                   </div>
                 </td>

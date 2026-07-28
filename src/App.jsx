@@ -1,7 +1,7 @@
 // ============================================================
 // App.jsx — Production router v4 with full UI system
 // ============================================================
-import React, { useEffect } from 'react'
+import React, { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore }    from './store/authStore'
 import { useSettingsStore, applyTheme } from './store/settingsStore'
@@ -11,61 +11,68 @@ import ProtectedRoute from './components/layout/ProtectedRoute'
 import LoadingScreen  from './components/ui/LoadingScreen'
 import ThemeProvider  from './theme/ThemeProvider'
 
+// Every route below is lazy-loaded (React.lazy + one shared <Suspense>
+// around <Routes>) so each page ships as its own chunk instead of all
+// ~50 pages inflating the single main bundle a user must download
+// before seeing even the login screen. LoginPageV3 is the one route
+// on the unauthenticated critical path — kept eager so the first paint
+// isn't gated behind an extra network round trip.
+import LoginPageV3 from './pages/auth/LoginPageV3'
+
 // Auth
-import LoginPageV2      from './pages/auth/LoginPageV2'
-import LoginPageV3      from './pages/auth/LoginPageV3'
-import LoginConceptA    from './pages/auth/concepts/LoginConceptA'
-import LoginConceptB    from './pages/auth/concepts/LoginConceptB'
-import LoginConceptC    from './pages/auth/concepts/LoginConceptC'
-import LoginNetworkPreview from './pages/auth/LoginNetworkPreview'
-import LoginVortexPreview from './pages/auth/LoginVortexPreview'
-import UnauthorizedPage from './pages/auth/UnauthorizedPage'
+const LoginPageV2      = lazy(() => import('./pages/auth/LoginPageV2'))
+const UnauthorizedPage = lazy(() => import('./pages/auth/UnauthorizedPage'))
 
 // Core
-import DashboardPage  from './pages/dashboard/DashboardPage'
-import KpiEntryPage   from './pages/pharmacist/KpiEntryPage'
+const DashboardPage  = lazy(() => import('./pages/dashboard/DashboardPage'))
+const KpiEntryPage   = lazy(() => import('./pages/pharmacist/KpiEntryPage'))
 
 // Admin
-import PharmaciesPage   from './pages/admin/PharmaciesPage'
-import UsersPage        from './pages/admin/UsersPage'
-import ImportCenterPage from './pages/admin/ImportCenterPage'
-import DataExchangeStudioPage from './pages/admin/DataExchangeStudioPage'
-import ExportStudioPage from './pages/admin/ExportStudioPage'
-import AuditLogsPage       from './pages/admin/AuditLogsPage'
-import KpiManagementPage  from './pages/admin/KpiManagementPage'
+const PharmaciesPage   = lazy(() => import('./pages/admin/PharmaciesPage'))
+const OrganizationPage = lazy(() => import('./pages/admin/OrganizationPage'))
+const UsersPage        = lazy(() => import('./pages/admin/UsersPage'))
+const ImportCenterPage = lazy(() => import('./pages/admin/ImportCenterPage'))
+const DataExchangeStudioPage = lazy(() => import('./pages/admin/DataExchangeStudioPage'))
+const AiIntakePage = lazy(() => import('./pages/admin/AiIntakePage'))
+const ExportStudioPage = lazy(() => import('./pages/admin/ExportStudioPage'))
+const AuditLogsPage       = lazy(() => import('./pages/admin/AuditLogsPage'))
+const KpiManagementPage  = lazy(() => import('./pages/admin/KpiManagementPage'))
 // RBAC Phase 1 — Territory Admin Pages
-import PersonalTargetsPage from './pages/manager/PersonalTargetsPage'
-import EvaluationRegistryPage from './pages/admin/EvaluationRegistryPage'
-import EvaluationRunPage      from './pages/admin/EvaluationRunPage'
-import BranchClassificationsPage from './pages/admin/BranchClassificationsPage'
-import RankingsPage               from './pages/admin/RankingsPage'
-import DemoDataPage               from './pages/admin/DemoDataPage'
-import DynamicKpiShadowPage       from './pages/admin/DynamicKpiShadowPage'
-import RegionsPage   from './pages/admin/RegionsPage'
-import DistrictsPage from './pages/admin/DistrictsPage'
+const PersonalTargetsPage = lazy(() => import('./pages/manager/PersonalTargetsPage'))
+const EvaluationRegistryPage = lazy(() => import('./pages/admin/EvaluationRegistryPage'))
+const EvaluationRunPage      = lazy(() => import('./pages/admin/EvaluationRunPage'))
+const BranchClassificationsPage = lazy(() => import('./pages/admin/BranchClassificationsPage'))
+const RankingsPage               = lazy(() => import('./pages/admin/RankingsPage'))
+const DemoDataPage               = lazy(() => import('./pages/admin/DemoDataPage'))
+const DynamicKpiShadowPage       = lazy(() => import('./pages/admin/DynamicKpiShadowPage'))
+const RegionsPage   = lazy(() => import('./pages/admin/RegionsPage'))
+const DistrictsPage = lazy(() => import('./pages/admin/DistrictsPage'))
 
 // Shared
-import SettingsPage         from './pages/settings/SettingsPage'
-import TargetsPage            from './pages/shared/TargetsPage'
-import ReportsPage            from './pages/shared/ReportsPage'
-import NotificationsPage      from './pages/shared/NotificationsPage'
-import PharmacistPerformancePage from './pages/pharmacist/PerformancePage'
-import TeamPage                  from './pages/manager/TeamPage'
-import BranchIntelligencePage    from './pages/branch/BranchIntelligencePage'
-import PharmacistIntelligencePage from './pages/pharmacist/PharmacistIntelligencePage'
-import MyPharmacistIntelligenceRedirect from './pages/pharmacist/MyPharmacistIntelligenceRedirect'
-import AboutPage    from './pages/shared/AboutPage'
-import ExecutiveDashboard from './pages/executive/ExecutiveDashboard'
+const SettingsPage         = lazy(() => import('./pages/settings/SettingsPage'))
+const TargetsPage            = lazy(() => import('./pages/shared/TargetsPage'))
+const ReportsPage            = lazy(() => import('./pages/shared/ReportsPage'))
+const NotificationsPage      = lazy(() => import('./pages/shared/NotificationsPage'))
+const PharmacistPerformancePage = lazy(() => import('./pages/pharmacist/PerformancePage'))
+const TeamPage                  = lazy(() => import('./pages/manager/TeamPage'))
+const BranchIntelligencePage    = lazy(() => import('./pages/branch/BranchIntelligencePage'))
+const PharmacistIntelligencePage = lazy(() => import('./pages/pharmacist/PharmacistIntelligencePage'))
+const MyPharmacistIntelligenceRedirect = lazy(() => import('./pages/pharmacist/MyPharmacistIntelligenceRedirect'))
+const AboutPage    = lazy(() => import('./pages/shared/AboutPage'))
+const ExecutiveDashboard = lazy(() => import('./pages/executive/ExecutiveDashboard'))
 
 // Actions Layer — Phase 3C-3
-import MyActionsPage from './pages/actions/MyActionsPage'
-import TasksPage     from './pages/actions/TasksPage'
+const MyActionsPage = lazy(() => import('./pages/actions/MyActionsPage'))
+const TasksPage     = lazy(() => import('./pages/actions/TasksPage'))
 
 // Profile Studio — Phase 2A
-import ProfileStudioPage from './pages/profileStudio/ProfileStudioPage'
+const ProfileStudioPage = lazy(() => import('./pages/profileStudio/ProfileStudioPage'))
 
 // Assistant — Visibility Hotfix
-import AssistantPage from './pages/assistant/AssistantPage'
+const AssistantPage = lazy(() => import('./pages/assistant/AssistantPage'))
+
+// Item Sales Analytics — DX-12b (smart list aggregates)
+const ItemSalesAnalyticsPage = lazy(() => import('./pages/smartList/ItemSalesAnalyticsPage'))
 
 const WIP = ({ t }) => (
   <div className="flex flex-col items-center justify-center min-h-[400px]"
@@ -136,29 +143,15 @@ export default function App() {
         {loading ? (
           <LoadingScreen message="جاري تحميل PharmaPulse..." />
         ) : (
+          <Suspense fallback={<LoadingScreen message="جاري تحميل الصفحة..." />}>
           <Routes>
-          <Route path="/login"        element={<LoginPageV2 />} />
-          {/* PR-1F Gate 2 — isolated static shell, reachable for evidence
-              capture only. /login still serves LoginPageV2 untouched;
-              cutover is an explicit, separate Gate 3 decision. */}
+          {/* PR-1F Gate 3 cutover (user-approved, July 2026): /login now
+              serves LoginPageV3 (animated live panel + Identity Gateway
+              V3 card). LoginPageV2 is kept, unmodified, at /login-v2 for
+              rollback/reference — see RC1_ROLLBACK_RUNBOOK.md. */}
+          <Route path="/login"        element={<LoginPageV3 />} />
           <Route path="/login-v3"     element={<LoginPageV3 />} />
-          {/* Login Design Exploration — visual-concept-only preview routes.
-              Static local form state, no auth wiring. Not linked from any
-              nav. See docs/production/LOGIN_DESIGN_EXPLORATION.md. */}
-          <Route path="/login-concept-a" element={<LoginConceptA />} />
-          <Route path="/login-concept-b" element={<LoginConceptB />} />
-          <Route path="/login-concept-c" element={<LoginConceptC />} />
-          {/* Login Network Preview — real animated background (code-built
-              SVG/CSS network, captured to MP4) + a real-structure login
-              panel. Local-only form state, no auth wiring. See
-              docs/production/LOGIN_STATIC_BACKGROUND_PREVIEW.md. */}
-          <Route path="/login-network-preview" element={<LoginNetworkPreview />} />
-          {/* Login Vortex Preview — cropped, text-free portion of the
-              rejected V3 reference artwork (glowing P + abstract spiral
-              only), composited as an inset graphic on a flat canvas.
-              Local-only form state, no auth wiring. See
-              docs/production/LOGIN_VORTEX_PREVIEW.md. */}
-          <Route path="/login-vortex-preview" element={<LoginVortexPreview />} />
+          <Route path="/login-v2"     element={<LoginPageV2 />} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="/about"        element={<AboutPage />} />
           <Route path="/"             element={<HomeRedirect />} />
@@ -189,6 +182,8 @@ export default function App() {
                 (PharmacistIntelligencePage) restricts pharmacists to their
                 own userId — see ownership check inside the page. */}
             <Route path="/pharmacist/:userId/intelligence" element={<PR roles={ALL}><PharmacistIntelligencePage /></PR>} />
+            {/* Item Sales Analytics — DX-12b: smart-list aggregates, managerial tiers */}
+            <Route path="/item-sales" element={<PR roles={MGR_UP}><ItemSalesAnalyticsPage /></PR>} />
             <Route path="/targets"  element={<PR roles={MGR_UP}><TargetsPage /></PR>} />
             <Route path="/personal-targets" element={<PR roles={MGR_UP}><PersonalTargetsPage /></PR>} />
             <Route path="/reports"  element={<PR roles={MGR_UP}><ReportsPage /></PR>} />
@@ -196,10 +191,18 @@ export default function App() {
             {/* Admin only */}
             <Route path="/executive"  element={<PR roles={EXEC_ROLES}><ExecutiveDashboard /></PR>} />
             <Route path="/pharmacies" element={<PR roles={ADMIN}><PharmaciesPage /></PR>} />
+            {/* Sidebar-2: consolidated Branches/Regions/Districts/Classifications —
+                the 4 individual routes below stay reachable by direct URL,
+                only removed from primary nav (same pattern as /import). */}
+            <Route path="/admin/organization" element={<PR roles={ADMIN}><OrganizationPage /></PR>} />
             <Route path="/users"      element={<PR roles={USERS_ROLES}><UsersPage /></PR>} />
             <Route path="/import"     element={<PR roles={ADMIN}><ImportCenterPage /></PR>} />
             {/* DX-2/DX-3 — Data Exchange Studio: Organization Onboarding (separate from Import Center) */}
             <Route path="/data-exchange" element={<PR roles={ADMIN}><DataExchangeStudioPage /></PR>} />
+            {/* Universal AI Intake Phase 1 — Excel/CSV/text/PDF/image front door onto the
+                same secure Data Exchange import pipeline (import_jobs + adapters), not a
+                parallel backend. Admin-only, same as Data Exchange Studio. */}
+            <Route path="/ai-intake" element={<PR roles={ADMIN}><AiIntakePage /></PR>} />
             {/* DX-10 — Export Studio: separate subsystem from Data Exchange (Import) Studio */}
             <Route path="/export-studio" element={<PR roles={ADMIN}><ExportStudioPage /></PR>} />
             <Route path="/audit"      element={<PR roles={ADMIN}><AuditLogsPage /></PR>} />
@@ -225,6 +228,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
         )}
       </ErrorBoundary>
     </BrowserRouter>

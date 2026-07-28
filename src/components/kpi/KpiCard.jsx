@@ -69,9 +69,16 @@ export default function KpiCard({
         <div className="flex items-center gap-2.5">
           <div
             className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
-            style={{ background: `${kpi?.color || '#1a9a7e'}22`, border: `1px solid ${kpi?.color || '#1a9a7e'}44` }}
+            style={kpi?.color
+              ? { background: `${kpi?.color}22`, border: `1px solid ${kpi?.color}44` }
+              // No per-KPI color assigned — fall back to the active theme's
+              // brand accent (var(--brand-400)) instead of a hardcoded hex,
+              // so the badge follows whichever theme the user has selected
+              // (Corporate/Executive/Futuristic/Medical/AMOLED/Apple/Cyber)
+              // rather than always showing the same fixed teal-green.
+              : { background: 'color-mix(in srgb, var(--brand-400) 13%, transparent)', border: '1px solid color-mix(in srgb, var(--brand-400) 27%, transparent)' }}
           >
-            <span style={{ color: kpi?.color || '#1a9a7e' }}>
+            <span style={{ color: kpi?.color || 'var(--brand-400)' }}>
               {kpi?.icon ? '📊' : '📈'}
             </span>
           </div>

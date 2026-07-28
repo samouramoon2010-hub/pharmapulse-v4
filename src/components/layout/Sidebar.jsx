@@ -17,12 +17,22 @@ import { useI18n }         from '../../hooks/useI18n'
 import PersonalIdentitySignature, { isSignatureIdentity } from '../identity/PersonalIdentitySignature'
 import { getRoleLabel } from '../../constants/roleScope'
 
-// UI3-D — Linear-style 3-group taxonomy: Intelligence Operations /
-// Data Architecture / Platform. "Actions" (and a couple of small
-// role-specific groups like "My Work"/"People") stay as their own
-// groups since they don't conceptually fit any of the 3 — every
-// existing route from before this regroup is still present and
-// permission-gated exactly as before; only group labels/order moved.
+// UI3-D — Linear-style group taxonomy: Intelligence Operations /
+// Evaluation Engine / Data & Import / Platform. "Actions" (and a
+// couple of small role-specific groups like "My Work") stay as
+// their own groups since they don't conceptually fit any of the
+// others — every existing route from before this regroup is still
+// present and permission-gated exactly as before; only group
+// labels/order moved.
+//
+// Admin's former single "Data Architecture" catch-all (11 unrelated
+// items: registries, evaluation tooling, import/export, people
+// management) was split for scannability: "Evaluation Engine" holds
+// KPI/Profile/Evaluation Registry tooling, "Data & Import" holds the
+// Data Exchange/AI Intake/Export pipelines, and Users/Organization
+// moved into Platform next to Settings — it's people/org management,
+// not data architecture. Other roles' "Data Architecture" groups are
+// tiny (Profile Studio, optionally People) and were left as-is.
 const NAV_CONFIG = {
   admin: [
     { group: '', items: [
@@ -35,7 +45,7 @@ const NAV_CONFIG = {
       { icon: ShoppingBasket, label: 'Item Sales', path: '/item-sales' },
       { icon: Bot,        label: 'Assistant',    path: '/assistant' },
     ]},
-    { group: 'Data Architecture', items: [
+    { group: 'Evaluation Engine', items: [
       { icon: Database,        label: 'KPI Registry',          path: '/admin/kpis' },
       // The developer-only parity diagnostic page (dynamic-kpi-shadow)
       // was removed from this nav — adds no business value and the
@@ -48,6 +58,8 @@ const NAV_CONFIG = {
       { icon: ClipboardCheck,  label: 'Evaluation Registry',   path: '/admin/evaluation-registry' },
       // ER-2A — Evaluation execution
       { icon: PlayCircle,      label: 'Run Evaluation',        path: '/admin/evaluation-run' },
+    ]},
+    { group: 'Data & Import', items: [
       // Import Center (/import) is the pre-DX-1 ungoverned bulk importer —
       // fully superseded by Data Exchange Studio below (Onboarding, KPI
       // Registry/Targets, Branch/Pharmacist Actuals all covered there with
@@ -57,11 +69,6 @@ const NAV_CONFIG = {
       { icon: FileSpreadsheet, label: 'Data Exchange Studio',   path: '/data-exchange' },
       { icon: Sparkles,        label: 'AI Data Intake',         path: '/ai-intake' },
       { icon: FileSpreadsheet, label: 'Export Studio',          path: '/export-studio' },
-      { icon: Users,           label: 'Users',                 path: '/users' },
-      // Sidebar-2: Pharmacies/Regions/Districts/Branch Classifications
-      // consolidated into one tabbed page — each route still exists and
-      // is reachable directly, just no longer 4 separate nav entries.
-      { icon: Building2, label: 'Organization', path: '/admin/organization' },
       // Sidebar-3: Demo Data seeder moved to Settings -> Admin Tools
       // (admin-only) — route stays reachable by direct URL.
     ]},
@@ -73,6 +80,11 @@ const NAV_CONFIG = {
       { icon: TrendingUp,      label: 'Reports',          path: '/reports' },
       { icon: Target,          label: 'Targets',          path: '/targets' },
       { icon: UserCheck,       label: 'Personal Targets', path: '/personal-targets' },
+      { icon: Users,           label: 'Users',            path: '/users' },
+      // Sidebar-2: Pharmacies/Regions/Districts/Branch Classifications
+      // consolidated into one tabbed page — each route still exists and
+      // is reachable directly, just no longer 4 separate nav entries.
+      { icon: Building2,       label: 'Organization',     path: '/admin/organization' },
       { icon: ShieldCheck,     label: 'Audit Log',        path: '/audit' },
       { icon: Bell,            label: 'Notifications',    path: '/notifications' },
       { icon: Settings,        label: 'Settings',         path: '/settings' },

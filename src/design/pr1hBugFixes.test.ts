@@ -38,7 +38,7 @@ describe('PR-1H bug fix 1 — historyService.js no longer logs diagnostic noise 
 
 describe('PR-1H bug fix 2 — KPI Entry hint icon is accessible to screen readers', () => {
   it('the hint icon span has an aria-label bound to the hint text', () => {
-    expect(kpiEntryPageSrc).toMatch(/<span className="text-xs text-slate-600" title=\{hint\} role="img" aria-label=\{hint\}>/)
+    expect(kpiEntryPageSrc).toMatch(/<span className="text-xs" style=\{\{ color: 'var\(--text-muted\)' \}\} title=\{hint\} role="img" aria-label=\{hint\}>/)
   })
 
   it('keeps the existing title attribute (sighted hover tooltip unaffected)', () => {

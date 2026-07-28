@@ -29,9 +29,13 @@ import type { CombinedRankingReport }     from '../../ranking/ranking-service'
 
 // ── Style helpers ─────────────────────────────────────────────
 
+// Matches the shared .card class (index.css) — same tokens, radius, and
+// inner-highlight shadow used by every other card-styled page, so this
+// page doesn't look flatter/less "premium" than the rest of the app.
 const card: React.CSSProperties = {
-  background: 'var(--bg-card)', border: '1px solid var(--border-default)',
-  borderRadius: '10px', padding: '20px 24px', marginBottom: '20px',
+  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+  borderRadius: '12px', padding: '20px 24px', marginBottom: '20px',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
 }
 const sectionTitle: React.CSSProperties = {
   fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
@@ -76,7 +80,7 @@ function classificationLabel(id?: string): string {
 
 function MovementBadge({ mv, dir }: { mv?: number; dir?: string }) {
   const direction = dir ?? (mv === undefined ? undefined : mv < 0 ? 'up' : mv > 0 ? 'down' : 'unchanged')
-  if (direction === 'new') return <span style={{ fontSize: '10px', color: 'var(--accent)', fontWeight: 600 }}>NEW</span>
+  if (direction === 'new') return <span style={{ fontSize: '10px', color: 'var(--brand-400)', fontWeight: 600 }}>NEW</span>
   if (direction === 'up')  return (
     <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#22c55e', fontSize: '11px' }}>
       <TrendingUp size={12} />{mv !== undefined ? Math.abs(mv) : ''}
@@ -402,7 +406,7 @@ export default function RankingsPage() {
       {/* ── Header ── */}
       <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-          <Trophy size={20} style={{ color: 'var(--accent)' }} />
+          <Trophy size={20} style={{ color: 'var(--brand-400)' }} />
           <h1 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
             Rankings
           </h1>
@@ -465,7 +469,7 @@ export default function RankingsPage() {
           padding: '0 20px', height: '38px', borderRadius: '8px',
           fontSize: '13px', fontWeight: 600,
           cursor: generating ? 'not-allowed' : 'pointer',
-          background: generating ? 'var(--bg-surface)' : 'var(--accent)',
+          background: generating ? 'var(--bg-surface)' : 'var(--brand-500)',
           color: generating ? 'var(--text-muted)' : '#fff',
           border: generating ? '1px solid var(--border-default)' : 'none',
           width: '100%', maxWidth: '280px', justifyContent: 'center',
@@ -653,16 +657,16 @@ export default function RankingsPage() {
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '8px 16px', fontSize: '13px', fontWeight: active ? 600 : 400,
               cursor: 'pointer', border: 'none', background: 'none',
-              color: active ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+              color: active ? 'var(--brand-400)' : 'var(--text-muted)',
+              borderBottom: active ? '2px solid var(--brand-400)' : '2px solid transparent',
               marginBottom: '-1px', transition: 'all 0.15s',
             }}>
               {label}{count > 0 && (
                 <span style={{
                   marginLeft: '6px', fontSize: '10px', fontWeight: 600,
                   padding: '1px 6px', borderRadius: '10px',
-                  background: active ? 'var(--accent)22' : 'var(--bg-surface)',
-                  color: active ? 'var(--accent)' : 'var(--text-muted)',
+                  background: active ? 'color-mix(in srgb, var(--brand-400) 13%, transparent)' : 'var(--bg-surface)',
+                  color: active ? 'var(--brand-400)' : 'var(--text-muted)',
                 }}>{count}</span>
               )}
             </button>

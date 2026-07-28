@@ -556,10 +556,10 @@ export default function KpiEntryPage() {
           the sticky bar. Desktop layout is unchanged. */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             <ClipboardList className="w-6 h-6 text-brand-400" /> السجل التشغيلي اليومي
           </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {pharmacy?.name || '—'}{pharmacy?.code ? ` · ${pharmacy.code}` : ''} · {userProfile?.displayName}
           </p>
           <p className="sm:hidden text-xs mt-1.5 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
@@ -568,7 +568,7 @@ export default function KpiEntryPage() {
             <span role="status" aria-live="polite">{saveStatusText}</span>
           </p>
           {process.env.NODE_ENV === 'development' && (
-            <p className="text-xs text-slate-700 mt-1 font-mono">
+            <p className="text-xs mt-1 font-mono" style={{ color: 'var(--text-muted)' }}>
               uid: {uid ? `${uid.slice(0, 6)}…` : 'NULL'} · pharmacyId: {pharmacyId || 'NULL'} · kpis: {entryFields.length}
             </p>
           )}
@@ -613,7 +613,7 @@ export default function KpiEntryPage() {
       <div className="card card-p flex items-center gap-4">
         <Calendar className="w-5 h-5 text-brand-400 flex-shrink-0" />
         <div className="flex-1">
-          <label htmlFor="kpi-entry-date" className="block text-xs text-slate-400 mb-1">تاريخ الإدخال</label>
+          <label htmlFor="kpi-entry-date" className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>تاريخ الإدخال</label>
           <input id="kpi-entry-date" type="date" value={selectedDate} max={TODAY}
             onChange={(e) => requestDateChange(e.target.value)}
             className="text-sm bg-transparent border-none p-0 focus:ring-0 w-auto" />
@@ -661,9 +661,9 @@ export default function KpiEntryPage() {
 
       {/* KPI input fields — registry-driven */}
       <div className="card card-p space-y-5">
-        <h2 className="text-base font-semibold text-white border-b border-slate-800 pb-3">
+        <h2 className="text-base font-semibold pb-3" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
           مؤشرات الأداء — {selectedDate}
-          {existingEntry && <span className="text-xs text-slate-500 mr-2">(تعديل إدخال موجود)</span>}
+          {existingEntry && <span className="text-xs mr-2" style={{ color: 'var(--text-muted)' }}>(تعديل إدخال موجود)</span>}
         </h2>
 
         {/* PR-1E2 Visual Refinement Addendum — desktop/tablet column
@@ -689,7 +689,8 @@ export default function KpiEntryPage() {
           const panelId  = `kpi-category-panel-${group.key}`
           const headerId = `kpi-category-header-${group.key}`
           return (
-            <div key={group.key} className="rounded-lg border border-slate-800/60 bg-slate-900/20 p-3 sm:p-4 space-y-1">
+            <div key={group.key} className="rounded-lg p-3 sm:p-4 space-y-1"
+                 style={{ border: '1px solid var(--border-subtle)', background: 'var(--bg-overlay)' }}>
               {showHeader && (
                 <button
                   type="button"
@@ -697,7 +698,8 @@ export default function KpiEntryPage() {
                   onClick={() => toggleCategory(group.key)}
                   aria-expanded={isOpen}
                   aria-controls={panelId}
-                  className="w-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500 -mb-1 py-1"
+                  className="w-full flex items-center gap-2 text-xs font-semibold uppercase tracking-wide -mb-1 py-1"
+                  style={{ color: 'var(--text-muted)' }}
                 >
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
                   <span className="flex-1 text-right">{group.label}</span>
@@ -733,16 +735,17 @@ export default function KpiEntryPage() {
 
                     return (
                       <div key={key}
-                           className="sm:grid sm:grid-cols-[1.5fr_1fr_0.9fr_1.1fr] sm:items-start sm:gap-4 py-2.5 sm:py-2 border-b border-slate-800/40 last:border-0">
+                           className="sm:grid sm:grid-cols-[1.5fr_1fr_0.9fr_1.1fr] sm:items-start sm:gap-4 py-2.5 sm:py-2 border-b last:border-0"
+                           style={{ borderColor: 'var(--border-subtle)' }}>
 
                         {/* KPI label */}
                         <div className="flex items-center gap-2 mb-1.5 sm:mb-0">
-                          <label htmlFor={inputId} className="flex items-center gap-2 text-sm font-medium text-slate-300">
-                            <span className="text-slate-400 text-xs font-mono">{labelEn}</span>
-                            <span className="text-slate-200">{label !== labelEn ? label : ''}</span>
+                          <label htmlFor={inputId} className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                            <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{labelEn}</span>
+                            <span style={{ color: 'var(--text-primary)' }}>{label !== labelEn ? label : ''}</span>
                           </label>
                           {hint && (
-                            <span className="text-xs text-slate-600" title={hint} role="img" aria-label={hint}>
+                            <span className="text-xs" style={{ color: 'var(--text-muted)' }} title={hint} role="img" aria-label={hint}>
                               <Info className="w-3.5 h-3.5" />
                             </span>
                           )}
@@ -844,7 +847,7 @@ export default function KpiEntryPage() {
             effect on evaluation/scoring, which only reads KPI numeric
             fields. No new notes contract was added. */}
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1.5">📝 ملاحظات (اختياري)</label>
+          <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>📝 ملاحظات (اختياري)</label>
           <textarea value={form.notes ?? ''}
             onChange={(e) => setField('notes', e.target.value)}
             rows={3} placeholder="أي ملاحظات إضافية... (لا تؤثر على التقييم)" />
@@ -888,12 +891,12 @@ export default function KpiEntryPage() {
       {/* Entry history — shows all KPI fields present in entry */}
       {entries.length > 0 && (
         <div className="card card-p space-y-3">
-          <h3 className="text-sm font-semibold text-slate-300">آخر الإدخالات</h3>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>آخر الإدخالات</h3>
           <div className="space-y-2">
             {entries.slice(0, 7).map((e) => (
-              <div key={e.id} className="flex items-center justify-between text-xs border-b border-slate-800/40 pb-2 last:border-0 last:pb-0">
-                <span className="text-slate-400 font-mono">{e.date}</span>
-                <div className="flex gap-3 text-slate-500 flex-wrap justify-end">
+              <div key={e.id} className="flex items-center justify-between text-xs border-b pb-2 last:border-0 last:pb-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{e.date}</span>
+                <div className="flex gap-3 flex-wrap justify-end" style={{ color: 'var(--text-muted)' }}>
                   {entryFields.map(({ key, labelEn }) => (
                     <span key={key} title={key} className="whitespace-nowrap">
                       {labelEn.slice(0, 6)} {e[key] ?? 0}

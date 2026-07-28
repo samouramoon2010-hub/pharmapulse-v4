@@ -5,7 +5,8 @@ import React, { useEffect, useState, useMemo } from 'react'
 import {
   Users, Plus, Search, Pencil, UserCheck, UserX,
   Save, X, Loader2, AlertCircle,
-  Mail, Phone, Hash, Shield, Crown, Building2, Download, ArrowRightLeft,
+  Mail, Phone, Hash, Crown, Building2, ArrowRightLeft,
+  BarChart2, Map, Store, Pill,
 } from 'lucide-react'
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db, COL } from '../../services/firebase'
@@ -27,16 +28,18 @@ import {
   getScopeRequiredMessage, getCanonicalRoleValue,
 } from '../../constants/roleScope'
 
-// Presentation-only icon/color per role — canonical label/scope rules live in roleScope.js
+// Presentation-only icon/color per role — canonical label/scope rules live in
+// roleScope.js. lucide-react components (not emoji) to match the icon
+// system used everywhere else in the app.
 const ROLE_ICONS = {
-  admin:'👑', general_manager:'🏢', regional_manager:'📊',
-  district_supervisor:'🗺️', branch_manager:'🏪', manager:'🏪', pharmacist:'💊',
+  admin:Crown, general_manager:Building2, regional_manager:BarChart2,
+  district_supervisor:Map, branch_manager:Store, manager:Store, pharmacist:Pill,
 }
 const ROLE_STAT_COLORS = {
   admin:'#f87171', general_manager:'#f87171', regional_manager:'#a78bfa',
   district_supervisor:'#fb923c', branch_manager:'#fbbf24', pharmacist:'var(--brand-400)',
 }
-const ROLES = CREATABLE_ROLES.map((r) => ({ ...r, icon: ROLE_ICONS[r.value] || '•' }))
+const ROLES = CREATABLE_ROLES.map((r) => ({ ...r, icon: ROLE_ICONS[r.value] || Users }))
 
 // Identity state — derived only from fields that already exist on the user
 // document (active, lastLoginAt). No new persisted state is introduced.
@@ -768,7 +771,7 @@ export default function UsersPage() {
                           cursor:'pointer', transition:'all 0.12s',
                           display:'flex', alignItems:'center', gap:'5px', justifyContent:'center',
                         }}>
-                        <span style={{ fontSize:'13px' }}>{r.icon}</span>
+                        <r.icon style={{ width:13, height:13, flexShrink:0 }} strokeWidth={1.75} />
                         <span>{r.label}</span>
                       </button>
                     ))}

@@ -495,10 +495,16 @@ describe('Per-role sidebar matrix — every role config exists and uses only the
       it('role config still includes a Dashboard entry', () => {
         expect(block).toContain("label: 'Dashboard'")
       })
-      it('every named group in this role block is one of the 4 locked groups or the ungrouped ("") top entry', () => {
+      it('every named group in this role block is one of the locked groups or the ungrouped ("") top entry', () => {
+        // Sidebar-5: admin's former "Data Architecture" catch-all (11
+        // unrelated items) was split into "Evaluation Engine" and
+        // "Data & Import" for scannability — see Sidebar.jsx header
+        // comment. Other roles keep "Data Architecture" since theirs
+        // is small (Profile Studio, optionally People).
         const groups = Array.from(block.matchAll(/group: '([^']*)'/g)).map((m) => m[1])
+        const ALLOWED = ['', ...REQUIRED_GROUPS, 'My Work', 'Evaluation Engine', 'Data & Import']
         for (const g of groups) {
-          expect(['', ...REQUIRED_GROUPS, 'My Work'].includes(g), `unexpected group "${g}" in ${role}`).toBe(true)
+          expect(ALLOWED.includes(g), `unexpected group "${g}" in ${role}`).toBe(true)
         }
       })
       it('no "Actions" (bare) or "People" group remains in this role block', () => {
